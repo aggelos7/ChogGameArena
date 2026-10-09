@@ -10,7 +10,7 @@ Nx is the frontend monorepo/task orchestration tool. Angular lives in `apps/web`
 apps/web/        Angular 22 SPA (standalone, zoneless, esbuild, Vitest)
 libs/            Shared browser-side TypeScript libraries
 backend/         Native .NET 8 solution (ChogGames.sln: Api, Core, Games.*, Infrastructure)
-infrastructure/  Docker Compose and deployment assets (STORY-004)
+infrastructure/  Docker Compose for local PostgreSQL and Redis (deployment assets later)
 docs/            Requirements, architecture, backlog, decisions
 tools/           Workspace scripts and checks
 ```
@@ -23,7 +23,7 @@ tools/           Workspace scripts and checks
 | Node.js 22 (LTS) | `>=22.22.3 <23.0.0`, see `.nvmrc` | `npm ci` refuses other versions (`engine-strict`) |
 | npm | `>=10` | ships with Node.js 22 |
 | .NET 8 SDK | 8.0.x | required from STORY-002 |
-| Docker with Compose | v2 | required from STORY-004 |
+| Docker with Compose | v2 (`docker compose`) | local PostgreSQL and Redis |
 
 Nx `23.3.0` and Angular `22.2.1` are pinned to exact versions in `package.json` and `package-lock.json`; no global Nx/Angular CLI install and no cloud account are needed.
 
@@ -49,6 +49,26 @@ npx nx g @schematics/angular:component <path> --project=web   # Angular schemati
 ```
 
 Routes: `/` (home), `/games` (games page); unknown URLs redirect to `/`.
+
+### Local dependencies (PostgreSQL and Redis)
+
+`infrastructure/docker-compose.yml` runs PostgreSQL 18.6 and Redis 8.10.2 (pinned images) with named volumes (`postgres-data`, `redis-data`), health checks and ports bound to `127.0.0.1` only.
+
+```bash
+cp infrastructure/.env.example infrastructure/.env   # once; set a local password (file is git-ignored)
+npm run deps:up      # start and wait until both services are healthy
+npm run deps:down    # stop and remove containers; data volumes are kept
+npm run deps:verify  # smoke test: isolated stack on ports 15432/16379, checks data survives a restart, then cleans up
+```
+
+| Setting (`infrastructure/.env`) | Default | Notes |
+|---|---|---|
+| `POSTGRES_PASSWORD` | *(required)* | Compose refuses to start without it |
+| `POSTGRES_DB` / `POSTGRES_USER` | `choggames` | |
+| `POSTGRES_PORT` | `5432` | change if the port is already in use |
+| `REDIS_PORT` | `6379` | Redis has no password locally; it is reachable from this machine only |
+
+To wipe local data: `docker compose -f infrastructure/docker-compose.yml down -v`.
 
 ### Backend
 
