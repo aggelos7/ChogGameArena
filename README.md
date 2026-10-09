@@ -7,7 +7,7 @@ Mobile-first multiplayer browser games for the Chog community on Monad. This rep
 Nx is the frontend monorepo/task orchestration tool. Angular lives in `apps/web`; shared TypeScript libraries live in `libs/`; the .NET 8 solution lives in `backend/` and remains buildable with native `dotnet` commands. Nx Cloud is not used (`neverConnectToCloud` in `nx.json`); task results are cached locally in `.nx/cache`. Docker Compose remains the local and VM deployment model.
 
 ```text
-apps/            Angular SPA (STORY-003)
+apps/web/        Angular 22 SPA (standalone, zoneless, esbuild, Vitest)
 libs/            Shared browser-side TypeScript libraries
 backend/         Native .NET 8 solution (ChogGames.sln: Api, Core, Games.*, Infrastructure)
 infrastructure/  Docker Compose and deployment assets (STORY-004)
@@ -20,12 +20,14 @@ tools/           Workspace scripts and checks
 | Tool | Version | Notes |
 |---|---|---|
 | Git | any recent | |
-| Node.js 22 (LTS) | `>=22.12.0 <23.0.0`, see `.nvmrc` | `npm ci` refuses other versions (`engine-strict`) |
+| Node.js 22 (LTS) | `>=22.22.3 <23.0.0`, see `.nvmrc` | `npm ci` refuses other versions (`engine-strict`) |
 | npm | `>=10` | ships with Node.js 22 |
 | .NET 8 SDK | 8.0.x | required from STORY-002 |
 | Docker with Compose | v2 | required from STORY-004 |
 
-Nx `23.3.0` is pinned in `package.json` and `package-lock.json`; no global Nx install and no cloud account are needed.
+Nx `23.3.0` and Angular `22.2.1` are pinned to exact versions in `package.json` and `package-lock.json`; no global Nx/Angular CLI install and no cloud account are needed.
+
+> **Changing dependencies:** `npm ci` works with the npm 10 bundled with Node.js 22, but `npm install` of new/updated packages crashes in npm 10.9 (`Cannot read properties of null (reading 'edgesOut')`). Use `npx npm@11 install <pkg>@<exact-version>` when adding or upgrading packages, and commit the resulting lockfile.
 
 ## Local commands
 
@@ -35,6 +37,18 @@ npm ci                  # install the exact locked dependencies
 npx nx --version        # verify the local, pinned Nx CLI
 npm run test:workspace  # run workspace skeleton checks (node:test)
 ```
+
+### Frontend
+
+```bash
+npm start               # dev server on http://localhost:4200 (same as npx nx serve web)
+npx nx build web        # production build to dist/apps/web
+npx nx test web         # unit tests (Vitest via @angular/build:unit-test)
+npx nx lint web         # ESLint (angular-eslint)
+npx nx g @schematics/angular:component <path> --project=web   # Angular schematics via Nx
+```
+
+Routes: `/` (home), `/games` (games page); unknown URLs redirect to `/`.
 
 ### Backend
 
