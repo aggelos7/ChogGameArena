@@ -1,4 +1,4 @@
-# Chog Games Suite — Architecture v1.0
+# Chog Game Arena — Architecture v1.0
 
 ## Decisions
 
@@ -63,6 +63,33 @@ ASP.NET Core modular monolith
 Player, GuestSession, WalletChallenge, WalletLink, ChogNft, NftTrait, GameDefinition, GameRoom, RoomMember, GameSession, MatchPlayer, MatchSnapshot, ProcessedAction, MatchResult, PlayerStats.
 
 Use stable IDs, indexes on room code, match status and wallet/token identity. Migrations must be reviewed before deploy.
+
+## Nx monorepo and build boundaries
+
+- **Workspace:** Nx at repository root (`nx.json`, root `package.json`, lockfile). Use `@nx/angular` for `apps/web` and browser-side libraries under `libs/`.
+- **Backend:** Keep `backend/ChogGames.sln` and .NET projects under `backend/src` and `backend/tests`. Native `dotnet restore/build/test` remains the source of truth; optionally expose Nx targets via `nx:run-commands` in a root `project.json` or explicit Nx project configuration.
+- **Nx integration:** Do not assume an `@nx/dotnet` package exists or is compatible without checking the installed Nx release. For MVP, prefer native .NET commands wrapped by Nx targets over unverified plugins.
+- **Caching:** Local Nx cache for deterministic frontend tasks; backend tasks must not be cached until inputs/outputs and correctness are verified. Nx Cloud is not required.
+- **Dependency direction:** Angular libs depend inward on shared contracts; browser code never imports backend C# code. Share API contracts through OpenAPI-generated TypeScript clients or explicitly maintained schemas, not runtime coupling.
+- **CI:** GitHub Actions installs pinned Node.js and .NET SDK versions, uses `npm ci`, runs frontend Nx targets, then runs `dotnet` restore/build/test. Nx affected optimizations may be added after baseline full checks work.
+- **Deployment:** Docker builds compile frontend and backend in build stages; production runs Nginx/static Angular assets and .NET runtime containers. Nx/Node are not required on the VM host at runtime. PostgreSQL, Redis, SignalR, HTTPS/WSS and Docker Compose topology do not change.
+
+### Repository convention
+
+```text
+apps/web/                  Angular app
+libs/ui/                   Shared UI
+libs/game-client/          Shared game client
+libs/shared-types/         TypeScript contracts
+backend/ChogGames.sln      Native .NET solution
+backend/src/               Backend application and game modules
+backend/tests/             Backend tests
+infrastructure/            Compose and deployment assets
+docs/                      Product and engineering specifications
+AGENTS.md                  AI coding agent rules
+nx.json                    Nx workspace configuration
+package.json               Workspace scripts and dependencies
+```
 
 ## Environments
 

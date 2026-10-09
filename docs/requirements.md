@@ -1,20 +1,21 @@
-# CHOG GAMES SUITE
-## Consolidated Product & Technical Requirements — v1.1
+# CHOG GAME ARENA
+## Consolidated Product & Technical Requirements — v1.2
 
 **Status:** Implementation baseline  
 **Implementation strategy:** Minimal suite foundation → Chog Life → Chog Race → shared progression  
 **NFT decision:** Shared ability pool for MVP; trait-based assignment extensibility reserved for future  
-**Deployment strategy:** Local-first, staging when external testers are needed, production after validation
+**Deployment strategy:** Local-first, staging when external testers are needed, production after validation  
+**Workspace tooling:** Nx for Angular and repository task orchestration; native .NET SDK for backend builds
 
 ## 1. Product vision and scope
-Chog Games Suite is a mobile-first browser-based multiplayer platform for the Chog community on Monad. The first two games are **Chog Life** (portfolio-building life-path board game) and **Chog Race** (competitive board race with action cards). The platform must allow future games and, eventually, alternative community themes without duplicating infrastructure. Game actions are off-chain; wallet ownership checks use Monad RPC. NFT ownership is optional for playing.
+Chog Game Arena is a mobile-first browser-based multiplayer platform for the Chog community on Monad. The first two games are **Chog Life** (portfolio-building life-path board game) and **Chog Race** (competitive board race with action cards). The platform must allow future games and, eventually, alternative community themes without duplicating infrastructure. Game actions are off-chain; wallet ownership checks use Monad RPC. NFT ownership is optional for playing.
 
 **MVP goals:** 2–6 players per room, private room codes and invite links, real-time turns, mobile usability, reconnect, server-authoritative actions, NFT character selection, and one balanced selectable ability per player per match. Target play time: Chog Life 15–20 minutes; Chog Race 10–15 minutes, hard limit 20 minutes for both.
 
 **Out of scope for MVP:** on-chain game moves/rewards, tournaments, friends/chat, marketplace, seasons, paid power-ups, multi-wallet aggregation, Kubernetes, microservices, advanced analytics, and cross-game progression.
 
 ## 2. Delivery sequence
-1. **Foundation:** monorepo, Angular frontend, ASP.NET Core backend, PostgreSQL, Redis-ready abstraction, Docker Compose, configuration, health checks and automated tests.
+1. **Foundation:** Nx monorepo, Angular frontend, ASP.NET Core backend, PostgreSQL, Redis-ready abstraction, Docker Compose, configuration, health checks and automated tests.
 2. **Suite skeleton:** landing page, game catalogue/status, guest identity, profile, navigation.
 3. **Wallet and NFTs:** wallet authentication, mock NFT provider, real Monad provider, collection browser, selected character, normalized metadata.
 4. **Shared multiplayer:** rooms, lobby, ready status, match lifecycle, SignalR, command validation, reconnect, AFK handling; verify with a minimal test game.
@@ -26,20 +27,33 @@ Chog Games Suite is a mobile-first browser-based multiplayer platform for the Ch
 ## 3. Architecture and ownership boundaries
 Use a modular monolith, one backend deployment, one frontend, shared PostgreSQL, optional Redis for cache/scale-out. Shared platform owns identity, wallets, NFTs, rooms, sessions, turn orchestration, real-time messaging, command processing, persistence and results. Each game owns rules, board, cards/events, economy, ability implementations, scoring, UI and configuration. The engine must not know NFT traits.
 
-Suggested repository:
+Suggested Nx repository layout (paths are conventions, not deployed service boundaries):
 ```text
 chog-games/
-  frontend/              # Angular app: core/, shared/, games/chog-life/, games/chog-race/
+  apps/
+    web/                    # Angular SPA (Nx @nx/angular)
+  libs/
+    ui/                     # Reusable Angular UI
+    game-client/            # Shared browser-side game client logic
+    shared-types/           # TypeScript-only API/client contracts
   backend/
-    Api/                 # REST, SignalR hubs, composition root
-    Core/                # players, rooms, matches, engine, ability contracts
-    Games/ChogLife/      # rules, state, events, abilities
-    Games/ChogRace/      # rules, state, cards, abilities
-    Infrastructure/      # EF Core, Redis, Monad, external providers
-    Tests/
-  infrastructure/        # compose, Dockerfiles, proxy, deployment samples
-  docs/                  # requirements, decisions, API contracts, prompts
+    ChogGames.sln           # Native .NET solution
+    src/
+      ChogGames.Api/        # REST, SignalR hubs, composition root
+      ChogGames.Core/       # players, rooms, matches, engine, ability contracts
+      ChogGames.Games.ChogLife/
+      ChogGames.Games.ChogRace/
+      ChogGames.Infrastructure/
+    tests/
+  infrastructure/          # Docker Compose, Dockerfiles, proxy, deploy examples
+  docs/                    # requirements, backlog, architecture, decisions
+  .github/workflows/       # CI (added in STORY-007)
+  AGENTS.md
+  nx.json
+  package.json
+  package-lock.json
 ```
+Nx manages Angular projects and orchestrates repository tasks. The .NET solution remains buildable/testable with `dotnet` directly; Nx may invoke those commands via explicit targets (`nx:run-commands`) rather than depending on a particular .NET Nx plugin. Nx and Node.js are development/CI tooling, **not runtime dependencies** of the production ASP.NET Core container. Nx Cloud is optional and disabled for the MVP; local caching is sufficient. Lock Node.js to a supported LTS version and pin Nx/plugin versions together in the lockfile.
 
 Use stable `gameType` identifiers (`chog-life`, `chog-race`), versioned game configurations, and game-specific state schemas. Do not copy room, SignalR or wallet logic into game modules.
 
@@ -175,7 +189,7 @@ Example command:
 Persist match results and game-config version; avoid storing full raw event history until needed. Apply EF Core migrations under source control.
 
 ## 11. Infrastructure and environments
-**Local (no paid hosting required):** developer machine with Angular, .NET API, PostgreSQL and Redis via Docker Compose (or frontend/backend running directly). Mock NFT provider must support offline gameplay; real Monad RPC is optional for integration testing. Use `.env.example` with placeholders, not real secrets.
+**Local (no paid hosting required):** developer machine with Node.js LTS, Nx, Angular, .NET SDK/API, PostgreSQL and Redis via Docker Compose (or frontend/backend running directly). Mock NFT provider must support offline gameplay; real Monad RPC is optional for integration testing. Use `.env.example` with placeholders, not real secrets.
 
 **Staging (when external testing starts):** one Linux VM, initial planning size 2 vCPU / 4 GB RAM / 40+ GB SSD; Docker Compose with API, PostgreSQL, Redis, reverse proxy; frontend on Cloudflare Pages or equivalent static host. HTTPS and WebSockets required.
 
@@ -194,7 +208,7 @@ Persist match results and game-config version; avoid storing full raw event hist
 - Unit-test deterministic game rules with seeded/test-controlled RNG; integration-test EF Core, SignalR and reconnect flows.
 - Simulate disconnects, duplicate commands, stale versions, AFK, simultaneous reactions, server restart and full-room joins.
 - Run representative multiplayer load tests before public launch; measure CPU, RAM, latency, connection count and database load.
-- Add CI checks for build, lint, tests, migrations and container image generation.
+- Add GitHub Actions CI checks for Nx-managed Angular build/lint/tests, native .NET build/tests, migrations, Compose validation and container image generation. Use Nx affected tasks only when the CI git base/head history is available; backend checks remain mandatory until affected-project integration is explicitly verified.
 
 ## 13. Acceptance criteria samples
 **Room creation:** Given a guest or authenticated player, when they create a Chog Life room, then a unique code is generated, they become host, room status is Waiting, and capacity is six.
