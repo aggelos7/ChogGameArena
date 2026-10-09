@@ -93,7 +93,7 @@
 
 #### STORY-005 — Configuration and secrets
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E01
 - **Implementation:** Add typed options, example env file, validation, and ignored local secrets.
