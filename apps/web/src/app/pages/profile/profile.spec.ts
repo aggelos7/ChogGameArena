@@ -1,9 +1,15 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { PlayerSession } from '../../identity/player-session';
 import { Avatar, Profile } from '../../profile/profile-api';
+import { WalletPanel } from '../../wallet/wallet-panel';
 import { ProfilePage } from './profile';
+
+/** The wallet panel has its own spec; stubbed so these tests only see profile requests. */
+@Component({ selector: 'app-wallet-panel', template: '' })
+class StubWalletPanel {}
 
 describe('Profile page', () => {
   const avatars: Avatar[] = [
@@ -27,7 +33,7 @@ describe('Profile page', () => {
     TestBed.configureTestingModule({
       imports: [ProfilePage],
       providers: [provideHttpClient(), provideHttpClientTesting()],
-    });
+    }).overrideComponent(ProfilePage, { remove: { imports: [WalletPanel] }, add: { imports: [StubWalletPanel] } });
     http = TestBed.inject(HttpTestingController);
     session = TestBed.inject(PlayerSession);
     session.player.set({ playerId: 'p-1', displayName: 'Chog 4821', kind: 'Guest' });
@@ -36,6 +42,11 @@ describe('Profile page', () => {
   });
 
   afterEach(() => http.verify());
+
+  it('includes the wallet panel once the profile is loaded', () => {
+    load();
+    expect(element().querySelector('app-wallet-panel')).not.toBeNull();
+  });
 
   const element = () => fixture.nativeElement as HTMLElement;
   const nameInput = () => element().querySelector('#displayName') as HTMLInputElement;
