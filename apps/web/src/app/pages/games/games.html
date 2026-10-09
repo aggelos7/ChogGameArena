@@ -1,0 +1,50 @@
+<h1>Games</h1>
+
+@switch (state().kind) {
+  @case ('loading') {
+    <p role="status">Loading games…</p>
+  }
+  @case ('error') {
+    <div role="alert" class="error">
+      <p>Games could not be loaded.</p>
+      <button type="button" (click)="load()">Try again</button>
+    </div>
+  }
+  @case ('loaded') {
+    @let current = state();
+    @if (current.kind === 'loaded') {
+      <ul class="game-grid">
+        @for (game of current.games; track game.id) {
+          <li class="game-card" [attr.data-game-id]="game.id">
+            <div class="game-card-header">
+              <h2 [id]="'game-name-' + game.id">{{ game.name }}</h2>
+              <span class="status" [class]="'status status-' + game.status" [id]="'game-status-' + game.id">
+                {{ statusLabels[game.status] }}
+              </span>
+            </div>
+            <p class="description">{{ game.description }}</p>
+            @if (game.status === 'Available') {
+              <a
+                class="play"
+                [routerLink]="['/games', game.id]"
+                [attr.aria-describedby]="'game-name-' + game.id + ' game-status-' + game.id"
+                >Play</a
+              >
+            } @else {
+              <button
+                type="button"
+                class="play"
+                disabled
+                [attr.aria-describedby]="'game-name-' + game.id + ' game-status-' + game.id"
+              >
+                Play
+              </button>
+            }
+          </li>
+        } @empty {
+          <li>No games are listed yet.</li>
+        }
+      </ul>
+    }
+  }
+}

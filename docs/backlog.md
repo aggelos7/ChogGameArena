@@ -138,7 +138,7 @@
 
 #### STORY-008 — Game catalog
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E02
 - **Implementation:** Render Chog Life and Chog Race cards with Available, Coming Soon and Maintenance states from backend config.
