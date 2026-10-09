@@ -1,0 +1,29 @@
+name: Story
+description: One backlog story (implement exactly one story per task/PR)
+labels: ["story"]
+body:
+  - type: input
+    id: story_id
+    attributes:
+      label: Story ID
+      description: Must match docs/backlog.md, e.g. STORY-062
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Given / when / then, including the invalid-input and test/build cases.
+    validations:
+      required: true
+  - type: textarea
+    id: scope_guard
+    attributes:
+      label: Scope guard
+      value: Do not implement later stories or future feature flags as part of this story.
