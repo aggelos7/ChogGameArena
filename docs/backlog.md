@@ -151,7 +151,7 @@
 
 #### STORY-009 — Guest identity
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E02
 - **Implementation:** Issue durable anonymous guest session with opaque server identity and display name.
