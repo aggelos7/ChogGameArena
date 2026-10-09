@@ -292,8 +292,14 @@ public sealed partial class WalletSignInTests(MigratedPostgresDatabase database)
 
         var responses = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => VerifyAsync(alice.Client, challenge.ChallengeId, signature)));
 
+        // Exactly one wins. The rest fail either on the used-up challenge (400) or, if they are authenticated after
+        // the winner rotated the shared session, on the revoked cookie (401); which one depends on timing.
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
-        Assert.Equal(4, responses.Count(r => r.StatusCode == HttpStatusCode.BadRequest));
+        Assert.All(
+            responses.Where(r => r.StatusCode != HttpStatusCode.OK),
+            r => Assert.Contains(r.StatusCode, new[] { HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized }));
+        await using var db = database.CreateDbContext();
+        Assert.Equal(1, await db.GuestSessions.CountAsync(s => s.PlayerId == alice.Player.PlayerId && s.RevokedAt == null));
         foreach (var response in responses)
         {
             response.Dispose();
