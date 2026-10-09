@@ -164,7 +164,7 @@
 
 #### STORY-010 — Player profile
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E02
 - **Implementation:** Persist player display name, selected avatar and minimal games/wins counters.

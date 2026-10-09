@@ -14,5 +14,13 @@ internal sealed class PlayerConfiguration : IEntityTypeConfiguration<Player>
         builder.Property(p => p.DisplayName).HasMaxLength(PlayerDisplayName.MaxLength).IsRequired();
         builder.Property(p => p.Kind).HasConversion<string>().HasMaxLength(16).IsRequired();
         builder.Property(p => p.CreatedAt).IsRequired();
+        builder.Property(p => p.AvatarId).HasMaxLength(DefaultAvatar.MaxIdLength).IsRequired().HasDefaultValue(DefaultAvatar.Classic.Id);
+        builder.Property(p => p.GamesPlayed).IsRequired().HasDefaultValue(0);
+        builder.Property(p => p.Wins).IsRequired().HasDefaultValue(0);
+        builder.ToTable(t =>
+        {
+            t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");
+            t.HasCheckConstraint("CK_Players_Wins_WithinGamesPlayed", "\"Wins\" >= 0 AND \"Wins\" <= \"GamesPlayed\"");
+        });
     }
 }

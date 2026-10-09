@@ -125,6 +125,16 @@ Guest identity (SUITE-002, ADR-005): the web app calls `GET /api/me` on startup 
 | `RequireSecureCookie` | `true` | `false` only in `appsettings.Development.json` (plain HTTP) |
 | `CreatePerMinutePerClient` | `10` | guest creations per client IP per minute |
 
+Player profile (SUITE-004): always the caller's own profile — there is no player id in any route or body, so one player can never edit another's.
+
+| Endpoint | Request | Responses |
+|---|---|---|
+| `GET /api/profile` | session cookie | `200 { playerId, displayName, kind, avatar: { id, name, color }, gamesPlayed, wins }`; `401` |
+| `PATCH /api/profile` | `{ "displayName"?: string, "avatarId"?: string }` | `200` updated profile; `400` invalid name, unknown avatar or no editable field (nothing changes); `401` |
+| `GET /api/profile/avatars` | session cookie | `200 [{ id, name, color }]` built-in placeholder avatars (`classic` default, `mint`, `sunset`, `ocean`, `berry`, `gold`) |
+
+`gamesPlayed`/`wins` are maintained by the server only (database check: `0 <= Wins <= GamesPlayed`); values sent by clients are ignored. Avatars are coloured placeholders until official artwork is approved (DEC-005).
+
 Health endpoints:
 
 | Endpoint | Checks | Healthy | Unhealthy |
