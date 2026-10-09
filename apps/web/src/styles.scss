@@ -1,8 +1,94 @@
+:root {
+  --text: #1a1a1a;
+  --text-muted: #555;
+  --surface: #fff;
+  --surface-muted: #f4f4f6;
+  --border: #d0d0d0;
+  --brand: #5b2bd6;
+  --focus: #1d4ed8;
+  --danger: #8a1c1c;
+  --danger-surface: #ffe4e1;
+  --tap-target: 2.75rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html {
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* 16px keeps iOS Safari from zooming into focused inputs. */
+  font-size: 100%;
   line-height: 1.5;
+  color: var(--text);
+  background: var(--surface);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+img,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: var(--tap-target);
+  padding: 0.5rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Keyboard focus is always visible; mouse clicks do not draw a ring. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+[tabindex='-1']:focus {
+  outline: none;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

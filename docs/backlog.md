@@ -177,7 +177,7 @@
 
 #### STORY-011 — Mobile-first shell
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E02
 - **Implementation:** Implement responsive navigation, loading/error/empty states and keyboard-accessible controls.
