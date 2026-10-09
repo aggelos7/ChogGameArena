@@ -1,3 +1,5 @@
+using ChogGames.Core.Players;
+using ChogGames.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace ChogGames.Infrastructure.Persistence;
@@ -8,6 +10,10 @@ namespace ChogGames.Infrastructure.Persistence;
 /// </summary>
 public sealed class ChogGamesDbContext(DbContextOptions<ChogGamesDbContext> options) : DbContext(options)
 {
+    public DbSet<Player> Players => Set<Player>();
+
+    public DbSet<GuestSession> GuestSessions => Set<GuestSession>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ChogGamesDbContext).Assembly);
