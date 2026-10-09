@@ -21,3 +21,7 @@ obj/
 !.vscode/extensions.json
 .idea/
 .DS_Store
+
+.angular
+
+__screenshots__/
