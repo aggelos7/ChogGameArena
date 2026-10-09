@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { GAME_STATUS_LABELS, GameCatalog, GameSummary } from '../../games/game-catalog';
+import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/state-views';
 
 type CatalogueState =
   | { kind: 'loading' }
@@ -9,7 +10,7 @@ type CatalogueState =
 
 @Component({
   selector: 'app-games',
-  imports: [RouterLink],
+  imports: [RouterLink, LoadingState, ErrorState, EmptyState],
   templateUrl: './games.html',
   styleUrl: './games.scss',
 })

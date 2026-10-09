@@ -2,13 +2,10 @@
 
 @switch (loadState()) {
   @case ('loading') {
-    <p role="status">Loading profile…</p>
+    <app-loading-state message="Loading profile…" />
   }
   @case ('error') {
-    <div role="alert">
-      <p>Your profile could not be loaded.</p>
-      <button type="button" (click)="load()">Try again</button>
-    </div>
+    <app-error-state message="Your profile could not be loaded." (retry)="load()" />
   }
   @case ('ready') {
     @if (profile(); as current) {
