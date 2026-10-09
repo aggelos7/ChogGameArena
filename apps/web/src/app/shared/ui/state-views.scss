@@ -1,0 +1,39 @@
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: var(--surface-muted);
+
+  p {
+    margin: 0;
+  }
+}
+
+p.state {
+  flex-direction: row;
+  align-items: center;
+}
+
+.state-error {
+  color: var(--danger);
+  background: var(--danger-surface);
+}
+
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

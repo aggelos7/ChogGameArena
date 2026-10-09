@@ -9,7 +9,14 @@ import { GameSummary } from '../../games/game-catalog';
   template: `
     <h1>{{ game().name }}</h1>
     <p>The {{ game().name }} lobby is coming soon.</p>
-    <a routerLink="/games">Back to games</a>
+    <a class="back" routerLink="/games">Back to games</a>
+  `,
+  styles: `
+    .back {
+      display: inline-flex;
+      align-items: center;
+      min-height: var(--tap-target);
+    }
   `,
 })
 export class GameLobby {
