@@ -1,0 +1,85 @@
+<section class="wallet" aria-labelledby="wallet-heading">
+  <h2 id="wallet-heading">Wallet</h2>
+
+  @switch (chainState()) {
+    @case ('loading') {
+      <app-loading-state message="Loading wallet network…" />
+    }
+    @case ('error') {
+      <app-error-state message="Wallet network details could not be loaded." (retry)="loadChain()" />
+    }
+    @case ('ready') {
+      @let chain = wallet.chain()!;
+      @let state = wallet.state();
+      @switch (state.status) {
+        @case ('disconnected') {
+          <p class="hint">
+            Optional. Connecting shows your wallet address on {{ chain.name }}; it does not sign you in and never moves
+            funds.
+          </p>
+          @if (discovery.wallets().length > 0) {
+            <ul class="wallet-list">
+              @for (option of discovery.wallets(); track option.info.uuid) {
+                <li>
+                  <button type="button" class="connect" [attr.data-wallet]="option.info.rdns" (click)="wallet.connect(option)">
+                    @if (option.info.icon) {
+                      <img [src]="option.info.icon" alt="" width="24" height="24" />
+                    } @else {
+                      <span class="icon-fallback" aria-hidden="true">{{ option.info.name.charAt(0) }}</span>
+                    }
+                    Connect {{ option.info.name }}
+                  </button>
+                </li>
+              }
+            </ul>
+          } @else {
+            <app-empty-state message="No wallet found in this browser.">
+              <p>Install a wallet browser extension, or open this page in your wallet app's built-in browser.</p>
+            </app-empty-state>
+          }
+        }
+        @case ('connecting') {
+          <app-loading-state [message]="'Confirm the connection in ' + state.wallet.name + '…'" />
+          <button type="button" class="secondary" (click)="wallet.disconnect()">Cancel</button>
+        }
+        @case ('connected') {
+          @if (connected(); as current) {
+            <dl class="details">
+              <div>
+                <dt>Wallet</dt>
+                <dd>{{ current.wallet.name }}</dd>
+              </div>
+              <div>
+                <dt>Address</dt>
+                <dd data-field="address" [title]="current.address">
+                  <span aria-hidden="true">{{ shortAddress(current.address) }}</span>
+                  <span class="visually-hidden">{{ current.address }}</span>
+                </dd>
+              </div>
+              <div>
+                <dt>Network</dt>
+                <dd data-field="network">
+                  {{ wallet.onSupportedChain() ? chain.name : 'Unsupported network (chain ' + current.chainId + ')' }}
+                </dd>
+              </div>
+            </dl>
+
+            @if (!wallet.onSupportedChain()) {
+              <div class="wrong-network" role="alert">
+                <p>Your wallet is on an unsupported network. Switch to {{ chain.name }} to continue.</p>
+                <button type="button" class="primary" [disabled]="wallet.switching()" (click)="wallet.switchToSupportedChain()">
+                  {{ wallet.switching() ? 'Check your wallet…' : 'Switch to ' + chain.name }}
+                </button>
+              </div>
+            }
+
+            <button type="button" class="secondary" (click)="wallet.disconnect()">Disconnect</button>
+          }
+        }
+      }
+      @if (wallet.error(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+    }
+  }
+</section>

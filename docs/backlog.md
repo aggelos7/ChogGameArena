@@ -196,7 +196,7 @@
 
 #### STORY-012 — Wallet connect UX
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E03
 - **Implementation:** Connect Monad-compatible wallet and show chain/address with disconnect option.

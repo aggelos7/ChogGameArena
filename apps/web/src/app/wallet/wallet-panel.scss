@@ -1,0 +1,116 @@
+.wallet {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 32rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+
+  h2 {
+    margin: 0;
+    font-size: 1.25rem;
+  }
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.wallet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connect {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  font-weight: 600;
+  text-align: left;
+  border-color: var(--border);
+
+  img,
+  .icon-fallback {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 0.25rem;
+  }
+
+  .icon-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.875rem;
+    color: #fff;
+    background: var(--text-muted);
+  }
+}
+
+.details {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+
+  div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+
+  dt::after {
+    content: ':';
+  }
+
+  dd {
+    margin: 0;
+    font-weight: 600;
+  }
+}
+
+.wrong-network {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  color: #5a4a00;
+  background: #fff4c2;
+
+  p {
+    margin: 0;
+  }
+}
+
+.primary {
+  border: none;
+  font-weight: 600;
+  color: #fff;
+  background: var(--brand);
+}
+
+.primary:disabled {
+  color: #555;
+  background: #e4e4e4;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+}
+
+app-empty-state p {
+  margin: 0;
+}
