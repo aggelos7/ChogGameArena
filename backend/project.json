@@ -2,7 +2,9 @@
   "$schema": "../node_modules/nx/schemas/project-schema.json",
   "name": "backend",
   "projectType": "application",
-  "tags": ["scope:backend"],
+  "tags": [
+    "scope:backend"
+  ],
   "targets": {
     "build": {
       "executor": "nx:run-commands",
@@ -15,10 +17,20 @@
     "test": {
       "executor": "nx:run-commands",
       "cache": false,
-      "dependsOn": ["build"],
+      "dependsOn": [
+        "build"
+      ],
       "options": {
         "cwd": "{projectRoot}",
         "command": "dotnet test ChogGames.sln --no-build"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "dotnet run --project src/ChogGames.Api"
       }
     }
   }
