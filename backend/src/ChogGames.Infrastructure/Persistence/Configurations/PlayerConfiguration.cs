@@ -1,4 +1,5 @@
 using ChogGames.Core.Players;
+using ChogGames.Core.Wallets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -17,10 +18,14 @@ internal sealed class PlayerConfiguration : IEntityTypeConfiguration<Player>
         builder.Property(p => p.AvatarId).HasMaxLength(DefaultAvatar.MaxIdLength).IsRequired().HasDefaultValue(DefaultAvatar.Classic.Id);
         builder.Property(p => p.GamesPlayed).IsRequired().HasDefaultValue(0);
         builder.Property(p => p.Wins).IsRequired().HasDefaultValue(0);
+        builder.Property(p => p.WalletAddress).HasMaxLength(WalletAddress.Length);
+        builder.HasIndex(p => p.WalletAddress).IsUnique();
         builder.ToTable(t =>
         {
             t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");
             t.HasCheckConstraint("CK_Players_Wins_WithinGamesPlayed", "\"Wins\" >= 0 AND \"Wins\" <= \"GamesPlayed\"");
+            t.HasCheckConstraint("CK_Players_WalletAddress_Format", "\"WalletAddress\" ~ '^0x[0-9a-f]{40}$'");
+            t.HasCheckConstraint("CK_Players_Wallet_MatchesKind", "(\"Kind\" = 'Wallet') = (\"WalletAddress\" IS NOT NULL)");
         });
     }
 }

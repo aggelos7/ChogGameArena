@@ -19,4 +19,7 @@ public static class GuestSessionCookie
             Expires = expiresAt,
             IsEssential = true,
         });
+
+    public static void Delete(HttpResponse response) =>
+        response.Cookies.Delete(Name, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, Path = "/" });
 }

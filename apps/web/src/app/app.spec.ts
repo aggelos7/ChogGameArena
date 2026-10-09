@@ -75,7 +75,7 @@ describe('App shell', () => {
     });
 
     it('shows the guest display name once the session is ready', async () => {
-      session.player.set({ playerId: 'x', displayName: 'Chog 4821', kind: 'Guest' });
+      session.player.set({ playerId: 'x', displayName: 'Chog 4821', kind: 'Guest', walletAddress: null });
       session.status.set('ready');
 
       const { element } = await render();

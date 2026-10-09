@@ -7,7 +7,7 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
 - DEC-001: Official Chog NFT contract/chain/metadata ownership adapter — Pending verification before real RPC integration.
 - DEC-002: Chog Life exact movement/finish/tie-break rules — Pending game design before final balancing.
 - DEC-003: Chog Race reaction windows and card resolution ordering — Pending before card engine.
-- DEC-004: Guest-to-wallet profile linking and account merge behavior — Pending before linking.
+- DEC-004: Guest-to-wallet profile linking and account merge behavior — Pending before linking. Sign-in binding decided in DEC-015; merging two existing histories is still open.
 - DEC-005: Game branding/assets and permissions — Pending before public launch.
 
 ## Confirmed
@@ -21,4 +21,17 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
 - DEC-012 (2026-10-09, STORY-009 — confirmed, PR #73): Guest persistence. A guest is a `Player` row with a server-generated id; the browser holds an opaque 256-bit session token in an HttpOnly, SameSite=Lax (Secure outside local dev) cookie; the database stores only its SHA-256 hash. Sessions last 90 days, sliding on use (renewal persisted at most daily); expired or revoked sessions get a new guest. Recovery works only in the same browser while the cookie exists. Guest-to-wallet linking/merging remains DEC-004.
 - DEC-013 (2026-10-09, STORY-009 — confirmed, PR #73): Same-site hosting for web and API. In staging and production the Angular app and the API must be served from the same registrable domain — e.g. `app.<domain>` + `api.<domain>`, or the API reverse-proxied at `<domain>/api`. Never a shared-suffix host such as `*.pages.dev` for one and a custom domain for the other. Rationale: guest (and later wallet) sessions use an HttpOnly `SameSite=Lax` cookie, which is the CSRF protection; a cross-site deployment would require `SameSite=None`, anti-forgery tokens and strict CORS, and is exposed to third-party-cookie blocking. Impact: E07 staging/production hosting stories, SignalR authentication. Revisit only if a cross-site deployment becomes unavoidable, together with adding anti-forgery tokens.
 - DEC-014 (2026-10-09, STORY-012 — confirmed by product owner): Wallet connection and supported network. The web app talks to wallets through the browser standards EIP-1193 and EIP-6963 directly, with no wallet SDK dependency; it covers extension and in-app-browser wallets. WalletConnect (deep links/QR to mobile wallet apps) needs a hosted project id and is deferred to a separate decision. The supported chain is server configuration (`Wallet:Chain`, public parameters only), never client input: Monad Mainnet (chain 143) by default, Monad Testnet (chain 10143) in Development. Parameters were taken from docs.monad.xyz on 2026-10-09. The NFT contract and chain for ownership checks remain DEC-001. A connected address is display state only; wallet sign-in is STORY-013.
+- DEC-015 (2026-10-10, STORY-013 — confirmed by product owner): Wallet sign-in binding and verification.
+  - **Sign-in binding** (the sign-in part of DEC-004):
+    - A verified wallet that isn't bound to anyone upgrades the caller's current guest to a wallet player (same id, name, avatar and stats).
+    - A wallet already bound to a player signs in as that player; the caller's guest is left unchanged, with no history merge.
+    - A caller who is already a wallet player and signs in with a different wallet gets a separate player for it.
+    - One wallet per player, enforced by a unique `Players.WalletAddress` column. Merging existing histories remains DEC-004.
+  - **Session:** every sign-in replaces the session and revokes the old cookie. Sign-out revokes the session, and the browser continues as a new guest.
+  - **Verification:**
+    - The challenge is an EIP-4361 message built by the server from configuration (`WalletAuth:Domain`/`Uri`, the configured chain id), with a 128-bit single-use nonce and a 5-minute expiry. It's bound to the requesting session's player.
+    - Each challenge is consumed atomically by the first verification attempt, successful or not.
+    - The signer is recovered from the stored message with EIP-191, secp256k1 and keccak-256. High-s signatures are rejected.
+  - **Wallet types:** only regular (EOA) wallets are supported. Smart-contract wallets (ERC-1271) fail safely and can be added later with an RPC check.
+  - **New dependency:** BouncyCastle.Cryptography 2.7.0 (MIT), for keccak-256 and secp256k1 only; recovery is our code, tested against published vectors.
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.

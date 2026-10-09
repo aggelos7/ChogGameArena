@@ -6,7 +6,9 @@ import {
   WalletProviderDetail,
   parseAccount,
   parseChainId,
+  parseSignature,
   toHexChainId,
+  utf8ToHex,
   walletErrorCode,
 } from './eip1193';
 import { WalletChain } from './wallet-chain';
@@ -16,7 +18,10 @@ export type WalletState =
   | { status: 'connecting'; wallet: WalletInfo }
   | { status: 'connected'; wallet: WalletInfo; address: string; chainId: number };
 
-class InvalidWalletResponse extends Error {}
+export class InvalidWalletResponse extends Error {}
+
+/** Thrown when the wallet's account changed or disconnected while a request was open. */
+export class WalletChangedError extends Error {}
 
 function errorMessage(error: unknown, action: 'connect' | 'switch'): string {
   if (error instanceof InvalidWalletResponse) return 'Your wallet returned an unexpected response. Try again.';
@@ -117,6 +122,27 @@ export class WalletConnection {
     } finally {
       if (attempt === this.attempt) this.switching.set(false);
     }
+  }
+
+  /**
+   * Asks the connected wallet to sign `message` with `personal_sign` (EIP-191). Signing proves control of the
+   * address to the server; it is not a transaction. Rejects if the account changes while the wallet is open.
+   */
+  async signMessage(message: string): Promise<string> {
+    const state = this.state();
+    const provider = this.provider;
+    if (state.status !== 'connected' || provider === null) throw new WalletChangedError();
+
+    const attempt = this.attempt;
+    const signature = parseSignature(
+      await provider.request({ method: 'personal_sign', params: [utf8ToHex(message), state.address] }),
+    );
+    const current = this.state();
+    if (attempt !== this.attempt || current.status !== 'connected' || current.address !== state.address) {
+      throw new WalletChangedError();
+    }
+    if (signature === null) throw new InvalidWalletResponse();
+    return signature;
   }
 
   /**

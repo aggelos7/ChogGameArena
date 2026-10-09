@@ -19,7 +19,7 @@ public sealed class ProfileTests(MigratedPostgresDatabase database) : IClassFixt
         if (database.ConnectionString.Length > 0)
         {
             await using var db = database.CreateDbContext();
-            await db.Database.ExecuteSqlRawAsync("TRUNCATE \"GuestSessions\", \"Players\"");
+            await db.Database.ExecuteSqlRawAsync("TRUNCATE \"GuestSessions\", \"Players\" CASCADE");
         }
 
         _factory = new ApiFactory(database.ConnectionString);

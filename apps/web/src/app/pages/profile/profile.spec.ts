@@ -36,12 +36,31 @@ describe('Profile page', () => {
     }).overrideComponent(ProfilePage, { remove: { imports: [WalletPanel] }, add: { imports: [StubWalletPanel] } });
     http = TestBed.inject(HttpTestingController);
     session = TestBed.inject(PlayerSession);
-    session.player.set({ playerId: 'p-1', displayName: 'Chog 4821', kind: 'Guest' });
+    session.player.set({ playerId: 'p-1', displayName: 'Chog 4821', kind: 'Guest', walletAddress: null });
     fixture = TestBed.createComponent(ProfilePage);
     fixture.detectChanges();
   });
 
   afterEach(() => http.verify());
+
+  it('reloads when the session switches to another player', async () => {
+    load();
+
+    session.player.set({ playerId: 'p-2', displayName: 'Wallet Chog', kind: 'Wallet', walletAddress: '0x' + 'a'.repeat(40) });
+    await fixture.whenStable();
+    load({ ...profile, playerId: 'p-2', displayName: 'Wallet Chog', kind: 'Wallet' });
+
+    expect(nameInput().value).toBe('Wallet Chog');
+  });
+
+  it('does not reload when the same player changes name', async () => {
+    load();
+
+    session.updateDisplayName('Renamed');
+    await fixture.whenStable();
+
+    http.expectNone('/api/profile');
+  });
 
   it('includes the wallet panel once the profile is loaded', () => {
     load();

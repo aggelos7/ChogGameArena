@@ -1,6 +1,7 @@
 using ChogGames.Infrastructure.Health;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Wallets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -46,6 +47,12 @@ public static class ConfigurationServiceCollectionExtensions
             .ValidateOnStart();
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<GuestSessionService>();
+
+        services.AddSingleton<IValidateOptions<WalletAuthOptions>, WalletAuthOptionsValidator>();
+        services.AddOptions<WalletAuthOptions>()
+            .Bind(configuration.GetSection(WalletAuthOptions.SectionName))
+            .ValidateOnStart();
+        services.AddScoped<WalletSignInService>();
 
         services.AddHealthChecks()
             .AddCheck<DatabaseHealthCheck>(DatabaseHealthCheck.Name, tags: [ReadinessTag], timeout: DatabaseHealthCheckTimeout);

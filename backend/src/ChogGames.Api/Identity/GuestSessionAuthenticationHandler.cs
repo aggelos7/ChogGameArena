@@ -20,6 +20,7 @@ public sealed class GuestSessionAuthenticationHandler(
 {
     public const string SchemeName = "GuestSession";
     public const string PlayerKindClaim = "player_kind";
+    public const string WalletAddressClaim = "wallet_address";
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -40,13 +41,18 @@ public sealed class GuestSessionAuthenticationHandler(
             GuestSessionCookie.Write(Response, token, session.ExpiresAt, sessionOptions.Value);
         }
 
-        var identity = new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.NameIdentifier, session.Player.Id.ToString()),
-                new Claim(ClaimTypes.Name, session.Player.DisplayName),
-                new Claim(PlayerKindClaim, session.Player.Kind.ToString()),
-            ],
-            SchemeName);
+        List<Claim> claims =
+        [
+            new Claim(ClaimTypes.NameIdentifier, session.Player.Id.ToString()),
+            new Claim(ClaimTypes.Name, session.Player.DisplayName),
+            new Claim(PlayerKindClaim, session.Player.Kind.ToString()),
+        ];
+        if (session.Player.WalletAddress is not null)
+        {
+            claims.Add(new Claim(WalletAddressClaim, session.Player.WalletAddress));
+        }
+
+        var identity = new ClaimsIdentity(claims, SchemeName);
 
         return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
     }
