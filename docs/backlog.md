@@ -67,7 +67,7 @@
 
 #### STORY-003 — Initialize Angular client
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E01
 - **Implementation:** Use Nx `@nx/angular` to generate Angular SPA under `apps/web`, with routing and shared layout. Create browser-side libraries only when needed; keep Angular/Nx versions compatible and pinned.
