@@ -19,6 +19,11 @@ export const appRoutes: Route[] = [
     resolve: { game: launchableGameResolver },
     loadComponent: () => import('./pages/game-lobby/game-lobby').then((m) => m.GameLobby),
   },
+  {
+    path: 'profile',
+    title: 'Profile · Chog Game Arena',
+    loadComponent: () => import('./pages/profile/profile').then((m) => m.ProfilePage),
+  },
   // Unknown URLs fall back to the home page instead of rendering an empty shell.
   { path: '**', redirectTo: '' },
 ];

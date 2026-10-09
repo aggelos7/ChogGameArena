@@ -22,6 +22,11 @@ export class PlayerSession {
   readonly player = signal<CurrentPlayer | null>(null);
   readonly status = signal<PlayerSessionStatus>('loading');
 
+  /** Reflects a display name change made through the profile, so the header stays in sync. */
+  updateDisplayName(displayName: string): void {
+    this.player.update((player) => (player ? { ...player, displayName } : player));
+  }
+
   /** Resumes the existing session, or creates a guest only when the server reports none (401). Never throws. */
   async ensureGuest(): Promise<void> {
     this.status.set('loading');

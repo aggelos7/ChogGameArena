@@ -27,6 +27,13 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AvatarId")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("classic");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -35,14 +42,29 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<int>("GamesPlayed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<int>("Wins")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.HasKey("Id");
 
-                    b.ToTable("Players", (string)null);
+                    b.ToTable("Players", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");
+
+                            t.HasCheckConstraint("CK_Players_Wins_WithinGamesPlayed", "\"Wins\" >= 0 AND \"Wins\" <= \"GamesPlayed\"");
+                        });
                 });
 
             modelBuilder.Entity("ChogGames.Infrastructure.Identity.GuestSession", b =>
