@@ -55,7 +55,7 @@ public class ProjectDependencyTests
     [Fact]
     public void Core_has_no_project_references()
     {
-        Assert.Empty(SourceProjects()["ChogGames.Core"]);
+        Assert.NotEmpty(SourceProjects()["ChogGames.Core"]); // DELIBERATE CI FAILURE CHECK
     }
 
     [Theory]

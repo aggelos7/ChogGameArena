@@ -24,7 +24,7 @@ describe('app routes', () => {
   it('renders the games page at /games', async () => {
     await harness.navigateByUrl('/games');
 
-    expect(heading()).toBe('Games');
+    expect(heading()).toBe('Deliberately wrong'); // DELIBERATE CI FAILURE CHECK
     expect(TestBed.inject(Title).getTitle()).toBe('Games · Chog Game Arena');
   });
 
