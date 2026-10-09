@@ -14,6 +14,7 @@ Read `docs/requirements.md`, `docs/architecture.md` and `docs/backlog.md` before
 10. Run Nx build/lint/tests for touched frontend projects and native `dotnet build/test` for backend changes. Nx Cloud is optional and off by default. Tests and builds must pass; if not, report exact failures. Do not claim success without running checks.
 11. Do not change unrelated files, introduce speculative features, or silently alter documented rules.
 12. After completion, report changes, tests, unresolved questions and update story status only if acceptance criteria are satisfied.
+13. Implement each story in its own new feature branch created from `develop` (e.g. `feature/story-002-backend-solution`); never commit directly to `develop` or `master`. Open the PR into `develop` with `Closes #<issue>`. See `.claude/skills/implement-story/SKILL.md`.
 
 ## Monorepo execution rules
 
