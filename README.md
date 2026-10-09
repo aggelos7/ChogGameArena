@@ -9,7 +9,7 @@ Nx is the frontend monorepo/task orchestration tool. Angular lives in `apps/web`
 ```text
 apps/            Angular SPA (STORY-003)
 libs/            Shared browser-side TypeScript libraries
-backend/         Native .NET 8 solution (STORY-002)
+backend/         Native .NET 8 solution (ChogGames.sln: Api, Core, Games.*, Infrastructure)
 infrastructure/  Docker Compose and deployment assets (STORY-004)
 docs/            Requirements, architecture, backlog, decisions
 tools/           Workspace scripts and checks
@@ -35,6 +35,18 @@ npm ci                  # install the exact locked dependencies
 npx nx --version        # verify the local, pinned Nx CLI
 npm run test:workspace  # run workspace skeleton checks (node:test)
 ```
+
+### Backend
+
+Native `dotnet` commands are authoritative; the SDK is pinned in `backend/global.json` and package versions in `backend/Directory.Packages.props`.
+
+```bash
+dotnet build backend/ChogGames.sln   # build all backend projects
+dotnet test backend/ChogGames.sln    # run backend tests, incl. architecture dependency rules
+npx nx run backend:test              # same commands via Nx (uncached wrapper)
+```
+
+Allowed project references (enforced by `ChogGames.Architecture.Tests`): `Core` → none; `Games.*` and `Infrastructure` → `Core`; `Api` → `Core`, `Infrastructure`, `Games.*`.
 
 ## Start here
 
