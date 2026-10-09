@@ -3,13 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "license": "UNLICENSED",
-  "description": "Chog Game Arena — Nx workspace (Angular frontend) with native .NET 8 backend",
+  "description": "Chog Game Arena \u2014 Nx workspace (Angular frontend) with native .NET 8 backend",
   "engines": {
     "node": ">=22.22.3 <23.0.0",
     "npm": ">=10.0.0"
   },
   "scripts": {
     "start": "nx serve web",
+    "start:all": "nx run-many -t serve -p backend web",
     "nx": "nx",
     "test:workspace": "node --test \"tools/**/*.test.mjs\"",
     "deps:up": "docker compose -f infrastructure/docker-compose.yml up -d --wait",

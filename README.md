@@ -41,14 +41,15 @@ npm run test:workspace  # run workspace skeleton checks (node:test)
 ### Frontend
 
 ```bash
-npm start               # dev server on http://localhost:4200 (same as npx nx serve web)
+npm start               # dev server on http://localhost:4200 (same as npx nx serve web); /api is proxied to http://localhost:5248
+npm run start:all       # API (Development) and web dev server together
 npx nx build web        # production build to dist/apps/web
 npx nx test web         # unit tests (Vitest via @angular/build:unit-test)
 npx nx lint web         # ESLint (angular-eslint)
 npx nx g @schematics/angular:component <path> --project=web   # Angular schematics via Nx
 ```
 
-Routes: `/` (home), `/games` (games page); unknown URLs redirect to `/`.
+Routes: `/` (home), `/games` (game catalogue), `/games/:gameId` (lobby placeholder, only for `Available` games; anything else redirects to `/games`); unknown URLs redirect to `/`.
 
 ### Local dependencies (PostgreSQL and Redis)
 
@@ -102,6 +103,12 @@ dotnet test backend/ChogGames.sln    # run backend tests, incl. architecture dep
 dotnet run --project backend/src/ChogGames.Api   # API on http://localhost:5248 (needs Database:ConnectionString)
 npm run db:migrate                   # apply EF Core migrations (uses Database__ConnectionString or user-secrets)
 npx nx run backend:test              # same commands via Nx (uncached wrapper)
+```
+
+Game catalogue (`GET /api/games`): games and their status come from the non-secret `Games:Items` configuration in `appsettings.json` and are validated at startup (unique kebab-case `Id`, required `Name`, `Status` one of `Available`, `ComingSoon`, `Maintenance`). Both games default to `ComingSoon`; `appsettings.Development.json` makes Chog Life `Available` locally. Only `Available` games can be launched; the web app re-checks the server before opening a game.
+
+```json
+[{ "id": "chog-life", "name": "Chog Life", "description": "...", "status": "ComingSoon" }]
 ```
 
 Health endpoints:
