@@ -10,9 +10,17 @@ public sealed class Player
 
     public string DisplayName { get; private set; } = string.Empty;
 
+    public string AvatarId { get; private set; } = DefaultAvatar.Classic.Id;
+
     public PlayerKind Kind { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
+
+    /// <summary>Completed matches. Maintained by the server when matches finish, never by clients.</summary>
+    public int GamesPlayed { get; private set; }
+
+    /// <summary>Completed matches won. Maintained by the server when matches finish, never by clients.</summary>
+    public int Wins { get; private set; }
 
     private Player()
     {
@@ -22,9 +30,14 @@ public sealed class Player
     {
         Id = Guid.NewGuid(),
         DisplayName = displayName.Value,
+        AvatarId = DefaultAvatar.Classic.Id,
         Kind = PlayerKind.Guest,
         CreatedAt = now,
     };
+
+    public void Rename(PlayerDisplayName displayName) => DisplayName = displayName.Value;
+
+    public void ChangeAvatar(DefaultAvatar avatar) => AvatarId = avatar.Id;
 }
 
 public enum PlayerKind

@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using ChogGames.Api.Catalog;
 using ChogGames.Api.Health;
 using ChogGames.Api.Identity;
+using ChogGames.Api.Profile;
 using ChogGames.Infrastructure.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,6 +21,7 @@ app.UseAuthorization();
 app.MapHealthEndpoints();
 app.MapGameCatalogEndpoints();
 app.MapIdentityEndpoints();
+app.MapProfileEndpoints();
 
 app.Run();
 
