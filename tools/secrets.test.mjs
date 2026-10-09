@@ -20,7 +20,8 @@ const read = (file) => {
   }
 };
 const isTestFile = (file) => /(^|\/)tests?\//.test(file) || /\.(test|spec)\.[cm]?[jt]s$/.test(file);
-const PLACEHOLDER_PASSWORDS = new Set(['change-me-local-only', '<password>', '<value>']);
+// 'ci-only-password' secures only the throwaway PostgreSQL service container in CI.
+const PLACEHOLDER_PASSWORDS = new Set(['change-me-local-only', 'ci-only-password', '<password>', '<value>']);
 
 test('local secret files are never tracked', () => {
   const forbidden = files.filter((file) => {

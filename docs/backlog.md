@@ -119,7 +119,7 @@
 
 #### STORY-007 — CI baseline
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E01
 - **Implementation:** Add GitHub Actions CI using pinned Node.js LTS and .NET 8 SDK: `npm ci`, Nx frontend build/lint/tests, native .NET restore/build/tests and Compose configuration validation. Begin with full checks; optimize with Nx affected only after correct base/head and project graph coverage are verified.
