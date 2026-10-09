@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{E7892233-5A93-489B-805D-BE8297CAA2B8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Api", "src\ChogGames.Api\ChogGames.Api.csproj", "{429810E1-6A9A-45BD-8A96-3A050BEB2C86}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Core", "src\ChogGames.Core\ChogGames.Core.csproj", "{675B9D5C-F0B5-444B-A547-FDC134E0DCA7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Games.ChogLife", "src\ChogGames.Games.ChogLife\ChogGames.Games.ChogLife.csproj", "{12759350-A9A6-4127-8D72-119132FC4082}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Games.ChogRace", "src\ChogGames.Games.ChogRace\ChogGames.Games.ChogRace.csproj", "{A43E03DC-9E46-485E-A27A-A121165C8AB7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Infrastructure", "src\ChogGames.Infrastructure\ChogGames.Infrastructure.csproj", "{36464B20-7737-4C21-B676-B45DC794D68E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B600B434-379B-47A3-9578-8F6A0F395914}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Architecture.Tests", "tests\ChogGames.Architecture.Tests\ChogGames.Architecture.Tests.csproj", "{9B6B08BD-5BC5-4C29-A448-AD496ECBEEE9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{429810E1-6A9A-45BD-8A96-3A050BEB2C86}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{429810E1-6A9A-45BD-8A96-3A050BEB2C86}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{429810E1-6A9A-45BD-8A96-3A050BEB2C86}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{429810E1-6A9A-45BD-8A96-3A050BEB2C86}.Release|Any CPU.Build.0 = Release|Any CPU
+		{675B9D5C-F0B5-444B-A547-FDC134E0DCA7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{675B9D5C-F0B5-444B-A547-FDC134E0DCA7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{675B9D5C-F0B5-444B-A547-FDC134E0DCA7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{675B9D5C-F0B5-444B-A547-FDC134E0DCA7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{12759350-A9A6-4127-8D72-119132FC4082}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{12759350-A9A6-4127-8D72-119132FC4082}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{12759350-A9A6-4127-8D72-119132FC4082}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{12759350-A9A6-4127-8D72-119132FC4082}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A43E03DC-9E46-485E-A27A-A121165C8AB7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A43E03DC-9E46-485E-A27A-A121165C8AB7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A43E03DC-9E46-485E-A27A-A121165C8AB7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A43E03DC-9E46-485E-A27A-A121165C8AB7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{36464B20-7737-4C21-B676-B45DC794D68E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{36464B20-7737-4C21-B676-B45DC794D68E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{36464B20-7737-4C21-B676-B45DC794D68E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{36464B20-7737-4C21-B676-B45DC794D68E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9B6B08BD-5BC5-4C29-A448-AD496ECBEEE9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9B6B08BD-5BC5-4C29-A448-AD496ECBEEE9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9B6B08BD-5BC5-4C29-A448-AD496ECBEEE9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9B6B08BD-5BC5-4C29-A448-AD496ECBEEE9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{429810E1-6A9A-45BD-8A96-3A050BEB2C86} = {E7892233-5A93-489B-805D-BE8297CAA2B8}
+		{675B9D5C-F0B5-444B-A547-FDC134E0DCA7} = {E7892233-5A93-489B-805D-BE8297CAA2B8}
+		{12759350-A9A6-4127-8D72-119132FC4082} = {E7892233-5A93-489B-805D-BE8297CAA2B8}
+		{A43E03DC-9E46-485E-A27A-A121165C8AB7} = {E7892233-5A93-489B-805D-BE8297CAA2B8}
+		{36464B20-7737-4C21-B676-B45DC794D68E} = {E7892233-5A93-489B-805D-BE8297CAA2B8}
+		{9B6B08BD-5BC5-4C29-A448-AD496ECBEEE9} = {B600B434-379B-47A3-9578-8F6A0F395914}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\ChogGames.Core\ChogGames.Core.csproj" />
+    <ProjectReference Include="..\ChogGames.Infrastructure\ChogGames.Infrastructure.csproj" />
+    <ProjectReference Include="..\ChogGames.Games.ChogLife\ChogGames.Games.ChogLife.csproj" />
+    <ProjectReference Include="..\ChogGames.Games.ChogRace\ChogGames.Games.ChogRace.csproj" />
+  </ItemGroup>
+
+</Project>
