@@ -70,6 +70,28 @@ npm run deps:verify  # smoke test: isolated stack on ports 15432/16379, checks d
 
 To wipe local data: `docker compose -f infrastructure/docker-compose.yml down -v`.
 
+### Configuration and secrets
+
+Backend settings are bound to typed options and validated at startup; a missing or invalid required setting stops the API with a message naming the setting. Secrets never go in `appsettings*.json` or any committed file (`npm run test:workspace` scans for them).
+
+| Setting | Required | Description |
+|---|---|---|
+| `Database:ConnectionString` | yes | Npgsql connection string; must include `Host`, `Database` and `Username` |
+
+Provide values, in order of preference:
+
+```bash
+# Local development: .NET user-secrets (stored in ~/.microsoft/usersecrets, outside the repo; Development environment only)
+dotnet user-secrets set "Database:ConnectionString" \
+  "Host=localhost;Port=5432;Database=choggames;Username=choggames;Password=<password>" \
+  --project backend/src/ChogGames.Api
+
+# Containers / CI: environment variables (':' becomes '__'); template in backend/.env.example
+export Database__ConnectionString="Host=<host>;Database=<db>;Username=<user>;Password=<password>"
+```
+
+Use the same password as `POSTGRES_PASSWORD` in `infrastructure/.env`.
+
 ### Backend
 
 Native `dotnet` commands are authoritative; the SDK is pinned in `backend/global.json` and package versions in `backend/Directory.Packages.props`.
@@ -77,6 +99,7 @@ Native `dotnet` commands are authoritative; the SDK is pinned in `backend/global
 ```bash
 dotnet build backend/ChogGames.sln   # build all backend projects
 dotnet test backend/ChogGames.sln    # run backend tests, incl. architecture dependency rules
+dotnet run --project backend/src/ChogGames.Api   # API on http://localhost:5248 (needs Database:ConnectionString)
 npx nx run backend:test              # same commands via Nx (uncached wrapper)
 ```
 
