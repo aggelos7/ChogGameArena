@@ -5,6 +5,7 @@ import { forkJoin } from 'rxjs';
 import { PlayerSession } from '../../identity/player-session';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
+import { WalletPanel } from '../../wallet/wallet-panel';
 import {
   Avatar,
   DISPLAY_NAME_MAX,
@@ -23,7 +24,7 @@ function displayNameValidator(control: AbstractControl<string>): ValidationError
 
 @Component({
   selector: 'app-profile',
-  imports: [ReactiveFormsModule, AvatarBadge, LoadingState, ErrorState],
+  imports: [ReactiveFormsModule, AvatarBadge, LoadingState, ErrorState, WalletPanel],
   templateUrl: './profile.html',
   styleUrl: './profile.scss',
 })

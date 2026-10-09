@@ -137,6 +137,22 @@ Player profile (SUITE-004): always the caller's own profile — there is no play
 
 `gamesPlayed`/`wins` are maintained by the server only (database check: `0 <= Wins <= GamesPlayed`); values sent by clients are ignored. Avatars are coloured placeholders until official artwork is approved (DEC-005).
 
+Wallet connection (STORY-012, DEC-014): the Profile page's Wallet section discovers browser wallets via EIP-6963 (falling back to `window.ethereum`), connects with `eth_requestAccounts`, shows the wallet, short address and network, prompts a switch when the wallet is on another chain (adding the chain to the wallet if needed), and disconnects by clearing all wallet state and asking the wallet to revoke the site's permission. No wallet SDK is used. Every wallet response is validated; anything malformed leaves the app disconnected. Connecting is **not** authentication: the address is display-only until challenge-sign sign-in (STORY-013).
+
+| Endpoint | Responses |
+|---|---|
+| `GET /api/wallet/chain` | `200 { chainId, name, nativeCurrency: { name, symbol, decimals }, rpcUrls, blockExplorerUrls }`; no session needed |
+
+| Setting (`Wallet:Chain:`) | Default (`appsettings.json`) | Development |
+|---|---|---|
+| `ChainId` | `143` (Monad Mainnet) | `10143` (Monad Testnet) |
+| `Name` | `Monad Mainnet` | `Monad Testnet` |
+| `CurrencyName` / `CurrencySymbol` / `CurrencyDecimals` | `Monad` / `MON` / `18` | |
+| `RpcUrls` | `https://rpc.monad.xyz` | `https://testnet-rpc.monad.xyz` |
+| `BlockExplorerUrls` | `https://monadvision.com` | `https://testnet.monadvision.com` |
+
+These values are sent to browsers, so URLs must be public `https://` addresses; credentials and query strings are rejected at startup. Never put a keyed RPC provider URL here. Lists override by index, so keep the same number of entries per environment or override every index.
+
 Health endpoints:
 
 | Endpoint | Checks | Healthy | Unhealthy |
