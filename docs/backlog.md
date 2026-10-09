@@ -1,4 +1,4 @@
-# Chog Games Suite — Implementation Backlog v1.0
+# Chog Game Arena — Implementation Backlog v1.1 (Nx workspace)
 
 **Source of truth:** `requirements.md` (product behavior); `architecture.md` (technical boundaries); `AGENTS.md` (agent instructions).  
 **Status:** Planned. All stories are initially `Todo`.  
@@ -7,7 +7,7 @@
 ## Global definition of done
 
 - Story acceptance criteria are verified with automated tests where practical.
-- Backend solution builds and tests pass; frontend builds and tests pass when touched.
+- Native .NET solution builds and tests pass; relevant Nx frontend build/lint/tests pass when touched. Nx must not mask native .NET failures.
 - Security, validation, concurrency and failure behavior are considered for the changed boundary.
 - Relevant docs, migration scripts, API contract and test fixtures are updated.
 - No feature outside the story scope is silently implemented.
@@ -41,12 +41,12 @@
 
 #### STORY-001 — Create monorepo skeleton
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E01
-- **Implementation:** Create frontend, backend, infrastructure and docs directories; add README with exact local start commands.
+- **Implementation:** Initialize a pinned Nx workspace at repository root without overwriting existing planning docs. Create `apps/`, `libs/`, `backend/`, `infrastructure/` and `docs/`; add `nx.json`, root `package.json` and committed lockfile. Configure local Nx caching; do not enable Nx Cloud. Add README with prerequisites and exact local commands. Do not scaffold the Angular app or .NET projects yet (STORY-002/003).
 - **Acceptance criteria:**
-  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a fresh checkout has expected directories; README identifies prerequisites and commands.
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a fresh checkout has expected directories and existing docs preserved; `npm ci` and `npx nx --version` succeed using pinned compatible Node.js LTS/Nx versions; README identifies prerequisites and commands; no cloud account is required.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
@@ -57,9 +57,9 @@
 - **Status:** Todo
 - **Priority:** P1
 - **Epic:** E01
-- **Implementation:** Create .NET 8 ASP.NET Core API, Core, Games and Infrastructure projects with dependency direction enforced.
+- **Implementation:** Create `backend/ChogGames.sln` and .NET 8 ASP.NET Core API, Core, Games and Infrastructure projects with dependency direction enforced. Add an explicit Nx backend task wrapper only if it adds value; native .NET commands remain authoritative.
 - **Acceptance criteria:**
-  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** solution builds; API references Core; Core does not reference Infrastructure or API.
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** `dotnet build backend/ChogGames.sln` passes; API references Core; Core does not reference Infrastructure or API; if an Nx wrapper is configured it invokes the same build successfully.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
@@ -70,9 +70,9 @@
 - **Status:** Todo
 - **Priority:** P1
 - **Epic:** E01
-- **Implementation:** Create Angular TypeScript SPA with routing and shared layout.
+- **Implementation:** Use Nx `@nx/angular` to generate Angular SPA under `apps/web`, with routing and shared layout. Create browser-side libraries only when needed; keep Angular/Nx versions compatible and pinned.
 - **Acceptance criteria:**
-  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** angular production build passes; / and /games routes render.
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** `npx nx build web` passes; `/` and `/games` routes render; Nx recognizes `web` as a project; native Angular tooling remains accessible through Nx.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
@@ -122,9 +122,9 @@
 - **Status:** Todo
 - **Priority:** P1
 - **Epic:** E01
-- **Implementation:** Add backend build/tests, Angular build/lint and Compose validation to CI.
+- **Implementation:** Add GitHub Actions CI using pinned Node.js LTS and .NET 8 SDK: `npm ci`, Nx frontend build/lint/tests, native .NET restore/build/tests and Compose configuration validation. Begin with full checks; optimize with Nx affected only after correct base/head and project graph coverage are verified.
 - **Acceptance criteria:**
-  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** pull request checks run automatically and fail on broken builds.
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** pull request checks run automatically and fail on broken Nx frontend or native .NET builds/tests; no Nx Cloud token is needed; CI does not skip backend changes.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.

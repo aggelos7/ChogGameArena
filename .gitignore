@@ -1,0 +1,23 @@
+# Node / Nx
+node_modules/
+dist/
+tmp/
+coverage/
+.nx/cache/
+.nx/workspace-data/
+
+# .NET
+bin/
+obj/
+*.user
+
+# Local secrets and environment
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
