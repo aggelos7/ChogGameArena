@@ -209,7 +209,7 @@
 
 #### STORY-013 — Challenge-sign authentication
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E03
 - **Implementation:** Backend issues nonce challenge bound to domain, chain, address and expiry; verify signature; rotate nonce.

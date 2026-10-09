@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { CurrentPlayer, PlayerSession } from './player-session';
 
 describe('PlayerSession', () => {
-  const guest: CurrentPlayer = { playerId: '6f1c4a1e-0000-4000-8000-000000000001', displayName: 'Chog 4821', kind: 'Guest' };
+  const guest: CurrentPlayer = { playerId: '6f1c4a1e-0000-4000-8000-000000000001', displayName: 'Chog 4821', kind: 'Guest', walletAddress: null };
   let session: PlayerSession;
   let http: HttpTestingController;
 
@@ -75,5 +75,20 @@ describe('PlayerSession', () => {
 
     await expect(done).resolves.toBeUndefined();
     expect(session.status()).toBe('error');
+  });
+
+  it('signs out on the server, then continues as a new guest', async () => {
+    session.setPlayer({ ...guest, kind: 'Wallet', walletAddress: '0x' + 'a'.repeat(40) });
+    const newGuest: CurrentPlayer = { ...guest, playerId: 'new' };
+
+    const done = session.signOut();
+    http.expectOne({ method: 'POST', url: '/api/wallet/sign-out' }).flush(null, { status: 204, statusText: 'No Content' });
+    await flushNext();
+    http.expectOne('/api/me').flush(null, { status: 401, statusText: 'Unauthorized' });
+    await flushNext();
+    http.expectOne('/api/guest-sessions').flush(newGuest);
+    await done;
+
+    expect(session.player()).toEqual(newGuest);
   });
 });

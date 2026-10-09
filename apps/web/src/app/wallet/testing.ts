@@ -4,6 +4,9 @@ import { WalletChain } from './wallet-chain';
 export const ALICE = '0x00000000000000000000000000000000000a11ce';
 export const BOB = '0x0000000000000000000000000000000000000b0b';
 
+/** Well-formed 65-byte signature; the server, not the browser, checks that it is valid. */
+export const SIGNATURE = '0x' + 'ab'.repeat(65);
+
 export const TESTNET: WalletChain = {
   chainId: 10143,
   name: 'Monad Testnet',
@@ -49,6 +52,8 @@ export class FakeWallet implements Eip1193Provider {
       }
       case 'wallet_revokePermissions':
         return null;
+      case 'personal_sign':
+        return SIGNATURE;
       default:
         throw { code: 4200, message: `Unsupported method ${method}` };
     }

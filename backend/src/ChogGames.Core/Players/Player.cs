@@ -1,3 +1,5 @@
+using ChogGames.Core.Wallets;
+
 namespace ChogGames.Core.Players;
 
 /// <summary>
@@ -13,6 +15,9 @@ public sealed class Player
     public string AvatarId { get; private set; } = DefaultAvatar.Classic.Id;
 
     public PlayerKind Kind { get; private set; }
+
+    /// <summary>Lowercase address bound by a verified wallet sign-in; null for guests. One wallet per player.</summary>
+    public string? WalletAddress { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
 
@@ -35,6 +40,29 @@ public sealed class Player
         CreatedAt = now,
     };
 
+    /// <summary>A new player for a wallet that is not yet bound to anyone, used when the caller already has another wallet.</summary>
+    public static Player CreateForWallet(WalletAddress wallet, PlayerDisplayName displayName, DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid(),
+        DisplayName = displayName.Value,
+        AvatarId = DefaultAvatar.Classic.Id,
+        Kind = PlayerKind.Wallet,
+        WalletAddress = wallet.Value,
+        CreatedAt = now,
+    };
+
+    /// <summary>Upgrades a guest to a wallet player, keeping its name, avatar and stats (DEC-004 sign-in binding).</summary>
+    public void BindWallet(WalletAddress wallet)
+    {
+        if (Kind != PlayerKind.Guest || WalletAddress is not null)
+        {
+            throw new InvalidOperationException("Only a guest without a wallet can be bound to a wallet.");
+        }
+
+        Kind = PlayerKind.Wallet;
+        WalletAddress = wallet.Value;
+    }
+
     public void Rename(PlayerDisplayName displayName) => DisplayName = displayName.Value;
 
     public void ChangeAvatar(DefaultAvatar avatar) => AvatarId = avatar.Id;
@@ -43,4 +71,5 @@ public sealed class Player
 public enum PlayerKind
 {
     Guest,
+    Wallet,
 }

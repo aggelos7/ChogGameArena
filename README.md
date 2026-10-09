@@ -137,7 +137,7 @@ Player profile (SUITE-004): always the caller's own profile — there is no play
 
 `gamesPlayed`/`wins` are maintained by the server only (database check: `0 <= Wins <= GamesPlayed`); values sent by clients are ignored. Avatars are coloured placeholders until official artwork is approved (DEC-005).
 
-Wallet connection (STORY-012, DEC-014): the Profile page's Wallet section discovers browser wallets via EIP-6963 (falling back to `window.ethereum`), connects with `eth_requestAccounts`, shows the wallet, short address and network, prompts a switch when the wallet is on another chain (adding the chain to the wallet if needed), and disconnects by clearing all wallet state and asking the wallet to revoke the site's permission. No wallet SDK is used. Every wallet response is validated; anything malformed leaves the app disconnected. Connecting is **not** authentication: the address is display-only until challenge-sign sign-in (STORY-013).
+Wallet connection (STORY-012, DEC-014): the Profile page's Wallet section discovers browser wallets via EIP-6963 (falling back to `window.ethereum`), connects with `eth_requestAccounts`, shows the wallet, short address and network, prompts a switch when the wallet is on another chain (adding the chain to the wallet if needed), and disconnects by clearing all wallet state and asking the wallet to revoke the site's permission. No wallet SDK is used. Every wallet response is validated; anything malformed leaves the app disconnected. Connecting alone is **not** authentication; see wallet sign-in below.
 
 | Endpoint | Responses |
 |---|---|
@@ -152,6 +152,30 @@ Wallet connection (STORY-012, DEC-014): the Profile page's Wallet section discov
 | `BlockExplorerUrls` | `https://monadvision.com` | `https://testnet.monadvision.com` |
 
 These values are sent to browsers, so URLs must be public `https://` addresses; credentials and query strings are rejected at startup. Never put a keyed RPC provider URL here. Lists override by index, so keep the same number of entries per environment or override every index.
+
+Wallet sign-in (STORY-013, SUITE-003, DEC-015): connecting a wallet is **not** authentication. In the Wallet section, "Sign in with wallet" works like this:
+1. The app asks the server for a one-time EIP-4361 message (domain, URI, chain, address, nonce, 5-minute expiry), built entirely from server configuration.
+2. The wallet signs the message (`personal_sign`; free, not a transaction).
+3. The server recovers the signer and compares it with the challenged address.
+
+On success the session cookie is replaced; the old cookie stops working. Each challenge works once, only for the session that requested it, and is used up even by a failed attempt. Replayed, expired, altered (e.g. wrong-domain) or wrongly-signed messages are rejected and change nothing. Only regular (EOA) wallets are supported; smart-contract wallets fail safely.
+
+| Endpoint | Request | Responses |
+|---|---|---|
+| `POST /api/wallet/challenge` | session cookie; `{ "address": "0x…" }` | `200 { challengeId, message, expiresAt }`; `400` invalid address; `401`; `429` |
+| `POST /api/wallet/verify` | session cookie; `{ "challengeId", "signature" }` | `200 { playerId, displayName, kind: "Wallet", walletAddress }` + new cookie; `400` with `errors.challengeId` (expired/used/not yours) or `errors.signature` (not signed by that address over that message); `401`; `429` |
+| `POST /api/wallet/sign-out` | session cookie | `204`, session revoked and cookie cleared; the app then starts a new guest |
+
+`GET /api/me` also returns `walletAddress` (`null` for guests). Binding: a new wallet upgrades the current guest (same player); a wallet already bound to a player signs in as that player.
+
+| Setting (`WalletAuth:`) | Default | |
+|---|---|---|
+| `Domain` | *(required)* | host[:port] users see the web app at; `localhost:4200` in `appsettings.Development.json` |
+| `Uri` | *(required)* | web app origin, e.g. `https://app.example.com` (`http` only for localhost); must match `Domain` |
+| `ChallengeLifetime` | `00:05:00` | 1-15 minutes |
+| `RequestsPerMinutePerClient` | `20` | challenge + verify requests per client IP per minute |
+
+Every deployment must set `WalletAuth:Domain` and `Uri` to the address users open; the API refuses to start without them. Wallets show this domain and warn when it doesn't match the page.
 
 Health endpoints:
 

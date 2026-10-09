@@ -54,6 +54,16 @@ export function walletErrorCode(error: unknown): number | undefined {
   return typeof code === 'number' ? code : undefined;
 }
 
+/** A 65-byte r ‖ s ‖ v signature as returned by `personal_sign`, or null. */
+export function parseSignature(value: unknown): string | null {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{130}$/.test(value) ? value : null;
+}
+
+/** `personal_sign` takes the message as 0x-hex UTF-8 bytes; wallets show it decoded. */
+export function utf8ToHex(text: string): string {
+  return `0x${Array.from(new TextEncoder().encode(text), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
 export function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }

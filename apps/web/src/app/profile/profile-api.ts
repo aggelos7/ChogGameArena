@@ -13,7 +13,7 @@ export interface Avatar {
 export interface Profile {
   playerId: string;
   displayName: string;
-  kind: 'Guest';
+  kind: 'Guest' | 'Wallet';
   avatar: Avatar;
   gamesPlayed: number;
   wins: number;

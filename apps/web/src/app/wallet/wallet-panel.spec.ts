@@ -3,7 +3,8 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { WalletProviderDetail } from './eip1193';
-import { ALICE, FakeWallet, TESTNET, walletDetail } from './testing';
+import { PlayerSession } from '../identity/player-session';
+import { ALICE, BOB, FakeWallet, TESTNET, walletDetail } from './testing';
 import { WalletDiscovery } from './wallet-discovery';
 import { WalletPanel } from './wallet-panel';
 
@@ -129,5 +130,54 @@ describe('Wallet panel', () => {
 
     expect(element().querySelector('p.error[role="alert"]')?.textContent).toBe('Connection was cancelled in your wallet.');
     expect(button('Connect Rabby')).toBeTruthy();
+  });
+
+  async function connectRabby() {
+    loadChain();
+    button('Connect Rabby').click();
+    await settle();
+  }
+
+  it('offers sign-in once connected on the supported network', async () => {
+    await connectRabby();
+
+    expect(button('Sign in with wallet')).toBeTruthy();
+    expect(button('Disconnect')).toBeTruthy();
+    expect(element().querySelector('[data-field="signed-in"]')).toBeNull();
+  });
+
+  it('does not offer sign-in on an unsupported network', async () => {
+    wallet.chainId = '0x1';
+    await connectRabby();
+
+    expect(button('Sign in with wallet')).toBeUndefined();
+  });
+
+  it('shows the signed-in wallet with a sign-out button instead of sign-in and disconnect', async () => {
+    TestBed.inject(PlayerSession).setPlayer({ playerId: 'p', displayName: 'Alice', kind: 'Wallet', walletAddress: ALICE });
+    await connectRabby();
+
+    const banner = element().querySelector('[data-field="signed-in"]') as HTMLElement;
+    expect(banner.textContent).toContain('Signed in with wallet');
+    expect(banner.querySelector('.visually-hidden')?.textContent).toBe(ALICE);
+    expect(button('Sign out')).toBeTruthy();
+    expect(button('Sign in with wallet')).toBeUndefined();
+    expect(button('Disconnect')).toBeUndefined();
+  });
+
+  it('keeps showing the wallet session after a reload without a connected wallet', () => {
+    TestBed.inject(PlayerSession).setPlayer({ playerId: 'p', displayName: 'Alice', kind: 'Wallet', walletAddress: ALICE });
+    loadChain();
+
+    expect(element().querySelector('[data-field="signed-in"]')?.textContent).toContain('Signed in with wallet');
+    expect(button('Connect Rabby')).toBeTruthy();
+  });
+
+  it('notices when the connected account differs from the signed-in one', async () => {
+    TestBed.inject(PlayerSession).setPlayer({ playerId: 'p', displayName: 'Alice', kind: 'Wallet', walletAddress: BOB });
+    await connectRabby();
+
+    expect(element().textContent).toContain('This wallet account is not the one you are signed in with.');
+    expect(button('Sign in with wallet')).toBeTruthy();
   });
 });

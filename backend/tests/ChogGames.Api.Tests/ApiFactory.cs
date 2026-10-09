@@ -16,6 +16,9 @@ public sealed class ApiFactory(
     /// <summary>A syntactically valid connection string for tests that never open a connection.</summary>
     public const string UnusedDatabase = "Host=127.0.0.1;Port=1;Database=choggames;Username=choggames;Timeout=2";
 
+    public const string WalletAuthDomain = "arena.example.test";
+    public const string WalletAuthUri = "https://arena.example.test";
+
     /// <summary>HTTPS client so Secure cookies round-trip exactly as in production.</summary>
     public HttpClient CreateHttpsClient() =>
         CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
@@ -26,7 +29,12 @@ public sealed class ApiFactory(
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration(config =>
         {
-            config.AddInMemoryCollection(new Dictionary<string, string?> { ["Database:ConnectionString"] = connectionString });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Database:ConnectionString"] = connectionString,
+                ["WalletAuth:Domain"] = WalletAuthDomain,
+                ["WalletAuth:Uri"] = WalletAuthUri,
+            });
             if (settings is not null)
             {
                 config.AddInMemoryCollection(settings);

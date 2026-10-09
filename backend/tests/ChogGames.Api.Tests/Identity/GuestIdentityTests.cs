@@ -24,7 +24,7 @@ public sealed class GuestIdentityTests(MigratedPostgresDatabase database) : ICla
         if (database.ConnectionString.Length > 0)
         {
             await using var db = database.CreateDbContext();
-            await db.Database.ExecuteSqlRawAsync("TRUNCATE \"GuestSessions\", \"Players\"");
+            await db.Database.ExecuteSqlRawAsync("TRUNCATE \"GuestSessions\", \"Players\" CASCADE");
         }
 
         _factory = CreateFactory();

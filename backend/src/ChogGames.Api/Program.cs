@@ -12,6 +12,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddGameCatalog(builder.Configuration);
 builder.Services.AddGuestIdentity();
 builder.Services.AddWalletChain(builder.Configuration);
+builder.Services.AddWalletSignIn();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
@@ -25,6 +26,7 @@ app.MapGameCatalogEndpoints();
 app.MapIdentityEndpoints();
 app.MapProfileEndpoints();
 app.MapWalletEndpoints();
+app.MapWalletSignInEndpoints();
 
 app.Run();
 

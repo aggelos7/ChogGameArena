@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { WalletConnection } from './wallet-connection';
-import { ALICE, BOB, FakeWallet, TESTNET, deferred, walletDetail } from './testing';
+import { ALICE, BOB, FakeWallet, SIGNATURE, TESTNET, deferred, walletDetail } from './testing';
+import { WalletChangedError } from './wallet-connection';
 
 describe('WalletConnection', () => {
   let wallet: FakeWallet;
@@ -183,5 +184,37 @@ describe('WalletConnection', () => {
     await connect();
 
     expect(connection.onSupportedChain()).toBe(false);
+  });
+
+  it('signs a message with personal_sign as hex UTF-8 for the connected account', async () => {
+    await connect();
+
+    const signature = await connection.signMessage('Hi Χ');
+
+    expect(signature).toBe(SIGNATURE);
+    expect(wallet.calls[wallet.calls.length - 1]).toEqual({ method: 'personal_sign', params: ['0x486920cea7', ALICE] });
+  });
+
+  it('rejects a malformed signature from the wallet', async () => {
+    wallet.handlers['personal_sign'] = () => '0x1234';
+    await connect();
+
+    await expect(connection.signMessage('hello')).rejects.toThrow();
+  });
+
+  it('rejects a signature if the account changed while the wallet was open', async () => {
+    const signing = deferred<unknown>();
+    wallet.handlers['personal_sign'] = () => signing.promise;
+    await connect();
+
+    const pending = connection.signMessage('hello');
+    wallet.emit('accountsChanged', [BOB]);
+    signing.resolve(SIGNATURE);
+
+    await expect(pending).rejects.toBeInstanceOf(WalletChangedError);
+  });
+
+  it('cannot sign without a connected wallet', async () => {
+    await expect(connection.signMessage('hello')).rejects.toBeInstanceOf(WalletChangedError);
   });
 });

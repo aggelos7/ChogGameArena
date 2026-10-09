@@ -11,12 +11,28 @@
     @case ('ready') {
       @let chain = wallet.chain()!;
       @let state = wallet.state();
+      @if (signIn.signedInAddress(); as signedIn) {
+        <div class="signed-in" data-field="signed-in">
+          <p>
+            Signed in with wallet
+            <strong [title]="signedIn"
+              ><span aria-hidden="true">{{ shortAddress(signedIn) }}</span
+              ><span class="visually-hidden">{{ signedIn }}</span></strong
+            >
+          </p>
+          <button type="button" class="secondary" [disabled]="signIn.busy() !== null" (click)="signIn.signOut()">
+            {{ signIn.busy() === 'signing-out' ? 'Signing out…' : 'Sign out' }}
+          </button>
+        </div>
+      }
       @switch (state.status) {
         @case ('disconnected') {
-          <p class="hint">
-            Optional. Connecting shows your wallet address on {{ chain.name }}; it does not sign you in and never moves
-            funds.
-          </p>
+          @if (!signIn.signedInAddress()) {
+            <p class="hint">
+              Optional. Connect a wallet on {{ chain.name }}, then sign a message to prove you own it. Nothing is sent
+              on-chain and no funds move.
+            </p>
+          }
           @if (discovery.wallets().length > 0) {
             <ul class="wallet-list">
               @for (option of discovery.wallets(); track option.info.uuid) {
@@ -73,11 +89,25 @@
               </div>
             }
 
-            <button type="button" class="secondary" (click)="wallet.disconnect()">Disconnect</button>
+            @if (wallet.onSupportedChain() && !signIn.signedInWithConnectedWallet()) {
+              <div class="sign-in">
+                @if (signIn.signedInAddress()) {
+                  <p>This wallet account is not the one you are signed in with.</p>
+                }
+                <button type="button" class="primary" [disabled]="signIn.busy() !== null" (click)="signIn.signIn()">
+                  {{ signIn.busy() === 'signing-in' ? 'Confirm in your wallet…' : 'Sign in with wallet' }}
+                </button>
+                <p class="hint">Your wallet asks you to sign a message. It's free and is not a transaction.</p>
+              </div>
+            }
+
+            @if (!signIn.signedInWithConnectedWallet()) {
+              <button type="button" class="secondary" (click)="wallet.disconnect()">Disconnect</button>
+            }
           }
         }
       }
-      @if (wallet.error(); as message) {
+      @if (wallet.error() ?? signIn.error(); as message) {
         <p class="error" role="alert">{{ message }}</p>
       }
     }
