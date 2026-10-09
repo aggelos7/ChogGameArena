@@ -17,3 +17,5 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
 - DEC-008: Shared ability pool for MVP, traits retained for future resolver.
 - DEC-009: All eligible NFTs browsable; exactly one selected per match; no ability stacking.
 - DEC-010: Gameplay is off-chain; fictional in-game MON is not a blockchain transfer.
+
+- DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.
