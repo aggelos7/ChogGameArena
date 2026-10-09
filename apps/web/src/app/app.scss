@@ -35,6 +35,21 @@ nav {
   }
 }
 
+.player {
+  margin: 0;
+  width: 100%;
+  font-size: 0.875rem;
+
+  button {
+    margin-left: 0.5rem;
+    font: inherit;
+  }
+}
+
+.player-error {
+  color: #8a1c1c;
+}
+
 .shell-main {
   flex: 1;
   width: 100%;

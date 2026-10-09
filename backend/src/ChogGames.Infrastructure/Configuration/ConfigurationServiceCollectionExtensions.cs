@@ -1,8 +1,10 @@
 using ChogGames.Infrastructure.Health;
+using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace ChogGames.Infrastructure.Configuration;
@@ -35,6 +37,15 @@ public static class ConfigurationServiceCollectionExtensions
 
         services.AddDbContext<ChogGamesDbContext>((provider, options) =>
             options.UseNpgsql(provider.GetRequiredService<IOptions<DatabaseOptions>>().Value.ConnectionString));
+
+        services.AddOptions<GuestSessionOptions>()
+            .Bind(configuration.GetSection(GuestSessionOptions.SectionName))
+            .Validate(o => o.Lifetime > TimeSpan.Zero && o.RenewInterval > TimeSpan.Zero && o.RenewInterval < o.Lifetime,
+                "GuestSessions:Lifetime and RenewInterval must be positive and RenewInterval shorter than Lifetime.")
+            .Validate(o => o.CreatePerMinutePerClient > 0, "GuestSessions:CreatePerMinutePerClient must be positive.")
+            .ValidateOnStart();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<GuestSessionService>();
 
         services.AddHealthChecks()
             .AddCheck<DatabaseHealthCheck>(DatabaseHealthCheck.Name, tags: [ReadinessTag], timeout: DatabaseHealthCheckTimeout);

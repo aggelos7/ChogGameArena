@@ -4,6 +4,14 @@
     <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
     <a routerLink="/games" routerLinkActive="active">Games</a>
   </nav>
+  @if (session.player(); as player) {
+    <p class="player">Playing as <strong>{{ player.displayName }}</strong></p>
+  } @else if (session.status() === 'error') {
+    <p class="player player-error" role="status">
+      Guest sign-in unavailable
+      <button type="button" (click)="session.ensureGuest()">Retry</button>
+    </p>
+  }
 </header>
 <main class="shell-main">
   <router-outlet />

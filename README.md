@@ -111,6 +111,20 @@ Game catalogue (`GET /api/games`): games and their status come from the non-secr
 [{ "id": "chog-life", "name": "Chog Life", "description": "...", "status": "ComingSoon" }]
 ```
 
+Guest identity (SUITE-002, ADR-005): the web app calls `GET /api/me` on startup and, only on `401`, `POST /api/guest-sessions`. The server creates a `Player` (opaque server-generated id, display name) and sets the session in an **HttpOnly, SameSite=Lax** cookie `chog_session` (Secure outside local development). Only the SHA-256 hash of the 256-bit token is stored. Identity comes **only** from that cookie; player ids in bodies, queries or headers are ignored.
+
+| Endpoint | Request | Responses |
+|---|---|---|
+| `POST /api/guest-sessions` | `{ "displayName"?: string }` (3–20 letters, digits, spaces, `_`, `-`; generated as `Chog 1234` if omitted) | `201` new guest + cookie; `200` existing guest when the cookie is still valid; `400` invalid name (nothing created); `429` over the per-IP limit |
+| `GET /api/me` | session cookie | `200 { playerId, displayName, kind }`; `401` without a valid session |
+
+| Setting (`GuestSessions:`) | Default | |
+|---|---|---|
+| `Lifetime` | `90.00:00:00` | session validity, extended on use |
+| `RenewInterval` | `1.00:00:00` | at most one renewal write per interval |
+| `RequireSecureCookie` | `true` | `false` only in `appsettings.Development.json` (plain HTTP) |
+| `CreatePerMinutePerClient` | `10` | guest creations per client IP per minute |
+
 Health endpoints:
 
 | Endpoint | Checks | Healthy | Unhealthy |
