@@ -14,7 +14,8 @@ public static class IdentityEndpoints
 
     public sealed record CreateGuestSessionRequest(string? DisplayName);
 
-    public sealed record CurrentPlayerResponse(Guid PlayerId, string DisplayName, string Kind);
+    /// <summary><paramref name="WalletAddress"/> is set only after a verified wallet sign-in (lowercase hex).</summary>
+    public sealed record CurrentPlayerResponse(Guid PlayerId, string DisplayName, string Kind, string? WalletAddress);
 
     public static IServiceCollection AddGuestIdentity(this IServiceCollection services)
     {
@@ -79,7 +80,7 @@ public static class IdentityEndpoints
         var issued = await sessions.CreateAsync(displayName, cancellationToken);
         GuestSessionCookie.Write(context.Response, issued.Token, issued.ExpiresAt, options.Value);
 
-        return TypedResults.Created("/api/me", new CurrentPlayerResponse(issued.Player.Id, issued.Player.DisplayName, issued.Player.Kind.ToString()));
+        return TypedResults.Created("/api/me", new CurrentPlayerResponse(issued.Player.Id, issued.Player.DisplayName, issued.Player.Kind.ToString(), null));
     }
 
     private static Ok<CurrentPlayerResponse> GetCurrentPlayer(ClaimsPrincipal user) => TypedResults.Ok(ToResponse(user));
@@ -87,5 +88,6 @@ public static class IdentityEndpoints
     private static CurrentPlayerResponse ToResponse(ClaimsPrincipal user) => new(
         Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!),
         user.FindFirstValue(ClaimTypes.Name)!,
-        user.FindFirstValue(GuestSessionAuthenticationHandler.PlayerKindClaim)!);
+        user.FindFirstValue(GuestSessionAuthenticationHandler.PlayerKindClaim)!,
+        user.FindFirstValue(GuestSessionAuthenticationHandler.WalletAddressClaim));
 }

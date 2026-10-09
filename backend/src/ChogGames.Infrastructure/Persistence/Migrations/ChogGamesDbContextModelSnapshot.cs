@@ -52,6 +52,10 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<string>("WalletAddress")
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
                     b.Property<int>("Wins")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -59,9 +63,16 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("WalletAddress")
+                        .IsUnique();
+
                     b.ToTable("Players", null, t =>
                         {
                             t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");
+
+                            t.HasCheckConstraint("CK_Players_WalletAddress_Format", "\"WalletAddress\" ~ '^0x[0-9a-f]{40}$'");
+
+                            t.HasCheckConstraint("CK_Players_Wallet_MatchesKind", "(\"Kind\" = 'Wallet') = (\"WalletAddress\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_Players_Wins_WithinGamesPlayed", "\"Wins\" >= 0 AND \"Wins\" <= \"GamesPlayed\"");
                         });
@@ -102,6 +113,51 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.ToTable("GuestSessions", (string)null);
                 });
 
+            modelBuilder.Entity("ChogGames.Infrastructure.Wallets.WalletChallenge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
+                    b.Property<long>("ChainId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("IssuedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("Nonce")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Nonce")
+                        .IsUnique();
+
+                    b.HasIndex("PlayerId");
+
+                    b.ToTable("WalletChallenges", (string)null);
+                });
+
             modelBuilder.Entity("ChogGames.Infrastructure.Identity.GuestSession", b =>
                 {
                     b.HasOne("ChogGames.Core.Players.Player", "Player")
@@ -111,6 +167,15 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Player");
+                });
+
+            modelBuilder.Entity("ChogGames.Infrastructure.Wallets.WalletChallenge", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

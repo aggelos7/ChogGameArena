@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, signal, untracked } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { PlayerSession } from '../../identity/player-session';
@@ -43,6 +43,17 @@ export class ProfilePage implements OnInit {
     displayName: ['', displayNameValidator],
     avatarId: [''],
   });
+
+  constructor() {
+    // Wallet sign-in or sign-out can switch the session to another player; show that player's profile.
+    effect(() => {
+      const playerId = this.session.player()?.playerId;
+      const shown = untracked(this.profile)?.playerId;
+      if (playerId && shown && playerId !== shown) {
+        untracked(() => this.load());
+      }
+    });
+  }
 
   ngOnInit(): void {
     this.load();

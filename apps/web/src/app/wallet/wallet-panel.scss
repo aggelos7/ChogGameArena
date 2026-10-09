@@ -94,6 +94,26 @@
   }
 }
 
+.signed-in,
+.sign-in {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+
+  p {
+    margin: 0;
+  }
+}
+
+.signed-in {
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  color: #116329;
+  background: #dafbe1;
+}
+
 .primary {
   border: none;
   font-weight: 600;

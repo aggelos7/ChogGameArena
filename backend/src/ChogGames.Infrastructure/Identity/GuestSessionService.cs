@@ -29,6 +29,38 @@ public sealed class GuestSessionService(ChogGamesDbContext dbContext, TimeProvid
         return new IssuedGuestSession(player, token, session.ExpiresAt);
     }
 
+    /// <summary>
+    /// Adds a new session for <paramref name="player"/> to the unit of work without saving, so callers can
+    /// rotate sessions atomically with other changes (e.g. wallet sign-in).
+    /// </summary>
+    public IssuedGuestSession StartSession(Player player, DateTimeOffset now)
+    {
+        var token = SessionToken.Generate();
+        SessionToken.TryHash(token, out var tokenHash);
+        var session = GuestSession.Create(player, tokenHash, now, Options.Lifetime);
+        dbContext.GuestSessions.Add(session);
+        return new IssuedGuestSession(player, token, session.ExpiresAt);
+    }
+
+    /// <summary>Marks the session for <paramref name="token"/> revoked in the unit of work without saving.</summary>
+    public async Task RevokeAsync(string? token, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (!SessionToken.TryHash(token, out var tokenHash))
+        {
+            return;
+        }
+
+        var session = await dbContext.GuestSessions.SingleOrDefaultAsync(s => s.TokenHash == tokenHash, cancellationToken);
+        session?.Revoke(now);
+    }
+
+    /// <summary>Ends the session for <paramref name="token"/> immediately. Unknown tokens are ignored.</summary>
+    public async Task SignOutAsync(string? token, CancellationToken cancellationToken)
+    {
+        await RevokeAsync(token, timeProvider.GetUtcNow(), cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     /// <summary>Resolves an active session from a client-supplied token, renewing it when due.</summary>
     public async Task<ActiveGuestSession?> AuthenticateAsync(string? token, CancellationToken cancellationToken)
     {

@@ -1,5 +1,6 @@
 using ChogGames.Core.Players;
 using ChogGames.Infrastructure.Identity;
+using ChogGames.Infrastructure.Wallets;
 using Microsoft.EntityFrameworkCore;
 
 namespace ChogGames.Infrastructure.Persistence;
@@ -13,6 +14,8 @@ public sealed class ChogGamesDbContext(DbContextOptions<ChogGamesDbContext> opti
     public DbSet<Player> Players => Set<Player>();
 
     public DbSet<GuestSession> GuestSessions => Set<GuestSession>();
+
+    public DbSet<WalletChallenge> WalletChallenges => Set<WalletChallenge>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

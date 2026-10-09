@@ -4,8 +4,9 @@ import { shortAddress } from './eip1193';
 import { WalletChainApi } from './wallet-chain';
 import { WalletConnection } from './wallet-connection';
 import { WalletDiscovery } from './wallet-discovery';
+import { WalletSignIn } from './wallet-sign-in';
 
-/** Connect / show / switch network / disconnect for a browser wallet (STORY-012). */
+/** Connect / switch network / sign in / sign out / disconnect for a browser wallet (STORY-012, STORY-013). */
 @Component({
   selector: 'app-wallet-panel',
   imports: [LoadingState, ErrorState, EmptyState],
@@ -16,6 +17,7 @@ export class WalletPanel implements OnInit {
   private readonly chainApi = inject(WalletChainApi);
   protected readonly discovery = inject(WalletDiscovery);
   protected readonly wallet = inject(WalletConnection);
+  protected readonly signIn = inject(WalletSignIn);
 
   protected readonly chainState = signal<'loading' | 'ready' | 'error'>('loading');
   protected readonly connected = computed(() => {
