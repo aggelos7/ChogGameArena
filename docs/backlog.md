@@ -54,7 +54,7 @@
 
 #### STORY-002 — Initialize backend solution
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E01
 - **Implementation:** Create `backend/ChogGames.sln` and .NET 8 ASP.NET Core API, Core, Games and Infrastructure projects with dependency direction enforced. Add an explicit Nx backend task wrapper only if it adds value; native .NET commands remain authoritative.
