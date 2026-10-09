@@ -14,7 +14,8 @@
     "test:workspace": "node --test \"tools/**/*.test.mjs\"",
     "deps:up": "docker compose -f infrastructure/docker-compose.yml up -d --wait",
     "deps:down": "docker compose -f infrastructure/docker-compose.yml down",
-    "deps:verify": "node tools/compose-smoke.mjs"
+    "deps:verify": "node tools/compose-smoke.mjs",
+    "db:migrate": "node tools/db-migrate.mjs"
   },
   "dependencies": {
     "@angular/common": "22.2.1",

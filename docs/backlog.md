@@ -106,7 +106,7 @@
 
 #### STORY-006 — Migrations and health checks
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E01
 - **Implementation:** Add EF Core migrations and liveness/readiness endpoints.

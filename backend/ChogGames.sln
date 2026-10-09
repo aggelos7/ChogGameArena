@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Architecture.Test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Infrastructure.Tests", "tests\ChogGames.Infrastructure.Tests\ChogGames.Infrastructure.Tests.csproj", "{FF4F545D-4CC3-4E39-B7D0-E1CF7984E3AB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChogGames.Api.Tests", "tests\ChogGames.Api.Tests\ChogGames.Api.Tests.csproj", "{FD1C554C-5EF4-4176-B88C-63A26927D06F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -58,6 +60,10 @@ Global
 		{FF4F545D-4CC3-4E39-B7D0-E1CF7984E3AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FF4F545D-4CC3-4E39-B7D0-E1CF7984E3AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FF4F545D-4CC3-4E39-B7D0-E1CF7984E3AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD1C554C-5EF4-4176-B88C-63A26927D06F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD1C554C-5EF4-4176-B88C-63A26927D06F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD1C554C-5EF4-4176-B88C-63A26927D06F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD1C554C-5EF4-4176-B88C-63A26927D06F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{429810E1-6A9A-45BD-8A96-3A050BEB2C86} = {E7892233-5A93-489B-805D-BE8297CAA2B8}
@@ -67,5 +73,6 @@ Global
 		{36464B20-7737-4C21-B676-B45DC794D68E} = {E7892233-5A93-489B-805D-BE8297CAA2B8}
 		{9B6B08BD-5BC5-4C29-A448-AD496ECBEEE9} = {B600B434-379B-47A3-9578-8F6A0F395914}
 		{FF4F545D-4CC3-4E39-B7D0-E1CF7984E3AB} = {B600B434-379B-47A3-9578-8F6A0F395914}
+		{FD1C554C-5EF4-4176-B88C-63A26927D06F} = {B600B434-379B-47A3-9578-8F6A0F395914}
 	EndGlobalSection
 EndGlobal

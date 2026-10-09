@@ -100,7 +100,32 @@ Native `dotnet` commands are authoritative; the SDK is pinned in `backend/global
 dotnet build backend/ChogGames.sln   # build all backend projects
 dotnet test backend/ChogGames.sln    # run backend tests, incl. architecture dependency rules
 dotnet run --project backend/src/ChogGames.Api   # API on http://localhost:5248 (needs Database:ConnectionString)
+npm run db:migrate                   # apply EF Core migrations (uses Database__ConnectionString or user-secrets)
 npx nx run backend:test              # same commands via Nx (uncached wrapper)
+```
+
+Health endpoints:
+
+| Endpoint | Checks | Healthy | Unhealthy |
+|---|---|---|---|
+| `GET /health/live` | none (process is running) | `200` | — |
+| `GET /health/ready` | PostgreSQL connection (5 s timeout) | `200` | `503` |
+
+Responses are JSON (`status`, per-check `name`/`status`/`durationMs`) and never include exception details or connection information.
+
+Migrations (EF Core 8, `ChogGames.Infrastructure/Persistence/Migrations`) are applied explicitly, never automatically at startup, so they can be reviewed before deploy. `dotnet-ef` is pinned in `backend/.config/dotnet-tools.json`:
+
+```bash
+cd backend && dotnet tool restore
+dotnet ef migrations add <Name> --project src/ChogGames.Infrastructure --startup-project src/ChogGames.Infrastructure --output-dir Persistence/Migrations
+dotnet ef migrations script --idempotent --project src/ChogGames.Infrastructure --startup-project src/ChogGames.Infrastructure -o migrations.sql
+```
+
+PostgreSQL integration tests (migrations on a fresh database, readiness when healthy) run only when `CHOG_TEST_POSTGRES` holds a connection string for a server whose user can create databases, e.g. the local Compose instance:
+
+```bash
+export CHOG_TEST_POSTGRES="Host=localhost;Port=5432;Database=choggames;Username=choggames;Password=<password>"
+dotnet test backend/ChogGames.sln
 ```
 
 Allowed project references (enforced by `ChogGames.Architecture.Tests`): `Core` → none; `Games.*` and `Infrastructure` → `Core`; `Api` → `Core`, `Infrastructure`, `Games.*`.
