@@ -80,7 +80,7 @@
 
 #### STORY-004 — Docker Compose dependencies
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E01
 - **Implementation:** Provision PostgreSQL and Redis with named volumes and local-only ports.
