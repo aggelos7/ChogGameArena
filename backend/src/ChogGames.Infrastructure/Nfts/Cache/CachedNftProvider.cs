@@ -6,6 +6,7 @@ using ChogGames.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace ChogGames.Infrastructure.Nfts.Cache;
 
@@ -194,9 +195,11 @@ public sealed class CachedNftProvider(
             await db.SaveChangesAsync(cancellationToken);
             return rows;
         }
-        catch (DbUpdateConcurrencyException)
+        catch (DbUpdateException error) when (error is DbUpdateConcurrencyException
+            || error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
-            // Another request updated these tokens meanwhile; show what is stored now.
+            // Another request stored metadata for these tokens meanwhile; show what is stored now. Its trait
+            // inserts may be written before the row version is checked, so this can surface as a duplicate trait.
             db.ChangeTracker.Clear();
             return await LoadAsync([.. rows.Select(r => r.TokenId)], cancellationToken);
         }
