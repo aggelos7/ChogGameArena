@@ -25,6 +25,9 @@ public sealed class FakeMonadRpc(WalletAddress contract, WalletAddress multicall
 
     public List<string> Calls { get; } = [];
 
+    /// <summary>The token URI returned for an existing token.</summary>
+    public Func<BigInteger, string> TokenUri { get; set; } = id => $"ipfs://bafybeid4ybujnscdipkno7ps5utqelp5ry5ryreqhay3zhgk3a6x4jruqu/{id}.json";
+
     public int Count(string kind) => Calls.Count(call => call == kind);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -50,6 +53,20 @@ public sealed class FakeMonadRpc(WalletAddress contract, WalletAddress multicall
             {
                 kind = "multicall";
                 result = "0x" + Convert.ToHexString(EncodeAggregate3Results(DecodeOwnerOfCalls(data, contract))).ToLowerInvariant();
+            }
+            else if (Convert.ToHexString(data[..4]).ToLowerInvariant() == "c87b56dd")
+            {
+                Assert.Equal(contract.Value, to);
+                kind = "tokenURI";
+                var tokenId = Uint(data[4..], 0);
+                if (Owners.ContainsKey(tokenId))
+                {
+                    result = "0x" + EncodeString(TokenUri(tokenId));
+                }
+                else
+                {
+                    error = new JsonObject { ["code"] = 3, ["message"] = "execution reverted" };
+                }
             }
             else
             {
@@ -142,6 +159,13 @@ public sealed class FakeMonadRpc(WalletAddress contract, WalletAddress multicall
         }
 
         return Convert.FromHexString(head + string.Concat(elements));
+    }
+
+    private static string EncodeString(string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var padded = (bytes.Length + 31) / 32 * 32;
+        return Word(32) + Word(bytes.Length) + Hex(bytes) + new string('0', (padded - bytes.Length) * 2);
     }
 
     private static byte[] OwnerWord(WalletAddress owner) => Convert.FromHexString(new string('0', 24) + owner.Value[2..]);

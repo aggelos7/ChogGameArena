@@ -1,5 +1,6 @@
 using ChogGames.Core.Players;
 using ChogGames.Infrastructure.Identity;
+using ChogGames.Infrastructure.Nfts.Cache;
 using ChogGames.Infrastructure.Wallets;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,6 +17,10 @@ public sealed class ChogGamesDbContext(DbContextOptions<ChogGamesDbContext> opti
     public DbSet<GuestSession> GuestSessions => Set<GuestSession>();
 
     public DbSet<WalletChallenge> WalletChallenges => Set<WalletChallenge>();
+
+    public DbSet<ChogNft> ChogNfts => Set<ChogNft>();
+
+    public DbSet<NftOwnershipScan> NftOwnershipScans => Set<NftOwnershipScan>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

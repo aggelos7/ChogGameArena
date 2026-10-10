@@ -18,6 +18,7 @@ public class MonadNftOptionsTests
             FirstTokenId = 1,
             LastTokenId = 1969,
         },
+        Ipfs = { Gateways = ["https://gateway.example/ipfs/", "https://dedicated.example/key-abc/ipfs/"] },
     };
 
     private static string? Validate(NftOptions options) =>
@@ -79,5 +80,44 @@ public class MonadNftOptionsTests
         options.Monad.RpcUrl = "http://127.0.0.1:8545";
 
         Assert.Null(Validate(options));
+    }
+
+    public static TheoryData<string, Action<NftOptions>> InvalidIpfsAndCache => new()
+    {
+        { "'Nfts:Ipfs:Gateways' must list", o => o.Ipfs.Gateways = [] },
+        { "'Nfts:Ipfs:Gateways:1'", o => o.Ipfs.Gateways[1] = "http://gateway.example/ipfs/" },
+        { "'Nfts:Ipfs:Gateways:0'", o => o.Ipfs.Gateways[0] = "https://gateway.example/" },
+        { "'Nfts:Ipfs:Gateways:0'", o => o.Ipfs.Gateways[0] = "https://gateway.example/ipfs/?key=secret" },
+        { "'Nfts:Ipfs:Gateways:0'", o => o.Ipfs.Gateways[0] = "https://user:secret@gateway.example/ipfs/" },
+        { "'Nfts:Ipfs:RequestTimeout'", o => o.Ipfs.RequestTimeout = TimeSpan.Zero },
+        { "'Nfts:Cache:OwnershipFallback'", o => o.Cache.OwnershipFallback = TimeSpan.FromHours(2) },
+        { "'Nfts:Cache:OwnershipFallback'", o => o.Cache.OwnershipFallback = TimeSpan.FromSeconds(-1) },
+        { "'Nfts:Cache:MetadataRefreshInterval'", o => o.Cache.MetadataRefreshInterval = TimeSpan.Zero },
+        { "'Nfts:Cache:MetadataRetryInterval'", o => o.Cache.MetadataRetryInterval = TimeSpan.FromSeconds(1) },
+        { "'Nfts:Cache:MetadataRetryInterval'", o => o.Cache.MetadataRetryInterval = TimeSpan.FromDays(8) },
+        { "'Nfts:Cache:MetadataFetchBudget'", o => o.Cache.MetadataFetchBudget = TimeSpan.FromMinutes(1) },
+        { "'Nfts:Cache:MaxConcurrentMetadataFetches'", o => o.Cache.MaxConcurrentMetadataFetches = 0 },
+        { "'Nfts:Cache:MaxConcurrentMetadataFetches'", o => o.Cache.MaxConcurrentMetadataFetches = 17 },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidIpfsAndCache))]
+    public void Invalid_gateway_and_cache_settings_are_refused_without_echoing_urls(string setting, Action<NftOptions> change)
+    {
+        var options = Valid();
+        change(options);
+
+        var failure = Validate(options);
+
+        Assert.NotNull(failure);
+        Assert.Contains(setting, failure);
+        Assert.DoesNotContain("secret", failure);
+        Assert.DoesNotContain("key-abc", failure);
+    }
+
+    [Fact]
+    public void Gateway_and_cache_settings_are_ignored_by_other_providers()
+    {
+        Assert.Null(Validate(new NftOptions { Provider = NftProviderKind.None, Cache = { MaxConcurrentMetadataFetches = 0 } }));
     }
 }

@@ -248,7 +248,7 @@
 
 #### STORY-016 — NFT metadata normalization and cache
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E03
 - **Implementation:** Persist token ID, collection, image URI, trait type/value, owner and refresh timestamp.

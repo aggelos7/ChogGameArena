@@ -1,6 +1,6 @@
 using ChogGames.Core.Nfts;
 using ChogGames.Infrastructure.Nfts;
-using ChogGames.Infrastructure.Nfts.Monad;
+using ChogGames.Infrastructure.Nfts.Cache;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -15,8 +15,11 @@ public class NftProviderRegistrationTests
         await using var factory = new ApiFactory(ApiFactory.UnusedDatabase);
 
         var options = factory.Services.GetRequiredService<IOptions<NftOptions>>().Value;
+        using var scope = factory.Services.CreateScope();
 
-        Assert.IsType<MonadNftProvider>(factory.Services.GetRequiredService<INftProvider>());
+        // The chain provider is wrapped by the database-backed cache (STORY-016).
+        Assert.IsType<CachedNftProvider>(scope.ServiceProvider.GetRequiredService<INftProvider>());
+        Assert.Equal(["https://gateway.pinata.cloud/ipfs/"], options.Ipfs.Gateways);
         Assert.Equal(NftProviderKind.Monad, options.Provider);
         Assert.Equal("https://rpc.monad.xyz", options.Monad.RpcUrl);
         Assert.Equal(143, options.Monad.ChainId);
@@ -72,7 +75,8 @@ public class NftProviderRegistrationTests
 
         using var client = production.CreateClient();
 
-        Assert.IsType<MonadNftProvider>(production.Services.GetRequiredService<INftProvider>());
+        using var scope = production.Services.CreateScope();
+        Assert.IsType<CachedNftProvider>(scope.ServiceProvider.GetRequiredService<INftProvider>());
     }
 
     [Fact]

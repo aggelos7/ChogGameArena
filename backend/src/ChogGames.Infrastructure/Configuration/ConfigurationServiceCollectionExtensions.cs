@@ -2,6 +2,8 @@ using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Nfts;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Nfts;
+using ChogGames.Infrastructure.Nfts.Cache;
+using ChogGames.Infrastructure.Nfts.Metadata;
 using ChogGames.Infrastructure.Nfts.Monad;
 using ChogGames.Infrastructure.Persistence;
 using ChogGames.Infrastructure.Wallets;
@@ -67,11 +69,20 @@ public static class ConfigurationServiceCollectionExtensions
             client.BaseAddress = new Uri(monad.RpcUrl);
             client.Timeout = monad.RequestTimeout;
         });
-        services.AddSingleton<INftProvider>(provider =>
+        services.AddHttpClient(IpfsNftMetadataSource.HttpClientName, (provider, client) =>
+                client.Timeout = provider.GetRequiredService<IOptions<NftOptions>>().Value.Ipfs.RequestTimeout)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddSingleton<MockNftProvider>();
+        services.AddSingleton<MonadNftProvider>();
+        services.AddSingleton<ITokenUriReader>(provider => provider.GetRequiredService<MonadNftProvider>());
+        services.AddSingleton<INftMetadataSource, IpfsNftMetadataSource>();
+        // Scoped: the Monad provider is wrapped by the database-backed cache (STORY-016).
+        services.AddScoped<INftProvider>(provider =>
             provider.GetRequiredService<IOptions<NftOptions>>().Value.Provider switch
             {
-                NftProviderKind.Mock => ActivatorUtilities.CreateInstance<MockNftProvider>(provider),
-                NftProviderKind.Monad => ActivatorUtilities.CreateInstance<MonadNftProvider>(provider),
+                NftProviderKind.Mock => provider.GetRequiredService<MockNftProvider>(),
+                NftProviderKind.Monad => ActivatorUtilities.CreateInstance<CachedNftProvider>(
+                    provider, provider.GetRequiredService<MonadNftProvider>()),
                 _ => new UnconfiguredNftProvider(),
             });
 
