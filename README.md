@@ -198,9 +198,28 @@ How the Monad provider reads ownership:
 - **Listing:** the collection isn't ERC-721 Enumerable, and the public RPC limits log queries to 100 blocks. The provider therefore reads `ownerOf` for every token in the range through Multicall3: 4 read-only calls, about 0.6 s. Wallets are matched against that scan, which is reused for 30 s.
 - **Single-token checks** (for match admission) call `ownerOf` on the Chog contract directly every time and never use the scan.
 - **Failures:** RPC errors, timeouts, rate limits, malformed answers or a wrong chain raise `NftProviderUnavailableException`. They never report "owns nothing" or "owns it".
-- **Metadata:** images and traits come with STORY-016; until then, tokens are named `Chog #<id>`.
 
-To read the real chain locally, run `dotnet user-secrets set "Nfts:Provider" "Monad" --project backend/src/ChogGames.Api`. Two live tests (`MonadLiveTests`) run only when `CHOG_TEST_MONAD_RPC` is set, e.g. `CHOG_TEST_MONAD_RPC=https://rpc.monad.xyz`.
+Stored ownership and metadata (STORY-016, DEC-016): with `Monad`, answers are saved in PostgreSQL and metadata is added.
+- **Tables:** `ChogNfts` holds the owner and when it was checked, plus metadata status, name and `ipfs://` image. `ChogNftTraits` holds traits in order. `NftOwnershipScans` records each wallet's last successful scan.
+- **Owners:** every live answer is saved. A token that left a wallet loses its stored owner, and older writes never overwrite newer ones.
+- **Metadata:** `tokenURI` is read on chain. Only `ipfs://` URIs are followed, through the configured gateways in order, with no redirects and at most 64 KiB.
+  - Normalization keeps any trait type and value; numbers and booleans become text, and unusable entries are skipped. An unsafe or missing image becomes no image, and a document that isn't a JSON object is stored as `Invalid`.
+  - A request fetches missing or stale metadata for at most `MetadataFetchBudget`. Tokens not reached show as `Chog #<id>` without an image and are filled in by a later request. Bad metadata never fails a request.
+  - Metadata is read again weekly; outages are retried after 5 minutes. An outage never erases metadata that was already read.
+- **RPC outage:** a wallet's list comes from its stored scan if that scan is at most `OwnershipFallback` old. Otherwise the request fails as unavailable. A wallet that was never scanned is never reported as owning nothing, and single-token checks never use stored ownership.
+- **Images:** browsers receive image URLs through the first gateway.
+
+| Setting (`Nfts:`) | Default | |
+|---|---|---|
+| `Ipfs:Gateways` | `https://gateway.pinata.cloud/ipfs/` | gateway bases ending in `/ipfs/`, tried in order; a dedicated gateway URL with a key belongs in secrets and is never logged |
+| `Ipfs:RequestTimeout` | `00:00:10` | per gateway request |
+| `Cache:OwnershipFallback` | `00:10:00` | 0 – 1 h |
+| `Cache:MetadataRefreshInterval` | `7.00:00:00` | |
+| `Cache:MetadataRetryInterval` | `00:05:00` | after a gateway or RPC outage |
+| `Cache:MetadataFetchBudget` | `00:00:05` | metadata time per request |
+| `Cache:MaxConcurrentMetadataFetches` | `4` | |
+
+To read the real chain locally, run `dotnet user-secrets set "Nfts:Provider" "Monad" --project backend/src/ChogGames.Api`. Live tests (`MonadLiveTests`) run only when `CHOG_TEST_MONAD_RPC` is set, e.g. `CHOG_TEST_MONAD_RPC=https://rpc.monad.xyz`; the metadata one also needs `CHOG_TEST_POSTGRES`.
 
 The mock provider needs no RPC or network; images are inline SVG. Its fixture wallets (`MockNftFixtures`) are made-up addresses:
 

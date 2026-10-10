@@ -275,6 +275,26 @@ public sealed class MonadNftProviderTests : IDisposable
         Assert.Empty(rpc.Calls);
     }
 
+    [Fact]
+    public async Task Token_uri_is_read_from_the_contract()
+    {
+        Assert.Equal(
+            "ipfs://bafybeid4ybujnscdipkno7ps5utqelp5ry5ryreqhay3zhgk3a6x4jruqu/3.json",
+            await provider.GetTokenUriAsync(NftTokenId.From(3), CancellationToken.None));
+        Assert.Null(await provider.GetTokenUriAsync(NftTokenId.From(10), CancellationToken.None));
+        Assert.Null(await provider.GetTokenUriAsync(NftTokenId.From(11), CancellationToken.None));
+        Assert.Equal(2, rpc.Count("tokenURI"));
+    }
+
+    [Fact]
+    public async Task Token_uri_outage_is_a_controlled_error()
+    {
+        await Find(Alice, 3);
+        rpc.Override = _ => FakeMonadRpc.Json("{}", HttpStatusCode.ServiceUnavailable);
+
+        await Assert.ThrowsAsync<NftProviderUnavailableException>(() => provider.GetTokenUriAsync(NftTokenId.From(3), CancellationToken.None));
+    }
+
     private sealed class Clock : TimeProvider
     {
         private DateTimeOffset now = new(2026, 10, 10, 0, 0, 0, TimeSpan.Zero);

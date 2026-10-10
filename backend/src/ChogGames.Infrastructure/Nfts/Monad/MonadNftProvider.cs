@@ -1,5 +1,6 @@
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Wallets;
+using ChogGames.Infrastructure.Nfts.Metadata;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,7 +17,7 @@ public sealed class MonadNftProvider(
     IHttpClientFactory httpClients,
     IOptions<NftOptions> options,
     TimeProvider timeProvider,
-    ILogger<MonadNftProvider> logger) : INftProvider, IDisposable
+    ILogger<MonadNftProvider> logger) : INftProvider, ITokenUriReader, IDisposable
 {
     private const string UnavailableMessage = "NFT ownership could not be read from Monad.";
 
@@ -57,6 +58,26 @@ public sealed class MonadNftProvider(
             }
 
             return ChogContractAbi.DecodeOwner(result) == owner ? ToNft(tokenId) : null;
+        }, cancellationToken);
+    }
+
+    public async Task<string?> GetTokenUriAsync(NftTokenId tokenId, CancellationToken cancellationToken)
+    {
+        if (tokenId.Value < Settings.FirstTokenId || tokenId.Value > Settings.LastTokenId)
+        {
+            return null;
+        }
+
+        return await ReadAsync(async rpc =>
+        {
+            try
+            {
+                return ChogContractAbi.DecodeString(await rpc.CallAsync(Contract, ChogContractAbi.EncodeTokenUri(tokenId), cancellationToken));
+            }
+            catch (RpcRevertedException)
+            {
+                return null;
+            }
         }, cancellationToken);
     }
 

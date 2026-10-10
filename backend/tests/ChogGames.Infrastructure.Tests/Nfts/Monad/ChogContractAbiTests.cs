@@ -117,4 +117,49 @@ public class ChogContractAbiTests
         Assert.Equal(["0", "42", ulong.MaxValue.ToString()], FakeMonadRpc.DecodeOwnerOfCalls(data, Contract).Select(id => id.ToString()));
         Assert.Equal(Word(42), Convert.ToHexString(ChogContractAbi.EncodeOwnerOf(NftTokenId.From(42))[4..]).ToLowerInvariant());
     }
+
+    // Real Monad Mainnet answer to tokenURI(1) on 2026-10-10.
+    private const string TokenUriAnswer = "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000004c697066733a2f2f6261667962656964347962756a6e73636469706b6e6f37707335757471656c70357279357279726571686179337a68676b33613678346a727571752f313436322e6a736f6e0000000000000000000000000000000000000000";
+
+    [Fact]
+    public void Encodes_token_uri()
+    {
+        Assert.Equal(
+            "c87b56dd" + new string('0', 63) + "1",
+            Convert.ToHexString(ChogContractAbi.EncodeTokenUri(NftTokenId.From(1))).ToLowerInvariant());
+    }
+
+    [Fact]
+    public void Decodes_a_real_token_uri()
+    {
+        Assert.Equal(
+            "ipfs://bafybeid4ybujnscdipkno7ps5utqelp5ry5ryreqhay3zhgk3a6x4jruqu/1462.json",
+            ChogContractAbi.DecodeString(Hex(TokenUriAnswer)));
+    }
+
+    [Fact]
+    public void Truncated_or_oversized_strings_are_rejected()
+    {
+        var answer = Hex(TokenUriAnswer);
+        Assert.Throws<AbiDecodingException>(() => ChogContractAbi.DecodeString(answer[..100]));
+
+        var tooLong = new byte[64 + ChogContractAbi.MaxStringLength + 32];
+        tooLong[31] = 0x20;
+        var length = ChogContractAbi.MaxStringLength + 1;
+        tooLong[62] = (byte)(length >> 8);
+        tooLong[63] = (byte)length;
+        Assert.Throws<AbiDecodingException>(() => ChogContractAbi.DecodeString(tooLong));
+    }
+
+    [Fact]
+    public void Invalid_utf8_is_rejected()
+    {
+        var data = new byte[96];
+        data[31] = 0x20;
+        data[63] = 2;
+        data[64] = 0xc3;
+        data[65] = 0x28;
+
+        Assert.Throws<AbiDecodingException>(() => ChogContractAbi.DecodeString(data));
+    }
 }

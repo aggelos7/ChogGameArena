@@ -29,6 +29,10 @@ public sealed class NftOptions
     public MockNftOptions Mock { get; set; } = new();
 
     public MonadNftOptions Monad { get; set; } = new();
+
+    public IpfsOptions Ipfs { get; set; } = new();
+
+    public NftCacheOptions Cache { get; set; } = new();
 }
 
 /// <summary>Mock provider settings (<c>Nfts:Mock</c>).</summary>
@@ -71,4 +75,37 @@ public sealed class MonadNftOptions
     public TimeSpan OwnershipCacheDuration { get; set; } = TimeSpan.FromSeconds(30);
 
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(10);
+}
+
+/// <summary>IPFS gateway settings (<c>Nfts:Ipfs</c>) for metadata and image URLs.</summary>
+public sealed class IpfsOptions
+{
+    /// <summary>
+    /// Gateway bases ending in <c>/ipfs/</c>, tried in order for metadata; the first also serves image URLs to
+    /// browsers. A dedicated gateway with a key belongs in secrets.
+    /// </summary>
+    public List<string> Gateways { get; set; } = [];
+
+    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(10);
+}
+
+/// <summary>Stored NFT ownership and metadata settings (<c>Nfts:Cache</c>), used with the Monad provider.</summary>
+public sealed class NftCacheOptions
+{
+    /// <summary>
+    /// While the chain cannot be read, a wallet's list may come from its last stored scan if it is at most this old
+    /// (NFT-003). Never used for single-token checks.
+    /// </summary>
+    public TimeSpan OwnershipFallback { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Metadata that was read (or found invalid) is read again after this long.</summary>
+    public TimeSpan MetadataRefreshInterval { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>Metadata that could not be read because of an outage is retried after this long.</summary>
+    public TimeSpan MetadataRetryInterval { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Time one request may spend fetching metadata; the rest is fetched by later requests.</summary>
+    public TimeSpan MetadataFetchBudget { get; set; } = TimeSpan.FromSeconds(5);
+
+    public int MaxConcurrentMetadataFetches { get; set; } = 4;
 }
