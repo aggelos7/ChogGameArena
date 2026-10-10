@@ -222,7 +222,7 @@
 
 #### STORY-014 — Mock NFT provider
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E03
 - **Implementation:** Implement INftProvider with deterministic local fixtures for zero, one and multiple NFTs.

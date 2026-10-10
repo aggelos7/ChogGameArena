@@ -1,5 +1,7 @@
 using ChogGames.Infrastructure.Health;
+using ChogGames.Core.Nfts;
 using ChogGames.Infrastructure.Identity;
+using ChogGames.Infrastructure.Nfts;
 using ChogGames.Infrastructure.Persistence;
 using ChogGames.Infrastructure.Wallets;
 using Microsoft.EntityFrameworkCore;
@@ -53,6 +55,17 @@ public static class ConfigurationServiceCollectionExtensions
             .Bind(configuration.GetSection(WalletAuthOptions.SectionName))
             .ValidateOnStart();
         services.AddScoped<WalletSignInService>();
+
+        services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
+        services.AddOptions<NftOptions>()
+            .Bind(configuration.GetSection(NftOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<INftProvider>(provider =>
+            provider.GetRequiredService<IOptions<NftOptions>>().Value.Provider switch
+            {
+                NftProviderKind.Mock => ActivatorUtilities.CreateInstance<MockNftProvider>(provider),
+                _ => new UnconfiguredNftProvider(),
+            });
 
         services.AddHealthChecks()
             .AddCheck<DatabaseHealthCheck>(DatabaseHealthCheck.Name, tags: [ReadinessTag], timeout: DatabaseHealthCheckTimeout);

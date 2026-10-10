@@ -177,6 +177,24 @@ On success the session cookie is replaced; the old cookie stops working. Each ch
 
 Every deployment must set `WalletAuth:Domain` and `Uri` to the address users open; the API refuses to start without them. Wallets show this domain and warn when it doesn't match the page.
 
+NFT ownership (STORY-014, ADR-006): server code reads Chog NFTs through `INftProvider` (Core). It lists a wallet's NFTs, or checks whether a wallet owns one token. Callers pass only the server-verified wallet address from the session, never one from a request. Tokens are normalized: a canonical uint256 id, a name, an optional image (`null` when unusable) and any trait types and values, known or not. There are no NFT endpoints yet.
+
+| Setting (`Nfts:`) | Default | |
+|---|---|---|
+| `Provider` | `None` | `None`: every lookup fails as unavailable, so ownership is never assumed. `Mock`: offline fixtures, set in `appsettings.Development.json`; the API refuses to start with `Mock` in Production |
+| `Mock:OtherWallets` | `Many` | what any non-fixture wallet (e.g. your own signed-in wallet) owns under `Mock`: `None`, `One` or `Many` |
+
+The mock provider needs no RPC or network; images are inline SVG. Its fixture wallets (`MockNftFixtures`) are made-up addresses:
+
+| Wallet | Owns |
+|---|---|
+| `0x…c000` | nothing |
+| `0x…c001` | token 1 |
+| `0x…c002` | tokens 7, 42 (no image), 108 (unknown and non-ASCII traits, maximum-length value) and 1969 (no traits) |
+| `0x…c003` | every lookup fails as if the RPC were down |
+
+Mock ownership isn't exclusive: every other wallet reports the same fixture tokens.
+
 Health endpoints:
 
 | Endpoint | Checks | Healthy | Unhealthy |
