@@ -2,6 +2,7 @@ using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Nfts;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Nfts;
+using ChogGames.Infrastructure.Nfts.Monad;
 using ChogGames.Infrastructure.Persistence;
 using ChogGames.Infrastructure.Wallets;
 using Microsoft.EntityFrameworkCore;
@@ -60,10 +61,17 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddOptions<NftOptions>()
             .Bind(configuration.GetSection(NftOptions.SectionName))
             .ValidateOnStart();
+        services.AddHttpClient(MonadRpcClient.HttpClientName, (provider, client) =>
+        {
+            var monad = provider.GetRequiredService<IOptions<NftOptions>>().Value.Monad;
+            client.BaseAddress = new Uri(monad.RpcUrl);
+            client.Timeout = monad.RequestTimeout;
+        });
         services.AddSingleton<INftProvider>(provider =>
             provider.GetRequiredService<IOptions<NftOptions>>().Value.Provider switch
             {
                 NftProviderKind.Mock => ActivatorUtilities.CreateInstance<MockNftProvider>(provider),
+                NftProviderKind.Monad => ActivatorUtilities.CreateInstance<MonadNftProvider>(provider),
                 _ => new UnconfiguredNftProvider(),
             });
 

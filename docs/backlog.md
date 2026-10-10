@@ -235,7 +235,7 @@
 
 #### STORY-015 — Monad NFT ownership provider
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E03
 - **Implementation:** Configure official contract and RPC/indexer adapter; validate ownership server-side.

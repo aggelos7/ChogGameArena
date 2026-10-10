@@ -143,13 +143,15 @@ Wallet connection (STORY-012, DEC-014): the Profile page's Wallet section discov
 |---|---|
 | `GET /api/wallet/chain` | `200 { chainId, name, nativeCurrency: { name, symbol, decimals }, rpcUrls, blockExplorerUrls }`; no session needed |
 
-| Setting (`Wallet:Chain:`) | Default (`appsettings.json`) | Development |
-|---|---|---|
-| `ChainId` | `143` (Monad Mainnet) | `10143` (Monad Testnet) |
-| `Name` | `Monad Mainnet` | `Monad Testnet` |
-| `CurrencyName` / `CurrencySymbol` / `CurrencyDecimals` | `Monad` / `MON` / `18` | |
-| `RpcUrls` | `https://rpc.monad.xyz` | `https://testnet-rpc.monad.xyz` |
-| `BlockExplorerUrls` | `https://monadvision.com` | `https://testnet.monadvision.com` |
+| Setting (`Wallet:Chain:`) | Default (`appsettings.json`, all environments) |
+|---|---|
+| `ChainId` | `143` (Monad Mainnet) |
+| `Name` | `Monad Mainnet` |
+| `CurrencyName` / `CurrencySymbol` / `CurrencyDecimals` | `Monad` / `MON` / `18` |
+| `RpcUrls` | `https://rpc.monad.xyz` |
+| `BlockExplorerUrls` | `https://monadvision.com` |
+
+Development uses Monad Mainnet too, because Chog NFTs exist only there. Sign-in is a free signature and the app never sends transactions.
 
 These values are sent to browsers, so URLs must be public `https://` addresses; credentials and query strings are rejected at startup. Never put a keyed RPC provider URL here. Lists override by index, so keep the same number of entries per environment or override every index.
 
@@ -177,12 +179,28 @@ On success the session cookie is replaced; the old cookie stops working. Each ch
 
 Every deployment must set `WalletAuth:Domain` and `Uri` to the address users open; the API refuses to start without them. Wallets show this domain and warn when it doesn't match the page.
 
-NFT ownership (STORY-014, ADR-006): server code reads Chog NFTs through `INftProvider` (Core). It lists a wallet's NFTs, or checks whether a wallet owns one token. Callers pass only the server-verified wallet address from the session, never one from a request. Tokens are normalized: a canonical uint256 id, a name, an optional image (`null` when unusable) and any trait types and values, known or not. There are no NFT endpoints yet.
+NFT ownership (STORY-014/015, ADR-006, DEC-001): server code reads Chog NFTs through `INftProvider` (Core). It lists a wallet's NFTs, or checks whether a wallet owns one token. Callers pass only the server-verified wallet address from the session, never one from a request. Tokens are normalized: a canonical uint256 id, a name, an optional image (`null` when unusable) and any trait types and values, known or not. There are no NFT endpoints yet.
 
-| Setting (`Nfts:`) | Default | |
+| Setting (`Nfts:`) | Default (`appsettings.json`) | |
 |---|---|---|
-| `Provider` | `None` | `None`: every lookup fails as unavailable, so ownership is never assumed. `Mock`: offline fixtures, set in `appsettings.Development.json`; the API refuses to start with `Mock` in Production |
+| `Provider` | `Monad` | `Monad`: reads the chain (below). `Mock`: offline fixtures, set in `appsettings.Development.json`; refused in Production. `None`: every lookup fails as unavailable, so ownership is never assumed |
 | `Mock:OtherWallets` | `Many` | what any non-fixture wallet (e.g. your own signed-in wallet) owns under `Mock`: `None`, `One` or `Many` |
+| `Monad:RpcUrl` | `https://rpc.monad.xyz` | JSON-RPC endpoint; a keyed provider URL belongs in user-secrets or environment variables, never in git. It is never logged |
+| `Monad:ChainId` | `143` | the endpoint must report this chain before any answer is used |
+| `Monad:ContractAddress` | `0xc96d31f8626c6d03fae5dcd3d61e3fb9f4a73763` | official Chog collection (DEC-001) |
+| `Monad:Multicall3Address` | `0xcA11bde05977b3631167028862bE2a173976CA11` | standard Multicall3 deployment, used only for listing |
+| `Monad:FirstTokenId` / `LastTokenId` | `1` / `1969` | token range that is scanned |
+| `Monad:BatchSize` | `500` | `ownerOf` calls per Multicall3 request |
+| `Monad:OwnershipCacheDuration` | `00:00:30` | how long a listing scan is reused (0–10 min) |
+| `Monad:RequestTimeout` | `00:00:10` | per RPC request (1 s – 1 min) |
+
+How the Monad provider reads ownership:
+- **Listing:** the collection isn't ERC-721 Enumerable, and the public RPC limits log queries to 100 blocks. The provider therefore reads `ownerOf` for every token in the range through Multicall3: 4 read-only calls, about 0.6 s. Wallets are matched against that scan, which is reused for 30 s.
+- **Single-token checks** (for match admission) call `ownerOf` on the Chog contract directly every time and never use the scan.
+- **Failures:** RPC errors, timeouts, rate limits, malformed answers or a wrong chain raise `NftProviderUnavailableException`. They never report "owns nothing" or "owns it".
+- **Metadata:** images and traits come with STORY-016; until then, tokens are named `Chog #<id>`.
+
+To read the real chain locally, run `dotnet user-secrets set "Nfts:Provider" "Monad" --project backend/src/ChogGames.Api`. Two live tests (`MonadLiveTests`) run only when `CHOG_TEST_MONAD_RPC` is set, e.g. `CHOG_TEST_MONAD_RPC=https://rpc.monad.xyz`.
 
 The mock provider needs no RPC or network; images are inline SVG. Its fixture wallets (`MockNftFixtures`) are made-up addresses:
 
