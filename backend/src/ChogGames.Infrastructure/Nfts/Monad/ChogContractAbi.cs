@@ -19,6 +19,12 @@ public static class ChogContractAbi
     /// <summary><c>ownerOf(uint256)</c>.</summary>
     private static readonly byte[] OwnerOfSelector = [0x63, 0x52, 0x21, 0x1e];
 
+    /// <summary><c>tokenURI(uint256)</c>.</summary>
+    private static readonly byte[] TokenUriSelector = [0xc8, 0x7b, 0x56, 0xdd];
+
+    /// <summary>Longest token URI accepted.</summary>
+    public const int MaxStringLength = 2048;
+
     /// <summary><c>aggregate3((address,bool,bytes)[])</c>.</summary>
     private static readonly byte[] Aggregate3Selector = [0x82, 0xad, 0x56, 0xcb];
 
@@ -28,6 +34,35 @@ public static class ChogContractAbi
         OwnerOfSelector.CopyTo(data, 0);
         WriteUint(data.AsSpan(4, Word), tokenId.Value);
         return data;
+    }
+
+    public static byte[] EncodeTokenUri(NftTokenId tokenId)
+    {
+        var data = new byte[4 + Word];
+        TokenUriSelector.CopyTo(data, 0);
+        WriteUint(data.AsSpan(4, Word), tokenId.Value);
+        return data;
+    }
+
+    /// <summary>Decodes an ABI <c>string</c> return value as strict UTF-8.</summary>
+    public static string DecodeString(ReadOnlySpan<byte> returnData)
+    {
+        var value = Slice(returnData, ReadLength(returnData, 0), returnData.Length);
+        var length = ReadLength(value, 0);
+        if (length > MaxStringLength)
+        {
+            throw new AbiDecodingException("ABI string is too long.");
+        }
+
+        var bytes = Slice(value, Word, Word + length)[..length];
+        try
+        {
+            return new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            throw new AbiDecodingException("ABI string is not valid UTF-8.");
+        }
     }
 
     /// <summary>The owner returned by <c>ownerOf</c>; null for the zero address.</summary>

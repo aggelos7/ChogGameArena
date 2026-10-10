@@ -42,4 +42,10 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
     - The signer is recovered from the stored message with EIP-191, secp256k1 and keccak-256. High-s signatures are rejected.
   - **Wallet types:** only regular (EOA) wallets are supported. Smart-contract wallets (ERC-1271) fail safely and can be added later with an RPC check.
   - **New dependency:** BouncyCastle.Cryptography 2.7.0 (MIT), for keccak-256 and secp256k1 only; recovery is our code, tested against published vectors.
+- DEC-016 (2026-10-10, STORY-016 — confirmed by product owner): NFT metadata source and stored ownership.
+  - **Gateway:** metadata and images are read through IPFS gateways from configuration (`Nfts:Ipfs:Gateways`), tried in order. The default is Pinata's public gateway. On 2026-10-10 it was the only public gateway still serving the collection: ipfs.io and dweb.link answer 429, cloudflare-ipfs is gone, and the others redirect to those. A dedicated gateway can be added via secrets, with no code change. Only `ipfs://` URIs are followed and redirects are not, so the collection can't direct server requests to other hosts.
+  - **Fetching:** metadata is fetched on demand, when a wallet's tokens are listed or checked, within a per-request time budget. It's stored and read again weekly; outages are retried after 5 minutes. There's no background prefetch job.
+  - **Outage fallback (NFT-003):** listing may use a wallet's stored scan for up to 10 minutes while the chain can't be read. Match admission (single-token checks) always reads the chain.
+  - **Metadata facts:** names are those of the shuffled metadata files, e.g. token 1 is "CHOG #1462". There are 12 traits (Background, Base, Skin, Side, Body, Mouth, Eyes, Head, Accessory, Form, Tier, Naked) and a `.webp` image of about 300 KB.
+  - Image hosting and artwork rights remain DEC-005.
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.

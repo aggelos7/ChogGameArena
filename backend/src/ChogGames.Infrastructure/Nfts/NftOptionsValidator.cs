@@ -32,6 +32,8 @@ public sealed class NftOptionsValidator(IHostEnvironment environment) : IValidat
         if (options.Provider == NftProviderKind.Monad)
         {
             ValidateMonad(options.Monad, errors);
+            ValidateIpfs(options.Ipfs, errors);
+            ValidateCache(options.Cache, errors);
         }
 
         return errors.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(errors);
@@ -84,6 +86,66 @@ public sealed class NftOptionsValidator(IHostEnvironment environment) : IValidat
         if (monad.RequestTimeout < TimeSpan.FromSeconds(1) || monad.RequestTimeout > TimeSpan.FromMinutes(1))
         {
             errors.Add($"'{section}:RequestTimeout' must be between 00:00:01 and 00:01:00.");
+        }
+    }
+
+    private static void ValidateIpfs(IpfsOptions ipfs, List<string> errors)
+    {
+        const string section = $"{Section}:Ipfs";
+
+        if (ipfs.Gateways.Count == 0)
+        {
+            errors.Add($"'{section}:Gateways' must list at least one gateway.");
+        }
+
+        for (var i = 0; i < ipfs.Gateways.Count; i++)
+        {
+            // Not echoed back: a dedicated gateway URL may carry a key.
+            var valid = Uri.TryCreate(ipfs.Gateways[i], UriKind.Absolute, out var url)
+                && (url.Scheme == Uri.UriSchemeHttps || (url.Scheme == Uri.UriSchemeHttp && url.IsLoopback))
+                && url.UserInfo.Length == 0
+                && url.Query.Length == 0
+                && url.Fragment.Length == 0
+                && url.AbsolutePath.EndsWith("/ipfs/", StringComparison.Ordinal);
+            if (!valid)
+            {
+                errors.Add($"'{section}:Gateways:{i}' must be an https:// gateway base ending in '/ipfs/' (http only for localhost), without query or user info.");
+            }
+        }
+
+        if (ipfs.RequestTimeout < TimeSpan.FromSeconds(1) || ipfs.RequestTimeout > TimeSpan.FromMinutes(1))
+        {
+            errors.Add($"'{section}:RequestTimeout' must be between 00:00:01 and 00:01:00.");
+        }
+    }
+
+    private static void ValidateCache(NftCacheOptions cache, List<string> errors)
+    {
+        const string section = $"{Section}:Cache";
+
+        if (cache.OwnershipFallback < TimeSpan.Zero || cache.OwnershipFallback > TimeSpan.FromHours(1))
+        {
+            errors.Add($"'{section}:OwnershipFallback' must be between 00:00:00 and 01:00:00.");
+        }
+
+        if (cache.MetadataRefreshInterval < TimeSpan.FromMinutes(1) || cache.MetadataRefreshInterval > TimeSpan.FromDays(365))
+        {
+            errors.Add($"'{section}:MetadataRefreshInterval' must be between 00:01:00 and 365.00:00:00.");
+        }
+
+        if (cache.MetadataRetryInterval < TimeSpan.FromSeconds(10) || cache.MetadataRetryInterval > cache.MetadataRefreshInterval)
+        {
+            errors.Add($"'{section}:MetadataRetryInterval' must be at least 00:00:10 and at most MetadataRefreshInterval.");
+        }
+
+        if (cache.MetadataFetchBudget < TimeSpan.Zero || cache.MetadataFetchBudget > TimeSpan.FromSeconds(30))
+        {
+            errors.Add($"'{section}:MetadataFetchBudget' must be between 00:00:00 and 00:00:30.");
+        }
+
+        if (cache.MaxConcurrentMetadataFetches is < 1 or > 16)
+        {
+            errors.Add($"'{section}:MaxConcurrentMetadataFetches' must be between 1 and 16.");
         }
     }
 }
