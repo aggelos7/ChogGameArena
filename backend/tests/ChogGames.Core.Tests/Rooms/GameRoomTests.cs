@@ -89,4 +89,187 @@ public class GameRoomTests
     {
         Assert.Throws<ArgumentException>(() => GameDefinition.Create(id, 2, 6));
     }
+
+    private static GameRoom RoomOf(Player host, params Player[] others)
+    {
+        var room = NewRoom(host);
+        foreach (var other in others)
+        {
+            room.Join(other, Now);
+        }
+
+        return room;
+    }
+
+    private static Player Choosing(string chogId)
+    {
+        var player = Guest();
+        Assert.True(DefaultAvatar.TryFind(chogId, out var chog));
+        player.SelectStandardCharacter(chog);
+        return player;
+    }
+
+    [Fact]
+    public void Minimum_players_come_from_the_game_definition()
+    {
+        Assert.True(RoomCode.TryParse("K7QF3M", out var code));
+
+        var room = GameRoom.Create(GameDefinition.Create("chog-trio", 3, 6), Guest(), code, Now);
+
+        Assert.Equal(3, room.MinPlayers);
+        Assert.Null(room.StartedAt);
+    }
+
+    [Fact]
+    public void Ready_is_for_the_chog_selected_when_marking_ready()
+    {
+        var host = Choosing("mint");
+        var room = NewRoom(host);
+        var member = Assert.Single(room.Members);
+        Assert.False(member.IsReadyWith(host));
+
+        room.MarkReady(host);
+        Assert.True(member.IsReadyWith(host));
+        Assert.Equal((CharacterKind.Standard, "mint"), (member.ReadyCharacterKind, member.ReadyCharacterId));
+
+        Assert.True(DefaultAvatar.TryFind("gold", out var gold));
+        host.SelectStandardCharacter(gold);
+        Assert.False(member.IsReadyWith(host));
+
+        room.MarkReady(host);
+        Assert.True(member.IsReadyWith(host));
+
+        room.MarkNotReady(host.Id);
+        Assert.False(member.IsReadyWith(host));
+        Assert.Null(member.ReadyCharacterId);
+    }
+
+    [Fact]
+    public void Ready_of_one_member_is_not_anyone_elses()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+
+        room.MarkReady(bob);
+
+        Assert.False(room.Members.Single(m => m.PlayerId == bob.Id).IsReadyWith(host));
+        Assert.False(room.Members.Single(m => m.PlayerId == host.Id).IsReadyWith(host));
+    }
+
+    [Fact]
+    public void Ready_cannot_change_for_non_members_or_outside_a_waiting_room()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+
+        Assert.Throws<InvalidOperationException>(() => room.MarkReady(Guest()));
+        Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(Guid.NewGuid()));
+
+        room.MarkReady(host);
+        room.MarkReady(bob);
+        room.Start(host.Id, [host, bob], Now);
+
+        Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(bob.Id));
+        Assert.Throws<InvalidOperationException>(() => room.MarkReady(bob));
+    }
+
+    [Fact]
+    public void Host_starts_when_enough_members_are_all_ready()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+
+        Assert.Null(room.CheckStart(host.Id, [host, bob]));
+        room.Start(host.Id, [host, bob], Now.AddMinutes(2));
+
+        Assert.Equal((RoomStatus.Active, Now.AddMinutes(2)), (room.Status, room.StartedAt));
+        Assert.Equal(RoomStartProblem.NotWaiting, room.CheckStart(host.Id, [host, bob]));
+    }
+
+    [Fact]
+    public void Six_ready_players_can_start()
+    {
+        var host = Guest();
+        var others = Enumerable.Range(0, 5).Select(_ => Guest()).ToArray();
+        var room = RoomOf(host, others);
+        Player[] everyone = [host, .. others];
+        foreach (var player in everyone)
+        {
+            room.MarkReady(player);
+        }
+
+        Assert.Null(room.CheckStart(host.Id, everyone));
+    }
+
+    [Fact]
+    public void Only_the_host_can_start()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+
+        Assert.Equal(RoomStartProblem.NotHost, room.CheckStart(bob.Id, [host, bob]));
+        Assert.Throws<InvalidOperationException>(() => room.Start(bob.Id, [host, bob], Now));
+        Assert.Equal(RoomStatus.Waiting, room.Status);
+    }
+
+    [Fact]
+    public void A_ready_host_alone_cannot_start()
+    {
+        var host = Guest();
+        var room = NewRoom(host);
+        room.MarkReady(host);
+
+        Assert.Equal(RoomStartProblem.NotEnoughPlayers, room.CheckStart(host.Id, [host]));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Now));
+    }
+
+    [Fact]
+    public void Every_member_including_the_host_must_be_ready()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+
+        room.MarkReady(bob);
+        Assert.Equal(RoomStartProblem.PlayersNotReady, room.CheckStart(host.Id, [host, bob]));
+
+        room.MarkNotReady(bob.Id);
+        room.MarkReady(host);
+        Assert.Equal(RoomStartProblem.PlayersNotReady, room.CheckStart(host.Id, [host, bob]));
+    }
+
+    [Fact]
+    public void Changing_chog_after_marking_ready_blocks_the_start()
+    {
+        var host = Guest();
+        var bob = Choosing("mint");
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+
+        Assert.True(DefaultAvatar.TryFind("berry", out var berry));
+        bob.SelectStandardCharacter(berry);
+
+        Assert.Equal(RoomStartProblem.PlayersNotReady, room.CheckStart(host.Id, [host, bob]));
+    }
+
+    [Fact]
+    public void A_member_whose_player_is_missing_counts_as_not_ready()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+
+        Assert.Equal(RoomStartProblem.PlayersNotReady, room.CheckStart(host.Id, [host]));
+    }
 }

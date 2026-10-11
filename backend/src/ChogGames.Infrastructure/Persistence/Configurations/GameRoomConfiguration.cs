@@ -1,4 +1,5 @@
 using ChogGames.Core.Games;
+using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using Microsoft.EntityFrameworkCore;
@@ -39,6 +40,9 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
                 "CK_GameRooms_Capacity",
                 $"\"Capacity\" BETWEEN {GameDefinition.MinRoomPlayers} AND {GameDefinition.MaxRoomPlayers}");
             table.HasCheckConstraint("CK_GameRooms_Status", $"\"Status\" IN ({statuses})");
+            table.HasCheckConstraint("CK_GameRooms_MinPlayers", $"\"MinPlayers\" >= {GameDefinition.MinRoomPlayers} AND \"MinPlayers\" <= \"Capacity\"");
+            table.HasCheckConstraint(
+                "CK_GameRooms_StartedAt", $"\"StartedAt\" IS NULL OR \"Status\" <> '{nameof(RoomStatus.Waiting)}'");
         });
         builder.HasKey(r => r.Id);
         builder.Property(r => r.Id).ValueGeneratedNever();
@@ -61,8 +65,13 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
 {
     public void Configure(EntityTypeBuilder<RoomMember> builder)
     {
-        builder.ToTable("RoomMembers");
+        builder.ToTable("RoomMembers", table => table.HasCheckConstraint(
+            "CK_RoomMembers_Ready",
+            "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) "
+            + "AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))"));
         builder.HasKey(m => new { m.RoomId, m.PlayerId });
+        builder.Property(m => m.ReadyCharacterKind).HasConversion<string>().HasMaxLength(16);
+        builder.Property(m => m.ReadyCharacterId).HasMaxLength(NftTokenId.MaxDigits);
         builder.HasIndex(m => m.PlayerId);
         builder.HasOne<Player>().WithMany().HasForeignKey(m => m.PlayerId).OnDelete(DeleteBehavior.Restrict);
     }

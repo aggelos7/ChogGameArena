@@ -60,7 +60,7 @@ describe('app routes', () => {
     await harness.navigateByUrl('/rooms/K7QF3M');
     http
       .expectOne('/api/rooms/K7QF3M')
-      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', capacity: 6, members: [] });
+      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', minPlayers: 2, capacity: 6, members: [] });
     http.expectOne('/api/games').flush(CATALOGUE);
     harness.detectChanges();
 
@@ -72,7 +72,7 @@ describe('app routes', () => {
     await harness.navigateByUrl('/join/k7qf3m');
     http
       .expectOne('/api/rooms/K7QF3M/join')
-      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', capacity: 6, members: [] });
+      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', minPlayers: 2, capacity: 6, members: [] });
     // The room page loads lazily after the join; wait for that navigation to finish.
     for (let tick = 0; tick < 50 && url() !== '/rooms/K7QF3M'; tick++) {
       await new Promise((resolve) => setTimeout(resolve));
@@ -80,7 +80,7 @@ describe('app routes', () => {
     harness.detectChanges();
     http
       .expectOne('/api/rooms/K7QF3M')
-      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', capacity: 6, members: [] });
+      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', minPlayers: 2, capacity: 6, members: [] });
     http.expectOne('/api/games').flush(CATALOGUE);
     harness.detectChanges();
 

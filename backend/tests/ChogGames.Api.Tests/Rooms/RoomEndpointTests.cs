@@ -11,9 +11,14 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
 
     private ApiFactory _factory = null!;
 
-    private sealed record MemberDto(string DisplayName, string AvatarId, bool IsHost, bool IsYou);
+    private static readonly CharacterDto Classic = new("Standard", "classic", "Classic", "#5b2bd6");
 
-    private sealed record RoomDto(string Code, string GameType, string Status, int Capacity, MemberDto[] Members);
+    private sealed record CharacterDto(string Kind, string Id, string Name, string? Color);
+
+    private sealed record MemberDto(
+        string DisplayName, string AvatarId, bool IsHost, bool IsYou, bool IsReady, CharacterDto Character, string? Ability);
+
+    private sealed record RoomDto(string Code, string GameType, string Status, int MinPlayers, int Capacity, MemberDto[] Members);
 
     private sealed record ProblemDto(int Status, string? Code, string? RoomCode, string? Detail);
 
@@ -90,10 +95,12 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
         using var create = await CreateAsync(client, new { gameType = "chog-life" });
         using var join = await JoinAsync(client, "K7QF3M");
         using var get = await client.GetAsync("/api/rooms/K7QF3M");
+        using var ready = await client.PutAsJsonAsync("/api/rooms/K7QF3M/ready", new { ready = true });
+        using var start = await client.PostAsync("/api/rooms/K7QF3M/start", null);
 
-        Assert.Equal(
-            [HttpStatusCode.Unauthorized, HttpStatusCode.Unauthorized, HttpStatusCode.Unauthorized],
-            new[] { create.StatusCode, join.StatusCode, get.StatusCode });
+        Assert.All(
+            new[] { create.StatusCode, join.StatusCode, get.StatusCode, ready.StatusCode, start.StatusCode },
+            status => Assert.Equal(HttpStatusCode.Unauthorized, status));
     }
 
     [PostgresFact]
@@ -106,8 +113,8 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
         var room = await RoomAsync(response, HttpStatusCode.Created);
         Assert.Matches("^[2-9A-HJKMNP-Z]{6}$", room.Code);
         Assert.Equal($"/api/rooms/{room.Code}", response.Headers.Location?.OriginalString);
-        Assert.Equal(("chog-life", "Waiting", 6), (room.GameType, room.Status, room.Capacity));
-        Assert.Equal([new MemberDto("Alice", "classic", IsHost: true, IsYou: true)], room.Members);
+        Assert.Equal(("chog-life", "Waiting", 2, 6), (room.GameType, room.Status, room.MinPlayers, room.Capacity));
+        Assert.Equal([new MemberDto("Alice", "classic", IsHost: true, IsYou: true, IsReady: false, Classic, Ability: null)], room.Members);
     }
 
     [PostgresFact]
@@ -185,7 +192,10 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
 
         Assert.Equal(created.Code, joined.Code);
         Assert.Equal(
-            [new MemberDto("Alice", "classic", IsHost: true, IsYou: false), new MemberDto("Bob", "classic", IsHost: false, IsYou: true)],
+            [
+                new MemberDto("Alice", "classic", IsHost: true, IsYou: false, IsReady: false, Classic, Ability: null),
+                new MemberDto("Bob", "classic", IsHost: false, IsYou: true, IsReady: false, Classic, Ability: null),
+            ],
             joined.Members);
         Assert.Equal([true, false], seenByHost!.Members.Select(m => m.IsYou));
         Assert.Equal(joined.Members.Select(m => m.DisplayName), seenByHost.Members.Select(m => m.DisplayName));

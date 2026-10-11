@@ -73,3 +73,84 @@ h2 {
   align-items: center;
   min-height: var(--tap-target);
 }
+
+.members li {
+  padding-block: 0.5rem;
+}
+
+.who {
+  flex: 1;
+  min-width: 0;
+}
+
+.who p {
+  margin: 0;
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.details {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.readiness {
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--surface-muted);
+}
+
+.readiness.ready {
+  color: #fff;
+  background: #116329;
+}
+
+.lobby {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.lobby h2 {
+  margin-top: 0;
+}
+
+.lobby a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+}
+
+.primary {
+  min-height: var(--tap-target);
+  margin-right: 0.5rem;
+  padding: 0.5rem 1.25rem;
+  border: none;
+  border-radius: 0.5rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--brand);
+}
+
+.primary:disabled {
+  opacity: 0.5;
+}
+
+.started {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  background: var(--surface-muted);
+}
+
+.action-error {
+  color: var(--danger);
+}

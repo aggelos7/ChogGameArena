@@ -2,21 +2,45 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { Room } from '../../rooms/rooms-api';
+import { Room, RoomMember } from '../../rooms/rooms-api';
 import { CATALOGUE } from '../../testing';
 import { RoomPage } from './room';
 
 describe('Room page', () => {
+  function member(displayName: string, overrides: Partial<RoomMember> = {}): RoomMember {
+    return {
+      displayName,
+      avatarId: 'classic',
+      isHost: false,
+      isYou: false,
+      isReady: false,
+      character: { kind: 'Standard', id: 'classic', name: 'Classic', color: '#5b2bd6' },
+      ability: null,
+      ...overrides,
+    };
+  }
+
   const room: Room = {
     code: 'K7QF3M',
     gameType: 'chog-life',
     status: 'Waiting',
+    minPlayers: 2,
     capacity: 6,
     members: [
-      { displayName: 'Alice', avatarId: 'classic', isHost: true, isYou: false },
-      { displayName: 'Bob', avatarId: 'ocean', isHost: false, isYou: true },
+      member('Alice', { isHost: true }),
+      member('Bob', { isYou: true, character: { kind: 'Standard', id: 'mint', name: 'Mint', color: '#1a7f5a' } }),
     ],
   };
+
+  /** Alice's view: she is the host. */
+  const hostView = (overrides: Partial<Room> = {}, ready: [boolean, boolean] = [false, false]): Room => ({
+    ...room,
+    members: [
+      member('Alice', { isHost: true, isYou: true, isReady: ready[0] }),
+      member('Bob', { isReady: ready[1], character: { kind: 'Nft', id: '7', name: 'Chog #7', color: null } }),
+    ],
+    ...overrides,
+  });
 
   let fixture: ComponentFixture<RoomPage>;
   let http: HttpTestingController;
@@ -36,11 +60,15 @@ describe('Room page', () => {
 
   const element = () => fixture.nativeElement as HTMLElement;
   const members = () =>
-    Array.from(element().querySelectorAll('[data-list="members"] li')).map((li) =>
-      Array.from(li.querySelectorAll('span'))
+    Array.from(element().querySelectorAll('[data-list="members"] li .line')).map((line) =>
+      Array.from(line.querySelectorAll('span'))
         .map((span) => span.textContent?.trim())
         .join(' '),
     );
+  const column = (selector: string) =>
+    Array.from(element().querySelectorAll(`[data-list="members"] ${selector}`)).map((node) => node.textContent?.trim());
+  const maybeButton = (label: string) =>
+    Array.from(element().querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
   const button = (label: string) =>
     Array.from(element().querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
 
@@ -79,7 +107,7 @@ describe('Room page', () => {
     button('Refresh').click();
     http.expectOne('/api/rooms/K7QF3M').flush({
       ...room,
-      members: [...room.members, { displayName: 'Carol', avatarId: 'gold', isHost: false, isYou: false }],
+      members: [...room.members, member('Carol')],
     });
     fixture.detectChanges();
 
@@ -102,5 +130,106 @@ describe('Room page', () => {
     load();
 
     expect(members()).toHaveLength(2);
+  });
+
+  it('shows each player’s Chog, the ability placeholder and who is ready', () => {
+    load(hostView({}, [false, true]));
+
+    expect(column('[data-chog]')).toEqual(['Classic', 'Chog #7']);
+    expect(column('[data-ability]')).toEqual(['Ability not chosen yet', 'Ability not chosen yet']);
+    expect(column('[data-readiness]')).toEqual(['Not ready', 'Ready']);
+  });
+
+  it('marks the player ready and back', () => {
+    load();
+
+    button('I’m ready').click();
+    const ready = http.expectOne('/api/rooms/K7QF3M/ready');
+    expect(ready.request.method).toBe('PUT');
+    expect(ready.request.body).toEqual({ ready: true });
+    ready.flush({ ...room, members: [room.members[0], { ...room.members[1], isReady: true }] });
+    fixture.detectChanges();
+
+    expect(column('[data-readiness]')).toEqual(['Not ready', 'Ready']);
+    button('Not ready').click();
+    const notReady = http.expectOne('/api/rooms/K7QF3M/ready');
+    expect(notReady.request.body).toEqual({ ready: false });
+    notReady.flush(room);
+  });
+
+  it('shows only the host a start button, enabled once enough players are all ready', () => {
+    load();
+    expect(maybeButton('Start game')).toBeUndefined();
+    expect(element().textContent).toContain('The host starts the game when everyone is ready.');
+
+    button('Refresh').click();
+    http.expectOne('/api/rooms/K7QF3M').flush(hostView({}, [true, false]));
+    fixture.detectChanges();
+    expect(button('Start game').disabled).toBe(true);
+    expect(element().querySelector('[data-start-hint]')?.textContent?.trim()).toBe(
+      'Starts with 2–6 players, all ready, including you.',
+    );
+
+    button('Refresh').click();
+    http.expectOne('/api/rooms/K7QF3M').flush(hostView({}, [true, true]));
+    fixture.detectChanges();
+    expect(button('Start game').disabled).toBe(false);
+  });
+
+  it('keeps start disabled for a host alone', () => {
+    load(hostView({ members: [member('Alice', { isHost: true, isYou: true, isReady: true })] }));
+
+    expect(button('Start game').disabled).toBe(true);
+  });
+
+  it('starts the game and hides the lobby controls', () => {
+    load(hostView({}, [true, true]));
+
+    button('Start game').click();
+    const start = http.expectOne('/api/rooms/K7QF3M/start');
+    expect(start.request.method).toBe('POST');
+    start.flush(hostView({ status: 'Active' }, [true, true]));
+    fixture.detectChanges();
+
+    expect(element().querySelector('[data-started]')?.textContent).toBe('The game has started.');
+    expect(maybeButton('Start game')).toBeUndefined();
+    expect(maybeButton('Not ready')).toBeUndefined();
+  });
+
+  it('explains a refused start and shows the lobby as it is now', () => {
+    load(hostView({}, [true, true]));
+
+    button('Start game').click();
+    http
+      .expectOne('/api/rooms/K7QF3M/start')
+      .flush({ code: 'character_unavailable' }, { status: 409, statusText: 'Conflict' });
+    http.expectOne('/api/rooms/K7QF3M').flush(hostView({}, [true, false]));
+    fixture.detectChanges();
+
+    expect(element().querySelector('[data-error="action"]')?.textContent).toBe(
+      'A player no longer owns their chosen Chog and must choose again.',
+    );
+    expect(column('[data-readiness]')).toEqual(['Ready', 'Not ready']);
+    expect(button('Start game').disabled).toBe(true);
+  });
+
+  it('explains when ownership cannot be checked without reloading', () => {
+    load(hostView({}, [true, true]));
+
+    button('Start game').click();
+    http
+      .expectOne('/api/rooms/K7QF3M/start')
+      .flush({ code: 'ownership_unavailable' }, { status: 503, statusText: 'Service Unavailable' });
+    fixture.detectChanges();
+
+    expect(element().querySelector('[data-error="action"]')?.textContent).toContain('can’t be checked right now');
+    expect(button('Start game').disabled).toBe(false);
+  });
+
+  it('links to the Chog gallery to change Chog', () => {
+    load();
+
+    const link = element().querySelector('.lobby a');
+    expect(link?.getAttribute('href')).toBe('/chogs');
   });
 });

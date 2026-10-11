@@ -156,6 +156,12 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("HostPlayerId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("MinPlayers")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -178,6 +184,10 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_GameRooms_Code_Format", "\"Code\" ~ '^[2-9A-HJKMNP-Z]{6}$'");
 
+                            t.HasCheckConstraint("CK_GameRooms_MinPlayers", "\"MinPlayers\" >= 2 AND \"MinPlayers\" <= \"Capacity\"");
+
+                            t.HasCheckConstraint("CK_GameRooms_StartedAt", "\"StartedAt\" IS NULL OR \"Status\" <> 'Waiting'");
+
                             t.HasCheckConstraint("CK_GameRooms_Status", "\"Status\" IN ('Waiting', 'Active', 'Completed', 'Cancelled')");
                         });
                 });
@@ -193,11 +203,22 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("JoinedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ReadyCharacterId")
+                        .HasMaxLength(78)
+                        .HasColumnType("character varying(78)");
+
+                    b.Property<string>("ReadyCharacterKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.HasKey("RoomId", "PlayerId");
 
                     b.HasIndex("PlayerId");
 
-                    b.ToTable("RoomMembers", (string)null);
+                    b.ToTable("RoomMembers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_RoomMembers_Ready", "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))");
+                        });
                 });
 
             modelBuilder.Entity("ChogGames.Infrastructure.Identity.GuestSession", b =>
