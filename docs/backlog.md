@@ -319,7 +319,7 @@
 
 #### STORY-021 — Lobby and ready state
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Display participants, chosen Chogs, abilities, host and ready status.
@@ -328,6 +328,19 @@
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-063 — Leave a waiting room
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E04
+- **Implementation:** Let a member leave a `Waiting` room (DEC-023). A member who leaves is removed, which frees their seat and their one open room (DEC-021); nobody else's ready status changes. When the host leaves, the room becomes `Cancelled` for everyone: members are free to create or join other rooms, and the code no longer accepts joins (`room_closed`). The room's row is locked and then the player's, as for joining. Web: a Leave room button in the lobby; the host is warned first that leaving closes the room for everyone. Implement after STORY-021, before STORY-022. Leaving an `Active` match is out of scope (STORY-023/025/027).
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a member who leaves is gone from the lobby and can join or create another room; when the host leaves, the room is cancelled and its other members can join or create other rooms.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** a non-member, an unknown code or a room that is not waiting is refused without changing the room or its members.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. No host transfer, kicking or leaving an active match.
 
 
 #### STORY-022 — SignalR auth and groups

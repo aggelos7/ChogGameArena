@@ -10,8 +10,19 @@ describe('Game lobby page', () => {
     code: 'K7QF3M',
     gameType: 'chog-life',
     status: 'Waiting',
+    minPlayers: 2,
     capacity: 6,
-    members: [{ displayName: 'Alice', avatarId: 'classic', isHost: true, isYou: true }],
+    members: [
+      {
+        displayName: 'Alice',
+        avatarId: 'classic',
+        isHost: true,
+        isYou: true,
+        isReady: false,
+        character: { kind: 'Standard', id: 'classic', name: 'Classic', color: '#5b2bd6' },
+        ability: null,
+      },
+    ],
   };
 
   let fixture: ComponentFixture<GameLobby>;

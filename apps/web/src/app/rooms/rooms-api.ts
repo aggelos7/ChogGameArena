@@ -2,12 +2,25 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
+/** Mirrors `RoomCharacterResponse`: the member's selected Chog. `color` is set for standard Chogs only. */
+export interface RoomCharacter {
+  kind: 'Standard' | 'Nft';
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 /** Mirrors `RoomMemberResponse`. Player ids never leave the server. */
 export interface RoomMember {
   displayName: string;
   avatarId: string;
   isHost: boolean;
   isYou: boolean;
+  /** Ready with the Chog shown; choosing another Chog makes the player not ready. */
+  isReady: boolean;
+  character: RoomCharacter;
+  /** Always null until ability selection (STORY-033). */
+  ability: string | null;
 }
 
 export type RoomStatus = 'Waiting' | 'Active' | 'Completed' | 'Cancelled';
@@ -17,6 +30,7 @@ export interface Room {
   code: string;
   gameType: string;
   status: RoomStatus;
+  minPlayers: number;
   capacity: number;
   members: RoomMember[];
 }
@@ -29,7 +43,12 @@ export type RoomErrorCode =
   | 'room_not_found'
   | 'room_full'
   | 'room_started'
-  | 'room_closed';
+  | 'room_closed'
+  | 'not_host'
+  | 'not_enough_players'
+  | 'players_not_ready'
+  | 'character_unavailable'
+  | 'ownership_unavailable';
 
 /** A room error from the server, or `unknown` for anything else (network, 5xx). */
 export interface RoomError {
@@ -66,6 +85,11 @@ const ROOM_ERROR_MESSAGES: Record<RoomError['code'], string> = {
   room_full: 'This room is full.',
   room_started: 'This room’s game has already started.',
   room_closed: 'This room is closed.',
+  not_host: 'Only the host can start the game.',
+  not_enough_players: 'More players are needed to start.',
+  players_not_ready: 'Every player must be ready to start.',
+  character_unavailable: 'A player no longer owns their chosen Chog and must choose again.',
+  ownership_unavailable: 'Chog ownership can’t be checked right now. Try again shortly.',
   rate_limited: 'Too many tries in a short time. Wait a minute and try again.',
   unknown: 'Something went wrong. Try again.',
 };
@@ -89,5 +113,13 @@ export class RoomsApi {
 
   get(code: string): Observable<Room> {
     return this.http.get<Room>(`/api/rooms/${encodeURIComponent(code)}`);
+  }
+
+  setReady(code: string, ready: boolean): Observable<Room> {
+    return this.http.put<Room>(`/api/rooms/${encodeURIComponent(code)}/ready`, { ready });
+  }
+
+  start(code: string): Observable<Room> {
+    return this.http.post<Room>(`/api/rooms/${encodeURIComponent(code)}/start`, null);
   }
 }

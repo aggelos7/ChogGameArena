@@ -66,4 +66,11 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Rejoining:** joining a room you're already in succeeds and changes nothing, so invite links and double taps are safe.
   - **Errors:** problem details with a stable `code`: `unknown_game` (400), `room_not_found` (404, also for malformed codes and for rooms the caller isn't in), `game_unavailable`, `already_in_room`, `room_full`, `room_started`, `room_closed` (409).
   - **Web:** a minimal create/join screen and room page; members appear on refresh until live updates (STORY-022).
+- DEC-022 (2026-10-11, STORY-021 — confirmed by product owner): Lobby and ready state.
+  - **Abilities:** the lobby shows an ability placeholder only; ready does not need an ability until STORY-033 adds the choice.
+  - **Start:** host only, with the game's minimum to capacity of members, all ready. Every member's Chog is checked live (STORY-018): a member whose NFT is no longer owned is set back to not ready and nothing starts; if ownership can't be read nothing changes and the host retries. Then the room becomes `Active`. The character snapshot and match record are kept from STORY-023/028.
+  - **Host ready:** everyone, the host included, must mark ready.
+  - **Changing Chog:** ready counts only for the Chog selected when marking ready, so choosing another Chog makes the player not ready. Joins and leaves don't change anyone else's ready status.
+  - **Errors:** `not_host` (403), `not_enough_players`, `players_not_ready`, `character_unavailable` (409), `ownership_unavailable` (503), plus the room codes of DEC-021.
+- DEC-023 (2026-10-12, product owner): Leaving a waiting room is STORY-063. A member who leaves frees their seat and their one open room. A host who leaves cancels the room for everyone; hosting is not passed on. Leaving an active match is decided with STORY-023/025/027.
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.
