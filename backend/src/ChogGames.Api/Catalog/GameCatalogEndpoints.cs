@@ -11,6 +11,7 @@ public static class GameCatalogEndpoints
         services.AddOptions<GameCatalogOptions>()
             .Bind(configuration.GetSection(GameCatalogOptions.SectionName))
             .ValidateOnStart();
+        services.AddSingleton<IGameCatalog, ConfiguredGameCatalog>();
 
         return services;
     }
@@ -25,7 +26,7 @@ public static class GameCatalogEndpoints
         return endpoints;
     }
 
-    private static GameCatalogItem ToCatalogItem(GameCatalogEntryOptions entry)
+    internal static GameCatalogItem ToCatalogItem(GameCatalogEntryOptions entry)
     {
         GameCatalogOptionsValidator.TryParseStatus(entry.Status, out var status);
         return new GameCatalogItem(entry.Id, entry.Name, entry.Description, status);

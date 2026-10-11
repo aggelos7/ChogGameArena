@@ -57,4 +57,8 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Outage:** if NFT ownership can't be read when a match starts, the player can't start with that NFT; there is no silent switch to a standard Chog. They can choose a standard Chog and play right away. This follows NFT-008: ownership is verified before start.
   - **Unowned NFT:** the start is refused (`NftNotOwned`) and the player chooses again; the saved choice isn't changed by the check.
   - **Storage:** the immutable `CharacterSnapshot` is built now. It is stored with the match player record when matches exist (STORY-023/028); there is no separate table.
+- DEC-020 (2026-10-11, STORY-019 — confirmed by product owner): Game registry and room codes.
+  - **Registry:** supported games are rows in a `GameDefinitions` table seeded by reviewed migrations (`chog-life`, `chog-race`, 2–6 players), so rooms reference them with a foreign key. Whether a game is enabled stays in the `Games:Items` configuration; a room needs both.
+  - **Room codes:** 6 characters from 31 letters and digits without look-alikes (no 0, O, 1, I or L), about 887 million codes, drawn with cryptographically secure randomness. Uniqueness is a database index; a collision draws another code.
+  - **Hosting:** a player may host one `Waiting` room at a time (filtered unique index). Rate limits come with the room API (STORY-020).
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.

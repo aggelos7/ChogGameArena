@@ -293,7 +293,7 @@
 
 #### STORY-019 — Game registry and room model
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Persist supported game definitions, private room, host, status and six-player capacity.
