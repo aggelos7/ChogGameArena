@@ -8,9 +8,9 @@ using Microsoft.Extensions.Logging;
 namespace ChogGames.Infrastructure.Rooms;
 
 /// <summary>
-/// The waiting room's lobby (STORY-021, ENG-002): members mark ready with their chosen Chog and the host starts the
-/// match. The room's row is locked first and then the members' rows, the same order as joining, so a start cannot
-/// race a join, a ready change or a Chog change. Every member's Chog is checked live at start (STORY-018, DEC-022).
+/// The waiting room's lobby (STORY-021, ENG-002): members mark ready with their chosen Chog, leave (STORY-063) and the
+/// host starts the match. The room's row is locked first and then the members' rows, the same order as joining, so a
+/// start cannot race a join, a leave, a ready change or a Chog change. Every member's Chog is checked live at start (STORY-018, DEC-022).
 /// </summary>
 public sealed class LobbyService(
     ChogGamesDbContext db,
@@ -47,6 +47,27 @@ public sealed class LobbyService(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.ReadyChanged, room);
+    }
+
+    /// <summary>The player leaves a waiting room; the host leaving cancels it for everyone (DEC-023).</summary>
+    public async Task<RoomResult> LeaveAsync(Player player, RoomCode code, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var room = await LockRoomAsync(code, cancellationToken);
+        if (room is null || !room.IsMember(player.Id))
+        {
+            return new RoomResult(RoomOutcome.RoomNotFound);
+        }
+
+        if (StatusFailure(room) is { } failure)
+        {
+            return failure;
+        }
+
+        room.Leave(player.Id);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new RoomResult(RoomOutcome.Left, room);
     }
 
     public async Task<RoomResult> StartAsync(Player caller, RoomCode code, CancellationToken cancellationToken)

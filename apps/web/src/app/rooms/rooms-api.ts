@@ -122,4 +122,9 @@ export class RoomsApi {
   start(code: string): Observable<Room> {
     return this.http.post<Room>(`/api/rooms/${encodeURIComponent(code)}/start`, null);
   }
+
+  /** Leaves a waiting room; when the host leaves, the room is closed for everyone. */
+  leave(code: string): Observable<void> {
+    return this.http.post<void>(`/api/rooms/${encodeURIComponent(code)}/leave`, null);
+  }
 }

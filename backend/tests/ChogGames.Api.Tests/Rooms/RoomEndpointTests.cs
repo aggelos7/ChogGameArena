@@ -97,9 +97,10 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
         using var get = await client.GetAsync("/api/rooms/K7QF3M");
         using var ready = await client.PutAsJsonAsync("/api/rooms/K7QF3M/ready", new { ready = true });
         using var start = await client.PostAsync("/api/rooms/K7QF3M/start", null);
+        using var leave = await client.PostAsync("/api/rooms/K7QF3M/leave", null);
 
         Assert.All(
-            new[] { create.StatusCode, join.StatusCode, get.StatusCode, ready.StatusCode, start.StatusCode },
+            new[] { create.StatusCode, join.StatusCode, get.StatusCode, ready.StatusCode, start.StatusCode, leave.StatusCode },
             status => Assert.Equal(HttpStatusCode.Unauthorized, status));
     }
 

@@ -272,4 +272,70 @@ public class GameRoomTests
 
         Assert.Equal(RoomStartProblem.PlayersNotReady, room.CheckStart(host.Id, [host]));
     }
+
+    [Fact]
+    public void A_member_who_leaves_frees_their_seat_and_others_stay_ready()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var carol = Guest();
+        var room = RoomOf(host, bob, carol);
+        room.MarkReady(host);
+        room.MarkReady(carol);
+
+        room.Leave(bob.Id);
+
+        Assert.Equal(RoomStatus.Waiting, room.Status);
+        Assert.False(room.IsMember(bob.Id));
+        Assert.Equal([host.Id, carol.Id], room.Members.Select(m => m.PlayerId));
+        Assert.Null(room.CheckStart(host.Id, [host, carol]));
+    }
+
+    [Fact]
+    public void A_seat_freed_by_leaving_can_be_taken()
+    {
+        var host = Guest();
+        var room = NewRoom(host, maxPlayers: 2);
+        var bob = Guest();
+        room.Join(bob, Now);
+        Assert.True(room.IsFull);
+
+        room.Leave(bob.Id);
+        room.Join(Guest(), Now);
+
+        Assert.Equal(2, room.Members.Count);
+    }
+
+    [Fact]
+    public void The_host_leaving_cancels_the_room_and_keeps_its_members_listed()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+
+        room.Leave(host.Id);
+
+        Assert.Equal(RoomStatus.Cancelled, room.Status);
+        Assert.Equal([host.Id, bob.Id], room.Members.Select(m => m.PlayerId));
+        Assert.Throws<InvalidOperationException>(() => room.Join(Guest(), Now));
+        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id));
+    }
+
+    [Fact]
+    public void Only_members_of_a_waiting_room_can_leave()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+
+        Assert.Throws<InvalidOperationException>(() => room.Leave(Guid.NewGuid()));
+
+        room.MarkReady(host);
+        room.MarkReady(bob);
+        room.Start(host.Id, [host, bob], Now);
+
+        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id));
+        Assert.Throws<InvalidOperationException>(() => room.Leave(host.Id));
+        Assert.Equal((RoomStatus.Active, 2), (room.Status, room.Members.Count));
+    }
 }

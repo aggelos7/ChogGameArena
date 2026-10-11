@@ -259,7 +259,7 @@ Match character check (STORY-018, NFT-008/009, DEC-019): `CharacterEligibilitySe
 
 Mock ownership isn't exclusive: every other wallet reports the same fixture tokens.
 
-Game registry, rooms and lobby (STORY-019/020/021, ENG-001/002, DEC-020/021/022): every room request runs as the session's player; player ids are never accepted from or returned to clients.
+Game registry, rooms and lobby (STORY-019/020/021/063, ENG-001/002, DEC-020 to DEC-023): every room request runs as the session's player; player ids are never accepted from or returned to clients.
 - **Registered games:** the `GameDefinitions` table, seeded by migration with `chog-life` and `chog-race` (2–6 players each). A new game needs a migration and a `Games:Items` entry.
 - **Enabled games:** the `Games:Items` status; only `Available` games get rooms.
 - **Room:** status `Waiting`, the creator as host and first member, capacity and minimum players from the game (2–6).
@@ -267,6 +267,7 @@ Game registry, rooms and lobby (STORY-019/020/021, ENG-001/002, DEC-020/021/022)
 - **One open room per player:** a player in a `Waiting` room, as host or member, can't create or join another. Each create or join locks the player's row (and, for a join, the room's row first), so concurrent requests can't get round this or overfill a room.
 - **Lobby:** each member's selected Chog, ability (always `null` until STORY-033) and ready status. Ready is recorded with the Chog selected at that moment, so choosing another Chog makes the player not ready.
 - **Start:** host only; needs between the game's minimum and capacity of members, every one ready (the host too). Every NFT Chog's ownership is then read live: a member whose NFT has left their wallet is set back to not ready and nothing starts (`character_unavailable`); if ownership can't be read nothing changes (`503 ownership_unavailable`). Otherwise the room becomes `Active` with `startedAt`. Ready and start lock the room's row and then the members' rows, so a start can't race a join or a ready change.
+- **Leaving:** a member can leave a `Waiting` room; their seat and their one open room are freed and nobody else's ready status changes. When the host leaves, the room becomes `Cancelled` for everyone: its members still see it (closed), nobody can join it any more (`room_closed`), and its members are free to create or join other rooms. Hosting is never passed on. Leaving a started match isn't possible yet (STORY-023/025/027).
 
 | Endpoint | Request | Responses |
 |---|---|---|
@@ -274,13 +275,14 @@ Game registry, rooms and lobby (STORY-019/020/021, ENG-001/002, DEC-020/021/022)
 | `POST /api/rooms/{code}/join` | — | `200` room (also when already a member, nothing changes); `404 room_not_found`; `409 room_full`, `room_started`, `room_closed` or `already_in_room` |
 | `GET /api/rooms/{code}` | — | `200` room for members; `404 room_not_found` for everyone else |
 | `PUT /api/rooms/{code}/ready` | `{ "ready": true }` | `200` room; `400` without a boolean `ready`; `404 room_not_found`; `409 room_started` or `room_closed` |
+| `POST /api/rooms/{code}/leave` | — | `204`; `404 room_not_found` (also after leaving); `409 room_started` or `room_closed` |
 | `POST /api/rooms/{code}/start` | — | `200` room (`Active`); `403 not_host`; `404 room_not_found`; `409 not_enough_players`, `players_not_ready`, `character_unavailable`, `room_started` or `room_closed`; `503 ownership_unavailable` |
 
 All of them need a session (`401` without) and return `429` over the per-player limit. A room is `{ code, gameType, status, minPlayers, capacity, members[{ displayName, avatarId, isHost, isYou, isReady, character{ kind, id, name, color }, ability }] }`; `character.color` is set for standard Chogs, and an NFT shows as `Chog #<id>`. Errors are problem details with a stable `code` (clients rely on it, never on the text); `already_in_room` also carries `roomCode`, the room the player is in.
 
 | Setting (`Rooms:`) | Default | |
 |---|---|---|
-| `RequestsPerMinutePerPlayer` | `60` | room requests (create, join, read, ready, start) per player per minute (1–1000); also limits guessing codes |
+| `RequestsPerMinutePerPlayer` | `60` | room requests (create, join, read, ready, start, leave) per player per minute (1–1000); also limits guessing codes |
 
 Health endpoints:
 

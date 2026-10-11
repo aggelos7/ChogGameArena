@@ -332,7 +332,7 @@
 
 #### STORY-063 — Leave a waiting room
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Let a member leave a `Waiting` room (DEC-023). A member who leaves is removed, which frees their seat and their one open room (DEC-021); nobody else's ready status changes. When the host leaves, the room becomes `Cancelled` for everyone: members are free to create or join other rooms, and the code no longer accepts joins (`room_closed`). The room's row is locked and then the player's, as for joining. Web: a Leave room button in the lobby; the host is warned first that leaving closes the room for everyone. Implement after STORY-021, before STORY-022. Leaving an `Active` match is out of scope (STORY-023/025/027).

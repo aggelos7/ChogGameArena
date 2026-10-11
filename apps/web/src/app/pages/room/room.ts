@@ -1,6 +1,6 @@
 import { DOCUMENT } from '@angular/common';
 import { Component, OnInit, computed, inject, input, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { GameCatalog } from '../../games/game-catalog';
 import { Observable } from 'rxjs';
 import { Avatar } from '../../profile/profile-api';
@@ -21,7 +21,7 @@ const NFT_COLOR = 'var(--brand)';
 
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
- * status, the player's ready toggle and the host's start. Refreshed on demand until live updates (STORY-022).
+ * status, the player's ready toggle, the host's start and leaving (STORY-063). Refreshed on demand until live updates (STORY-022).
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
@@ -34,6 +34,7 @@ export class RoomPage implements OnInit {
   private readonly api = inject(RoomsApi);
   private readonly catalog = inject(GameCatalog);
   private readonly document = inject(DOCUMENT);
+  private readonly router = inject(Router);
 
   readonly code = input.required<string>();
 
@@ -44,6 +45,8 @@ export class RoomPage implements OnInit {
   protected readonly copyState = signal<'idle' | 'copied' | 'failed'>('idle');
   protected readonly busy = signal(false);
   protected readonly actionError = signal<RoomError | null>(null);
+  /** The host confirms first, since leaving closes the room for everyone. */
+  protected readonly confirmingLeave = signal(false);
   protected readonly message = roomErrorMessage;
 
   protected readonly you = computed(() => this.room()?.members.find((member) => member.isYou) ?? null);
@@ -97,6 +100,28 @@ export class RoomPage implements OnInit {
     if (room) {
       this.act(this.api.start(room.code));
     }
+  }
+
+  protected leave(): void {
+    const room = this.room();
+    if (!room) {
+      return;
+    }
+    if (this.you()?.isHost && !this.confirmingLeave()) {
+      this.confirmingLeave.set(true);
+      return;
+    }
+    this.busy.set(true);
+    this.actionError.set(null);
+    this.api.leave(room.code).subscribe({
+      next: () => this.router.navigate(['/games', room.gameType]),
+      error: (error: unknown) => {
+        this.busy.set(false);
+        this.confirmingLeave.set(false);
+        this.actionError.set(toRoomError(error));
+        this.refreshQuietly();
+      },
+    });
   }
 
   protected badge(character: RoomCharacter): Avatar {
