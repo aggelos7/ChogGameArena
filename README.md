@@ -247,6 +247,16 @@ Character gallery (STORY-017, NFT-002/004/005/006): the web app's **My Chogs** p
 |---|---|---|
 | `RequestsPerMinutePerPlayer` | `30` | gallery and selection requests per player per minute (1–1000); each may read the chain |
 
+Match character check (STORY-018, NFT-008/009, DEC-019): `CharacterEligibilityService.SnapshotForMatchAsync(player)` is what match start calls (STORY-023) to fix each player's character. There is no endpoint for it.
+- **Standard Chog:** always eligible; no chain call.
+- **NFT:** ownership is read live with `FindOwnedAsync` every time, never from stored ownership or the gallery. The results are:
+  - `Eligible` with a snapshot;
+  - `NftNotOwned`: the player must choose again;
+  - `OwnershipUnavailable`: the chain can't be read, so the match doesn't start with that NFT, though a standard Chog still works.
+- **Snapshot:** an immutable `CharacterSnapshot`: kind, id, name, image, a copy of the traits, the verified wallet and the time. Later transfers, metadata refreshes or a new gallery choice don't change it. Each match takes a new one, so ownership is checked again.
+- **Selection:** the player's saved choice is never changed by this check.
+- **Storage:** the snapshot is stored with the match player record when matches exist (STORY-023/028).
+
 Mock ownership isn't exclusive: every other wallet reports the same fixture tokens.
 
 Health endpoints:
