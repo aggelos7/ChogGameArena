@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { Room, RoomMember } from '../../rooms/rooms-api';
 import { CATALOGUE } from '../../testing';
 import { RoomPage } from './room';
@@ -231,5 +231,66 @@ describe('Room page', () => {
 
     const link = element().querySelector('.lobby a');
     expect(link?.getAttribute('href')).toBe('/chogs');
+  });
+
+  describe('leaving', () => {
+    let navigate: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    });
+
+    it('lets a member leave at once and returns to the game', () => {
+      load();
+
+      button('Leave room').click();
+      const leave = http.expectOne('/api/rooms/K7QF3M/leave');
+      expect(leave.request.method).toBe('POST');
+      leave.flush(null, { status: 204, statusText: 'No Content' });
+
+      expect(navigate).toHaveBeenCalledWith(['/games', 'chog-life']);
+    });
+
+    it('asks the host to confirm that leaving closes the room', () => {
+      load(hostView());
+
+      button('Leave room').click();
+      fixture.detectChanges();
+      http.expectNone('/api/rooms/K7QF3M/leave');
+      expect(element().querySelector('[data-leave] [role="alert"]')?.textContent).toContain('closes this room for everyone');
+
+      button('Stay').click();
+      fixture.detectChanges();
+      expect(maybeButton('Leave and close room')).toBeUndefined();
+
+      button('Leave room').click();
+      fixture.detectChanges();
+      button('Leave and close room').click();
+      http.expectOne('/api/rooms/K7QF3M/leave').flush(null, { status: 204, statusText: 'No Content' });
+
+      expect(navigate).toHaveBeenCalledWith(['/games', 'chog-life']);
+    });
+
+    it('explains a refused leave and shows the room as it is now', () => {
+      load();
+
+      button('Leave room').click();
+      http.expectOne('/api/rooms/K7QF3M/leave').flush({ code: 'room_started' }, { status: 409, statusText: 'Conflict' });
+      http.expectOne('/api/rooms/K7QF3M').flush({ ...room, status: 'Active' });
+      fixture.detectChanges();
+
+      expect(navigate).not.toHaveBeenCalled();
+      expect(element().querySelector('[data-started]')?.textContent).toBe('The game has started.');
+      expect(maybeButton('Leave room')).toBeUndefined();
+    });
+
+    it('tells members when the host has closed the room', () => {
+      load({ ...room, status: 'Cancelled' });
+
+      expect(element().querySelector('[data-closed]')?.textContent).toContain('This room is closed.');
+      expect(element().querySelector('[data-closed] a')?.getAttribute('href')).toBe('/games');
+      expect(maybeButton('Leave room')).toBeUndefined();
+      expect(maybeButton('I’m ready')).toBeUndefined();
+    });
   });
 });

@@ -84,6 +84,21 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
         return code;
     }
 
+    private async Task<RoomResult> Leave(Player player, GameRoom room)
+    {
+        await using var db = database.CreateDbContext();
+        return await Service(db).LeaveAsync(player, Code(room), CancellationToken.None);
+    }
+
+    private RoomService Rooms(ChogGamesDbContext db) =>
+        new(db, new OpenCatalog(), new SecureRoomCodeGenerator(), clock, NullLogger<RoomService>.Instance);
+
+    private async Task<RoomResult> JoinRoom(Player player, GameRoom room)
+    {
+        await using var db = database.CreateDbContext();
+        return await Rooms(db).JoinAsync(player, Code(room), CancellationToken.None);
+    }
+
     private async Task<GameRoom> Stored(GameRoom room)
     {
         await using var db = database.CreateDbContext();
@@ -346,13 +361,7 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
             var carol = await SavedGuest();
 
             var start = Task.Run(() => Start(host, room));
-            var join = Task.Run(async () =>
-            {
-                await using var db = database.CreateDbContext();
-                var rooms = new RoomService(
-                    db, new OpenCatalog(), new SecureRoomCodeGenerator(), clock, NullLogger<RoomService>.Instance);
-                return await rooms.JoinAsync(carol, Code(room), CancellationToken.None);
-            });
+            var join = Task.Run(() => JoinRoom(carol, room));
             var (started, joined) = (await start, await join);
 
             var stored = await Stored(room);
@@ -379,6 +388,105 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
 
         Assert.Single(results, r => r.Outcome == RoomOutcome.Started);
         Assert.All(results.Where(r => r.Outcome != RoomOutcome.Started), r => Assert.Equal(RoomOutcome.RoomStarted, r.Outcome));
+    }
+
+    [PostgresFact]
+    public async Task A_member_who_leaves_is_removed_and_can_join_another_room()
+    {
+        var host = await SavedGuest();
+        var bob = await SavedGuest();
+        var carol = await SavedGuest();
+        var room = await SavedRoom(host, bob, carol);
+        await Ready(host, room);
+        await Ready(carol, room);
+
+        var result = await Leave(bob, room);
+
+        Assert.Equal(RoomOutcome.Left, result.Outcome);
+        var stored = await Stored(room);
+        Assert.Equal((RoomStatus.Waiting, 2), (stored.Status, stored.Members.Count));
+        Assert.False(stored.IsMember(bob.Id));
+        Assert.True(await IsReady(room, host));
+        Assert.True(await IsReady(room, carol));
+
+        var other = await SavedRoom(await SavedGuest());
+        Assert.Equal(RoomOutcome.Joined, (await JoinRoom(bob, other)).Outcome);
+    }
+
+    [PostgresFact]
+    public async Task The_host_leaving_cancels_the_room_and_frees_everyone()
+    {
+        var (room, host, bob) = await ReadyPair();
+
+        Assert.Equal(RoomOutcome.Left, (await Leave(host, room)).Outcome);
+
+        var stored = await Stored(room);
+        Assert.Equal((RoomStatus.Cancelled, 2), (stored.Status, stored.Members.Count));
+        Assert.Equal(RoomOutcome.RoomClosed, (await JoinRoom(await SavedGuest(), room)).Outcome);
+
+        var other = await SavedRoom(await SavedGuest());
+        Assert.Equal(RoomOutcome.Joined, (await JoinRoom(bob, other)).Outcome);
+        await using var db = database.CreateDbContext();
+        var game = await db.GameDefinitions.AsNoTracking().SingleAsync(g => g.Id == GameDefinition.ChogLife);
+        db.GameRooms.Add(GameRoom.Create(game, host, new SecureRoomCodeGenerator().Next(), clock.GetUtcNow()));
+        await db.SaveChangesAsync();
+    }
+
+    [PostgresFact]
+    public async Task Leaving_is_refused_for_non_members_and_after_leaving()
+    {
+        var host = await SavedGuest();
+        var bob = await SavedGuest();
+        var room = await SavedRoom(host, bob);
+
+        Assert.Equal(RoomOutcome.RoomNotFound, (await Leave(await SavedGuest(), room)).Outcome);
+        Assert.Equal(RoomOutcome.Left, (await Leave(bob, room)).Outcome);
+        Assert.Equal(RoomOutcome.RoomNotFound, (await Leave(bob, room)).Outcome);
+        Assert.Equal(RoomOutcome.Left, (await Leave(host, room)).Outcome);
+        Assert.Equal(RoomOutcome.RoomClosed, (await Leave(host, room)).Outcome);
+    }
+
+    [PostgresTheory]
+    [InlineData(RoomStatus.Active, RoomOutcome.RoomStarted)]
+    [InlineData(RoomStatus.Completed, RoomOutcome.RoomClosed)]
+    public async Task Nobody_leaves_once_the_room_is_not_waiting(RoomStatus status, RoomOutcome expected)
+    {
+        var (room, host, bob) = await ReadyPair();
+        await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE \"GameRooms\" SET \"Status\" = {status.ToString()}, \"StartedAt\" = {clock.GetUtcNow()} WHERE \"Id\" = {room.Id}");
+        }
+
+        Assert.Equal(expected, (await Leave(bob, room)).Outcome);
+        Assert.Equal(expected, (await Leave(host, room)).Outcome);
+        Assert.Equal((status, 2), ((await Stored(room)).Status, (await Stored(room)).Members.Count));
+    }
+
+    [PostgresFact]
+    public async Task A_leave_racing_a_start_either_is_refused_or_stops_the_start()
+    {
+        for (var round = 0; round < 10; round++)
+        {
+            var (room, host, bob) = await ReadyPair();
+
+            var start = Task.Run(() => Start(host, room));
+            var leave = Task.Run(() => Leave(bob, room));
+            var (started, left) = (await start, await leave);
+
+            var stored = await Stored(room);
+            if (started.Outcome == RoomOutcome.Started)
+            {
+                Assert.Equal(RoomOutcome.RoomStarted, left.Outcome);
+                Assert.Equal((RoomStatus.Active, 2), (stored.Status, stored.Members.Count));
+            }
+            else
+            {
+                Assert.Equal(RoomOutcome.NotEnoughPlayers, started.Outcome);
+                Assert.Equal(RoomOutcome.Left, left.Outcome);
+                Assert.Equal((RoomStatus.Waiting, 1), (stored.Status, stored.Members.Count));
+            }
+        }
     }
 
     /// <summary>Joining never reads the catalogue; only creating a room does.</summary>
