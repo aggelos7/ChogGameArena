@@ -56,6 +56,37 @@ describe('app routes', () => {
     expect(TestBed.inject(Title).getTitle()).toBe('My Chogs · Chog Game Arena');
   });
 
+  it('opens a room at /rooms/:code', async () => {
+    await harness.navigateByUrl('/rooms/K7QF3M');
+    http
+      .expectOne('/api/rooms/K7QF3M')
+      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', capacity: 6, members: [] });
+    http.expectOne('/api/games').flush(CATALOGUE);
+    harness.detectChanges();
+
+    expect(heading()).toBe('Chog Life room');
+    expect(TestBed.inject(Title).getTitle()).toBe('Room · Chog Game Arena');
+  });
+
+  it('joins from an invite link at /join/:code and replaces it with the room', async () => {
+    await harness.navigateByUrl('/join/k7qf3m');
+    http
+      .expectOne('/api/rooms/K7QF3M/join')
+      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', capacity: 6, members: [] });
+    // The room page loads lazily after the join; wait for that navigation to finish.
+    for (let tick = 0; tick < 50 && url() !== '/rooms/K7QF3M'; tick++) {
+      await new Promise((resolve) => setTimeout(resolve));
+    }
+    harness.detectChanges();
+    http
+      .expectOne('/api/rooms/K7QF3M')
+      .flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', capacity: 6, members: [] });
+    http.expectOne('/api/games').flush(CATALOGUE);
+    harness.detectChanges();
+
+    expect(url()).toBe('/rooms/K7QF3M');
+  });
+
   it('redirects unknown URLs to the home page', async () => {
     await harness.navigateByUrl('/does-not-exist');
 

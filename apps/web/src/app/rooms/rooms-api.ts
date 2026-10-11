@@ -1,0 +1,93 @@
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable } from 'rxjs';
+
+/** Mirrors `RoomMemberResponse`. Player ids never leave the server. */
+export interface RoomMember {
+  displayName: string;
+  avatarId: string;
+  isHost: boolean;
+  isYou: boolean;
+}
+
+export type RoomStatus = 'Waiting' | 'Active' | 'Completed' | 'Cancelled';
+
+/** Mirrors `RoomResponse` from the `/api/rooms` endpoints. */
+export interface Room {
+  code: string;
+  gameType: string;
+  status: RoomStatus;
+  capacity: number;
+  members: RoomMember[];
+}
+
+/** Stable `code` values of room errors (DEC-021). */
+export type RoomErrorCode =
+  | 'unknown_game'
+  | 'game_unavailable'
+  | 'already_in_room'
+  | 'room_not_found'
+  | 'room_full'
+  | 'room_started'
+  | 'room_closed';
+
+/** A room error from the server, or `unknown` for anything else (network, 5xx). */
+export interface RoomError {
+  code: RoomErrorCode | 'rate_limited' | 'unknown';
+  /** For `already_in_room`: the room the player is already in. */
+  roomCode?: string;
+}
+
+/** Room codes are six characters without look-alikes (no 0, O, 1, I or L); case does not matter. */
+export const ROOM_CODE_PATTERN = /^[2-9A-HJKMNP-Z]{6}$/;
+
+export function normalizeRoomCode(input: string): string {
+  return input.trim().toUpperCase();
+}
+
+export function toRoomError(error: unknown): RoomError {
+  if (error instanceof HttpErrorResponse) {
+    if (error.status === 429) {
+      return { code: 'rate_limited' };
+    }
+    const body = error.error as { code?: unknown; roomCode?: unknown } | null;
+    if (typeof body?.code === 'string') {
+      return { code: body.code as RoomErrorCode, roomCode: typeof body.roomCode === 'string' ? body.roomCode : undefined };
+    }
+  }
+  return { code: 'unknown' };
+}
+
+const ROOM_ERROR_MESSAGES: Record<RoomError['code'], string> = {
+  unknown_game: 'This game does not exist.',
+  game_unavailable: 'This game is not available right now.',
+  already_in_room: 'You are already in a room.',
+  room_not_found: 'No room with this code was found.',
+  room_full: 'This room is full.',
+  room_started: 'This room’s game has already started.',
+  room_closed: 'This room is closed.',
+  rate_limited: 'Too many tries in a short time. Wait a minute and try again.',
+  unknown: 'Something went wrong. Try again.',
+};
+
+export function roomErrorMessage(error: RoomError): string {
+  return ROOM_ERROR_MESSAGES[error.code] ?? ROOM_ERROR_MESSAGES.unknown;
+}
+
+/** The host and members always come from the session cookie; nothing here identifies the player. */
+@Injectable({ providedIn: 'root' })
+export class RoomsApi {
+  private readonly http = inject(HttpClient);
+
+  create(gameType: string): Observable<Room> {
+    return this.http.post<Room>('/api/rooms', { gameType });
+  }
+
+  join(code: string): Observable<Room> {
+    return this.http.post<Room>(`/api/rooms/${encodeURIComponent(code)}/join`, null);
+  }
+
+  get(code: string): Observable<Room> {
+    return this.http.get<Room>(`/api/rooms/${encodeURIComponent(code)}`);
+  }
+}

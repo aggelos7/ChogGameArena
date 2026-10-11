@@ -8,9 +8,14 @@ using Npgsql;
 
 namespace ChogGames.Infrastructure.Rooms;
 
-public enum RoomCreationStatus
+public enum RoomOutcome
 {
     Created,
+
+    Joined,
+
+    /// <summary>The player was already a member; nothing changed (DEC-021).</summary>
+    AlreadyMember,
 
     /// <summary>The game is not in the catalogue or has no registered definition.</summary>
     UnknownGame,
@@ -18,18 +23,31 @@ public enum RoomCreationStatus
     /// <summary>The game is listed but not enabled (coming soon or under maintenance).</summary>
     GameUnavailable,
 
-    /// <summary>The player already hosts a waiting room (DEC-020).</summary>
-    AlreadyHosting,
+    /// <summary>The player is already in another waiting room, as host or member (DEC-020, DEC-021).</summary>
+    AlreadyInRoom,
+
+    RoomNotFound,
+
+    RoomFull,
+
+    /// <summary>The room's match has started.</summary>
+    RoomStarted,
+
+    /// <summary>The room's match is over or the room was cancelled.</summary>
+    RoomClosed,
 }
 
-public sealed record RoomCreation(RoomCreationStatus Status, GameRoom? Room)
+/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c> or <c>AlreadyMember</c>.</param>
+/// <param name="OpenRoomCode">For <c>AlreadyInRoom</c>: the code of the room the player is already in.</param>
+public sealed record RoomResult(RoomOutcome Outcome, GameRoom? Room = null, string? OpenRoomCode = null)
 {
-    public static RoomCreation Refused(RoomCreationStatus status) => new(status, null);
+    public bool Succeeded => Room is not null;
 }
 
 /// <summary>
-/// Creates private rooms (STORY-019, ENG-001). The host is the authenticated player, never client input; the game
-/// must be registered and enabled; the code is drawn by the server and is unique.
+/// Creates and joins private rooms (STORY-019/020, ENG-001). The player is always the authenticated one, never
+/// client input. Each operation locks the player's row (and, when joining, the room's row first), so concurrent
+/// requests can neither put a player in two open rooms nor fill a room beyond its capacity.
 /// </summary>
 public sealed class RoomService(
     ChogGamesDbContext db,
@@ -42,9 +60,8 @@ public sealed class RoomService(
     public const int MaxCodeAttempts = 5;
 
     private const string CodeIndex = "IX_GameRooms_Code";
-    private const string HostIndex = "IX_GameRooms_HostPlayerId";
 
-    public async Task<RoomCreation> CreateAsync(Player host, string gameType, CancellationToken cancellationToken)
+    public async Task<RoomResult> CreateAsync(Player host, string gameType, CancellationToken cancellationToken)
     {
         var listed = catalog.Find(gameType);
         var game = listed is null
@@ -52,17 +69,19 @@ public sealed class RoomService(
             : await db.GameDefinitions.AsNoTracking().SingleOrDefaultAsync(g => g.Id == gameType, cancellationToken);
         if (listed is null || game is null)
         {
-            return RoomCreation.Refused(RoomCreationStatus.UnknownGame);
+            return new RoomResult(RoomOutcome.UnknownGame);
         }
 
         if (listed.Status != GameStatus.Available)
         {
-            return RoomCreation.Refused(RoomCreationStatus.GameUnavailable);
+            return new RoomResult(RoomOutcome.GameUnavailable);
         }
 
-        if (await db.GameRooms.AnyAsync(r => r.HostPlayerId == host.Id && r.Status == RoomStatus.Waiting, cancellationToken))
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await LockPlayerAsync(host, cancellationToken);
+        if (await OpenRoomCodeAsync(host, cancellationToken) is { } openRoom)
         {
-            return RoomCreation.Refused(RoomCreationStatus.AlreadyHosting);
+            return new RoomResult(RoomOutcome.AlreadyInRoom, OpenRoomCode: openRoom);
         }
 
         for (var attempt = 1; attempt <= MaxCodeAttempts; attempt++)
@@ -71,29 +90,86 @@ public sealed class RoomService(
             db.GameRooms.Add(room);
             try
             {
+                // Inside a transaction EF saves behind a savepoint, so a failed insert can be retried.
                 await db.SaveChangesAsync(cancellationToken);
-                return new RoomCreation(RoomCreationStatus.Created, room);
+                await transaction.CommitAsync(cancellationToken);
+                return new RoomResult(RoomOutcome.Created, room);
             }
             catch (DbUpdateException error) when (error.InnerException is PostgresException
                 {
                     SqlState: PostgresErrorCodes.UniqueViolation,
-                    ConstraintName: CodeIndex or HostIndex,
-                } violation)
+                    ConstraintName: CodeIndex,
+                })
             {
                 // Only this room's entries are detached; the caller's tracked player is left alone.
                 Detach(room);
-                if (violation.ConstraintName == HostIndex)
-                {
-                    // A concurrent request by the same host created a room first.
-                    return RoomCreation.Refused(RoomCreationStatus.AlreadyHosting);
-                }
-
                 logger.LogInformation("Room code collision on attempt {Attempt}; drawing another code.", attempt);
             }
         }
 
         throw new InvalidOperationException($"No unused room code was found in {MaxCodeAttempts} attempts.");
     }
+
+    public async Task<RoomResult> JoinAsync(Player player, RoomCode code, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        // Room first, then player: the same order everywhere, so concurrent joins cannot deadlock.
+        var roomIds = await db.Database
+            .SqlQuery<Guid>($"""SELECT "Id" AS "Value" FROM "GameRooms" WHERE "Code" = {code.Value} FOR UPDATE""")
+            .ToListAsync(cancellationToken);
+        if (roomIds is not [var roomId])
+        {
+            return new RoomResult(RoomOutcome.RoomNotFound);
+        }
+
+        var room = await db.GameRooms.SingleAsync(r => r.Id == roomId, cancellationToken);
+        if (room.IsMember(player.Id))
+        {
+            return new RoomResult(RoomOutcome.AlreadyMember, room);
+        }
+
+        switch (room.Status)
+        {
+            case RoomStatus.Active:
+                return new RoomResult(RoomOutcome.RoomStarted);
+            case RoomStatus.Completed or RoomStatus.Cancelled:
+                return new RoomResult(RoomOutcome.RoomClosed);
+        }
+
+        await LockPlayerAsync(player, cancellationToken);
+        if (await OpenRoomCodeAsync(player, cancellationToken) is { } openRoom)
+        {
+            return new RoomResult(RoomOutcome.AlreadyInRoom, OpenRoomCode: openRoom);
+        }
+
+        if (room.IsFull)
+        {
+            return new RoomResult(RoomOutcome.RoomFull);
+        }
+
+        room.Join(player, timeProvider.GetUtcNow());
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new RoomResult(RoomOutcome.Joined, room);
+    }
+
+    /// <summary>The room with this code if <paramref name="player"/> is a member; otherwise null, so non-members learn nothing.</summary>
+    public async Task<GameRoom?> FindForMemberAsync(Player player, RoomCode code, CancellationToken cancellationToken)
+    {
+        var room = await db.GameRooms.AsNoTracking().SingleOrDefaultAsync(r => r.Code == code.Value, cancellationToken);
+        return room is not null && room.IsMember(player.Id) ? room : null;
+    }
+
+    private Task LockPlayerAsync(Player player, CancellationToken cancellationToken) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""SELECT 1 FROM "Players" WHERE "Id" = {player.Id} FOR UPDATE""", cancellationToken);
+
+    /// <summary>Code of a waiting room the player is in (as host or member), if any.</summary>
+    private Task<string?> OpenRoomCodeAsync(Player player, CancellationToken cancellationToken) =>
+        db.GameRooms.AsNoTracking()
+            .Where(r => r.Status == RoomStatus.Waiting && r.Members.Any(m => m.PlayerId == player.Id))
+            .Select(r => r.Code)
+            .FirstOrDefaultAsync(cancellationToken);
 
     private void Detach(GameRoom room)
     {

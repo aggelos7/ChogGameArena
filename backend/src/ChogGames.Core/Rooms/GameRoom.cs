@@ -49,9 +49,37 @@ public sealed class GameRoom
         room._members.Add(new RoomMember(room.Id, host.Id, now));
         return room;
     }
+
+    public bool IsMember(Guid playerId) => _members.Any(m => m.PlayerId == playerId);
+
+    public bool IsFull => _members.Count >= Capacity;
+
+    /// <summary>
+    /// Adds <paramref name="player"/> to a waiting room with a free seat. The caller has checked that the player is
+    /// in no other open room (DEC-021).
+    /// </summary>
+    public void Join(Player player, DateTimeOffset now)
+    {
+        if (Status != RoomStatus.Waiting)
+        {
+            throw new InvalidOperationException("Only a waiting room can be joined.");
+        }
+
+        if (IsMember(player.Id))
+        {
+            throw new InvalidOperationException("The player is already a member of this room.");
+        }
+
+        if (IsFull)
+        {
+            throw new InvalidOperationException("The room is full.");
+        }
+
+        _members.Add(new RoomMember(Id, player.Id, now));
+    }
 }
 
-/// <summary>A player's membership of a room. Joining by code is STORY-020.</summary>
+/// <summary>A player's membership of a room.</summary>
 public sealed class RoomMember
 {
     public Guid RoomId { get; private set; }

@@ -39,6 +39,40 @@ public class GameRoomTests
         Assert.Equal(2, room.Capacity);
     }
 
+    private static GameRoom NewRoom(Player host, int maxPlayers = 6)
+    {
+        Assert.True(RoomCode.TryParse("K7QF3M", out var code));
+        return GameRoom.Create(GameDefinition.Create("chog-life", 2, maxPlayers), host, code, Now);
+    }
+
+    [Fact]
+    public void Players_join_until_the_room_is_full()
+    {
+        var host = Guest();
+        var room = NewRoom(host, maxPlayers: 3);
+        var bob = Guest();
+        var carol = Guest();
+
+        room.Join(bob, Now.AddMinutes(1));
+        room.Join(carol, Now.AddMinutes(2));
+
+        Assert.Equal([host.Id, bob.Id, carol.Id], room.Members.Select(m => m.PlayerId));
+        Assert.True(room.IsFull);
+        Assert.True(room.IsMember(carol.Id));
+        Assert.Throws<InvalidOperationException>(() => room.Join(Guest(), Now));
+        Assert.Equal(3, room.Members.Count);
+    }
+
+    [Fact]
+    public void A_member_cannot_join_twice()
+    {
+        var host = Guest();
+        var room = NewRoom(host);
+
+        Assert.Throws<InvalidOperationException>(() => room.Join(host, Now));
+        Assert.Single(room.Members);
+    }
+
     [Theory]
     [InlineData(1, 6)]
     [InlineData(2, 7)]

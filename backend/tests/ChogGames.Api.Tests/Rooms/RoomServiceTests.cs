@@ -28,10 +28,37 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         return player;
     }
 
-    private async Task<RoomCreation> Create(Player host, string gameType = GameDefinition.ChogLife)
+    private async Task<RoomResult> Create(Player host, string gameType = GameDefinition.ChogLife)
     {
         await using var db = database.CreateDbContext();
         return await Service(db).CreateAsync(host, gameType, CancellationToken.None);
+    }
+
+    private async Task<RoomResult> Join(Player player, string code)
+    {
+        Assert.True(RoomCode.TryParse(code, out var roomCode));
+        await using var db = database.CreateDbContext();
+        return await Service(db).JoinAsync(player, roomCode, CancellationToken.None);
+    }
+
+    private async Task<(GameRoom Room, Player Host)> RoomWithHost()
+    {
+        var host = await SavedGuest();
+        var created = await Create(host);
+        Assert.Equal(RoomOutcome.Created, created.Outcome);
+        return (created.Room!, host);
+    }
+
+    private async Task<GameRoom> Stored(GameRoom room)
+    {
+        await using var db = database.CreateDbContext();
+        return await db.GameRooms.AsNoTracking().SingleAsync(r => r.Id == room.Id);
+    }
+
+    private async Task SetStatus(GameRoom room, RoomStatus status)
+    {
+        await using var db = database.CreateDbContext();
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"GameRooms\" SET \"Status\" = {status.ToString()} WHERE \"Id\" = {room.Id}");
     }
 
     private async Task<List<GameRoom>> RoomsHostedBy(Player host)
@@ -47,7 +74,7 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
 
         var result = await Create(host);
 
-        Assert.Equal(RoomCreationStatus.Created, result.Status);
+        Assert.Equal(RoomOutcome.Created, result.Outcome);
         var stored = Assert.Single(await RoomsHostedBy(host));
         Assert.Equal(result.Room!.Id, stored.Id);
         Assert.Equal(codes.Issued[^1], stored.Code);
@@ -79,7 +106,7 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
 
         var result = await Create(host, gameType);
 
-        Assert.Equal((RoomCreationStatus.UnknownGame, null), (result.Status, result.Room));
+        Assert.Equal((RoomOutcome.UnknownGame, null), (result.Outcome, result.Room));
         Assert.Empty(await RoomsHostedBy(host));
         Assert.Empty(codes.Issued);
     }
@@ -94,7 +121,7 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
 
         var result = await Create(host, GameDefinition.ChogRace);
 
-        Assert.Equal((RoomCreationStatus.GameUnavailable, null), (result.Status, result.Room));
+        Assert.Equal((RoomOutcome.GameUnavailable, null), (result.Outcome, result.Room));
         Assert.Empty(await RoomsHostedBy(host));
     }
 
@@ -102,12 +129,12 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
     public async Task Host_with_a_waiting_room_cannot_open_another()
     {
         var host = await SavedGuest();
-        Assert.Equal(RoomCreationStatus.Created, (await Create(host)).Status);
+        Assert.Equal(RoomOutcome.Created, (await Create(host)).Outcome);
 
         var second = await Create(host, GameDefinition.ChogRace);
 
-        Assert.Equal(RoomCreationStatus.AlreadyHosting, second.Status);
-        Assert.Single(await RoomsHostedBy(host));
+        Assert.Equal((RoomOutcome.AlreadyInRoom, null), (second.Outcome, second.Room));
+        Assert.Equal(Assert.Single(await RoomsHostedBy(host)).Code, second.OpenRoomCode);
     }
 
     [PostgresFact]
@@ -122,25 +149,191 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
 
         var second = await Create(host);
 
-        Assert.Equal(RoomCreationStatus.Created, second.Status);
+        Assert.Equal(RoomOutcome.Created, second.Outcome);
         Assert.Equal(2, (await RoomsHostedBy(host)).Count);
     }
 
     [PostgresFact]
-    public async Task Concurrent_request_by_the_same_host_is_refused_by_the_database()
+    public async Task Concurrent_creates_by_the_same_host_open_one_room()
     {
         var host = await SavedGuest();
-        // Another request creates this host's room after our pre-check but before our insert.
-        codes.BeforeNext = () =>
-        {
-            codes.BeforeNext = null;
-            Assert.Equal(RoomCreationStatus.Created, Create(host).GetAwaiter().GetResult().Status);
-        };
 
-        var result = await Create(host);
+        var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() => Create(host))));
 
-        Assert.Equal(RoomCreationStatus.AlreadyHosting, result.Status);
+        Assert.Single(results, r => r.Outcome == RoomOutcome.Created);
+        Assert.Equal(3, results.Count(r => r.Outcome == RoomOutcome.AlreadyInRoom));
         Assert.Single(await RoomsHostedBy(host));
+    }
+
+    [PostgresFact]
+    public async Task Member_of_another_waiting_room_cannot_create_a_room()
+    {
+        var (room, _) = await RoomWithHost();
+        var bob = await SavedGuest();
+        Assert.Equal(RoomOutcome.Joined, (await Join(bob, room.Code)).Outcome);
+
+        var result = await Create(bob);
+
+        Assert.Equal((RoomOutcome.AlreadyInRoom, room.Code), (result.Outcome, result.OpenRoomCode));
+        Assert.Empty(await RoomsHostedBy(bob));
+    }
+
+    [PostgresFact]
+    public async Task Second_player_joins_a_waiting_room()
+    {
+        var (room, host) = await RoomWithHost();
+        var bob = await SavedGuest();
+        clock.Advance(TimeSpan.FromMinutes(1));
+
+        var result = await Join(bob, room.Code.ToLowerInvariant());
+
+        Assert.Equal(RoomOutcome.Joined, result.Outcome);
+        var stored = await Stored(room);
+        Assert.Equal([host.Id, bob.Id], stored.Members.OrderBy(m => m.JoinedAt).Select(m => m.PlayerId));
+        Assert.Equal(clock.GetUtcNow(), stored.Members.Single(m => m.PlayerId == bob.Id).JoinedAt);
+        Assert.Equal(host.Id, stored.HostPlayerId);
+    }
+
+    [PostgresFact]
+    public async Task Joining_again_changes_nothing()
+    {
+        var (room, host) = await RoomWithHost();
+        var bob = await SavedGuest();
+        await Join(bob, room.Code);
+
+        var again = await Join(bob, room.Code);
+        var hostJoins = await Join(host, room.Code);
+
+        Assert.Equal((RoomOutcome.AlreadyMember, RoomOutcome.AlreadyMember), (again.Outcome, hostJoins.Outcome));
+        Assert.Equal(2, (await Stored(room)).Members.Count);
+    }
+
+    [PostgresFact]
+    public async Task Unknown_code_is_not_found()
+    {
+        var bob = await SavedGuest();
+
+        var result = await Join(bob, codes.Fresh());
+
+        Assert.Equal((RoomOutcome.RoomNotFound, null), (result.Outcome, result.Room));
+    }
+
+    [PostgresFact]
+    public async Task Seventh_player_is_refused_when_six_are_in()
+    {
+        var (room, _) = await RoomWithHost();
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.Equal(RoomOutcome.Joined, (await Join(await SavedGuest(), room.Code)).Outcome);
+        }
+
+        var result = await Join(await SavedGuest(), room.Code);
+
+        Assert.Equal(RoomOutcome.RoomFull, result.Outcome);
+        Assert.Equal(6, (await Stored(room)).Members.Count);
+    }
+
+    [PostgresTheory]
+    [InlineData(RoomStatus.Active, RoomOutcome.RoomStarted)]
+    [InlineData(RoomStatus.Completed, RoomOutcome.RoomClosed)]
+    [InlineData(RoomStatus.Cancelled, RoomOutcome.RoomClosed)]
+    public async Task Room_that_is_no_longer_waiting_cannot_be_joined(RoomStatus status, RoomOutcome expected)
+    {
+        var (room, _) = await RoomWithHost();
+        var bob = await SavedGuest();
+        await SetStatus(room, status);
+
+        var result = await Join(bob, room.Code);
+
+        Assert.Equal(expected, result.Outcome);
+        Assert.Single((await Stored(room)).Members);
+    }
+
+    [PostgresFact]
+    public async Task Member_reopening_a_started_room_gets_the_room()
+    {
+        var (room, _) = await RoomWithHost();
+        var bob = await SavedGuest();
+        await Join(bob, room.Code);
+        await SetStatus(room, RoomStatus.Active);
+
+        var result = await Join(bob, room.Code);
+
+        Assert.Equal((RoomOutcome.AlreadyMember, room.Id), (result.Outcome, result.Room!.Id));
+    }
+
+    [PostgresFact]
+    public async Task Player_in_another_waiting_room_cannot_join()
+    {
+        var (first, _) = await RoomWithHost();
+        var (second, otherHost) = await RoomWithHost();
+        var bob = await SavedGuest();
+        await Join(bob, first.Code);
+
+        var asMember = await Join(bob, second.Code);
+        var asHost = await Join(otherHost, first.Code);
+
+        Assert.Equal((RoomOutcome.AlreadyInRoom, first.Code), (asMember.Outcome, asMember.OpenRoomCode));
+        Assert.Equal((RoomOutcome.AlreadyInRoom, second.Code), (asHost.Outcome, asHost.OpenRoomCode));
+        Assert.Single((await Stored(second)).Members);
+    }
+
+    [PostgresFact]
+    public async Task Concurrent_joins_never_overfill_a_room()
+    {
+        var (room, _) = await RoomWithHost();
+        for (var i = 0; i < 4; i++)
+        {
+            await Join(await SavedGuest(), room.Code);
+        }
+
+        var joiners = new List<Player>();
+        for (var i = 0; i < 4; i++)
+        {
+            joiners.Add(await SavedGuest());
+        }
+
+        var results = await Task.WhenAll(joiners.Select(p => Task.Run(() => Join(p, room.Code))));
+
+        Assert.Single(results, r => r.Outcome == RoomOutcome.Joined);
+        Assert.Equal(3, results.Count(r => r.Outcome == RoomOutcome.RoomFull));
+        Assert.Equal(6, (await Stored(room)).Members.Count);
+    }
+
+    [PostgresFact]
+    public async Task Concurrent_joins_by_one_player_enter_one_room()
+    {
+        var rooms = new List<GameRoom>();
+        for (var i = 0; i < 3; i++)
+        {
+            rooms.Add((await RoomWithHost()).Room);
+        }
+
+        var bob = await SavedGuest();
+
+        var results = await Task.WhenAll(rooms.Select(r => Task.Run(() => Join(bob, r.Code))));
+
+        Assert.Single(results, r => r.Outcome == RoomOutcome.Joined);
+        Assert.Equal(2, results.Count(r => r.Outcome == RoomOutcome.AlreadyInRoom));
+        var memberships = 0;
+        foreach (var r in rooms)
+        {
+            memberships += (await Stored(r)).Members.Count(m => m.PlayerId == bob.Id);
+        }
+
+        Assert.Equal(1, memberships);
+    }
+
+    [PostgresFact]
+    public async Task Only_members_can_read_a_room()
+    {
+        var (room, host) = await RoomWithHost();
+        var bob = await SavedGuest();
+        Assert.True(RoomCode.TryParse(room.Code, out var code));
+        await using var db = database.CreateDbContext();
+
+        Assert.Equal(room.Id, (await Service(db).FindForMemberAsync(host, code, CancellationToken.None))?.Id);
+        Assert.Null(await Service(db).FindForMemberAsync(bob, code, CancellationToken.None));
     }
 
     [PostgresFact]
@@ -150,12 +343,12 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         var bob = await SavedGuest();
         var taken = codes.Fresh();
         codes.Queue.Enqueue(taken);
-        Assert.Equal(RoomCreationStatus.Created, (await Create(alice)).Status);
+        Assert.Equal(RoomOutcome.Created, (await Create(alice)).Outcome);
         codes.Queue.Enqueue(taken);
 
         var result = await Create(bob);
 
-        Assert.Equal(RoomCreationStatus.Created, result.Status);
+        Assert.Equal(RoomOutcome.Created, result.Outcome);
         Assert.NotEqual(taken, result.Room!.Code);
         Assert.Equal(result.Room.Code, Assert.Single(await RoomsHostedBy(bob)).Code);
     }
@@ -167,7 +360,7 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         var bob = await SavedGuest();
         var taken = codes.Fresh();
         codes.Queue.Enqueue(taken);
-        Assert.Equal(RoomCreationStatus.Created, (await Create(alice)).Status);
+        Assert.Equal(RoomOutcome.Created, (await Create(alice)).Outcome);
         for (var i = 0; i < RoomService.MaxCodeAttempts; i++)
         {
             codes.Queue.Enqueue(taken);
@@ -243,13 +436,10 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
 
         public List<string> Issued { get; } = [];
 
-        public Action? BeforeNext { get; set; }
-
         public string Fresh() => random.Next().Value;
 
         public RoomCode Next()
         {
-            BeforeNext?.Invoke();
             Assert.True(RoomCode.TryParse(Queue.TryDequeue(out var queued) ? queued : Fresh(), out var code));
             Issued.Add(code.Value);
             return code;

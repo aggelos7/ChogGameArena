@@ -259,12 +259,24 @@ Match character check (STORY-018, NFT-008/009, DEC-019): `CharacterEligibilitySe
 
 Mock ownership isn't exclusive: every other wallet reports the same fixture tokens.
 
-Game registry and rooms (STORY-019, ENG-001, DEC-020): `RoomService.CreateAsync(host, gameType)` creates a private room. There is no endpoint yet; `POST /api/rooms` is STORY-020.
+Game registry and rooms (STORY-019/020, ENG-001, DEC-020/021): every room request runs as the session's player; player ids are never accepted from or returned to clients.
 - **Registered games:** the `GameDefinitions` table, seeded by migration with `chog-life` and `chog-race` (2–6 players each). A new game needs a migration and a `Games:Items` entry.
-- **Enabled games:** the `Games:Items` status. A game that isn't registered or isn't listed is `UnknownGame`; a listed game that isn't `Available` is `GameUnavailable`.
-- **Room:** status `Waiting`, the authenticated player as host and first member, capacity from the game (6).
-- **Code:** 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0, O, 1, I or L), drawn with secure randomness, unique in the database and redrawn on a collision (up to 5 times). Input is accepted in any letter case.
-- **One open room per host:** a player who already hosts a `Waiting` room gets `AlreadyHosting`, enforced by a filtered unique index, so concurrent requests can't get round it.
+- **Enabled games:** the `Games:Items` status; only `Available` games get rooms.
+- **Room:** status `Waiting`, the creator as host and first member, capacity from the game (6).
+- **Code:** 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0, O, 1, I or L), drawn with secure randomness, unique in the database and redrawn on a collision (up to 5 times). Input is accepted in any letter case. The invite link is `/join/<code>` in the web app.
+- **One open room per player:** a player in a `Waiting` room, as host or member, can't create or join another. Each create or join locks the player's row (and, for a join, the room's row first), so concurrent requests can't get round this or overfill a room.
+
+| Endpoint | Request | Responses |
+|---|---|---|
+| `POST /api/rooms` | `{ "gameType": "chog-life" }` | `201` room, `Location: /api/rooms/<code>`; `400 unknown_game`; `409 game_unavailable` or `already_in_room` |
+| `POST /api/rooms/{code}/join` | — | `200` room (also when already a member, nothing changes); `404 room_not_found`; `409 room_full`, `room_started`, `room_closed` or `already_in_room` |
+| `GET /api/rooms/{code}` | — | `200` room for members; `404 room_not_found` for everyone else |
+
+All three need a session (`401` without) and return `429` over the per-player limit. A room is `{ code, gameType, status, capacity, members[{ displayName, avatarId, isHost, isYou }] }`. Errors are problem details with a stable `code` (clients rely on it, never on the text); `already_in_room` also carries `roomCode`, the room the player is in.
+
+| Setting (`Rooms:`) | Default | |
+|---|---|---|
+| `RequestsPerMinutePerPlayer` | `60` | room requests per player per minute (1–1000); also limits guessing codes |
 
 Health endpoints:
 
