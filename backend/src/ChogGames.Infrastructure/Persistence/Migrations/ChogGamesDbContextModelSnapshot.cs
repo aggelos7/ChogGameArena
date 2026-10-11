@@ -23,6 +23,42 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ChogGames.Core.Games.GameDefinition", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("MaxPlayers")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MinPlayers")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("GameDefinitions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GameDefinitions_Id_Format", "\"Id\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'");
+
+                            t.HasCheckConstraint("CK_GameDefinitions_Players", "\"MinPlayers\" >= 2 AND \"MinPlayers\" <= \"MaxPlayers\" AND \"MaxPlayers\" <= 6");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = "chog-life",
+                            MaxPlayers = 6,
+                            MinPlayers = 2
+                        },
+                        new
+                        {
+                            Id = "chog-race",
+                            MaxPlayers = 6,
+                            MinPlayers = 2
+                        });
+                });
+
             modelBuilder.Entity("ChogGames.Core.Players.Player", b =>
                 {
                     b.Property<Guid>("Id")
@@ -93,6 +129,75 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_Players_Wins_WithinGamesPlayed", "\"Wins\" >= 0 AND \"Wins\" <= \"GamesPlayed\"");
                         });
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Rooms.GameRoom", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Capacity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character(6)")
+                        .IsFixedLength();
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GameType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("HostPlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("GameType");
+
+                    b.HasIndex("HostPlayerId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Waiting'");
+
+                    b.ToTable("GameRooms", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_GameRooms_Capacity", "\"Capacity\" BETWEEN 2 AND 6");
+
+                            t.HasCheckConstraint("CK_GameRooms_Code_Format", "\"Code\" ~ '^[2-9A-HJKMNP-Z]{6}$'");
+
+                            t.HasCheckConstraint("CK_GameRooms_Status", "\"Status\" IN ('Waiting', 'Active', 'Completed', 'Cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Rooms.RoomMember", b =>
+                {
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("RoomId", "PlayerId");
+
+                    b.HasIndex("PlayerId");
+
+                    b.ToTable("RoomMembers", (string)null);
                 });
 
             modelBuilder.Entity("ChogGames.Infrastructure.Identity.GuestSession", b =>
@@ -293,6 +398,36 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.ToTable("WalletChallenges", (string)null);
                 });
 
+            modelBuilder.Entity("ChogGames.Core.Rooms.GameRoom", b =>
+                {
+                    b.HasOne("ChogGames.Core.Games.GameDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("GameType")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithMany()
+                        .HasForeignKey("HostPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Rooms.RoomMember", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ChogGames.Core.Rooms.GameRoom", null)
+                        .WithMany("Members")
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ChogGames.Infrastructure.Identity.GuestSession", b =>
                 {
                     b.HasOne("ChogGames.Core.Players.Player", "Player")
@@ -320,6 +455,11 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PlayerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Rooms.GameRoom", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("ChogGames.Infrastructure.Nfts.Cache.ChogNft", b =>

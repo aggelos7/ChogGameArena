@@ -1,12 +1,14 @@
 using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Nfts;
+using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Nfts;
 using ChogGames.Infrastructure.Nfts.Cache;
 using ChogGames.Infrastructure.Nfts.Metadata;
 using ChogGames.Infrastructure.Nfts.Monad;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Rooms;
 using ChogGames.Infrastructure.Wallets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -60,6 +62,8 @@ public static class ConfigurationServiceCollectionExtensions
             .ValidateOnStart();
         services.AddScoped<WalletSignInService>();
         services.AddScoped<CharacterEligibilityService>();
+        services.AddSingleton<IRoomCodeGenerator, SecureRoomCodeGenerator>();
+        services.AddScoped<RoomService>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()

@@ -259,6 +259,13 @@ Match character check (STORY-018, NFT-008/009, DEC-019): `CharacterEligibilitySe
 
 Mock ownership isn't exclusive: every other wallet reports the same fixture tokens.
 
+Game registry and rooms (STORY-019, ENG-001, DEC-020): `RoomService.CreateAsync(host, gameType)` creates a private room. There is no endpoint yet; `POST /api/rooms` is STORY-020.
+- **Registered games:** the `GameDefinitions` table, seeded by migration with `chog-life` and `chog-race` (2–6 players each). A new game needs a migration and a `Games:Items` entry.
+- **Enabled games:** the `Games:Items` status. A game that isn't registered or isn't listed is `UnknownGame`; a listed game that isn't `Available` is `GameUnavailable`.
+- **Room:** status `Waiting`, the authenticated player as host and first member, capacity from the game (6).
+- **Code:** 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0, O, 1, I or L), drawn with secure randomness, unique in the database and redrawn on a collision (up to 5 times). Input is accepted in any letter case.
+- **One open room per host:** a player who already hosts a `Waiting` room gets `AlreadyHosting`, enforced by a filtered unique index, so concurrent requests can't get round it.
+
 Health endpoints:
 
 | Endpoint | Checks | Healthy | Unhealthy |
