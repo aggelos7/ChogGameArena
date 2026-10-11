@@ -391,11 +391,46 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         await using var db = database.CreateDbContext();
 
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO "GameRooms" ("Id", "Code", "GameType", "HostPlayerId", "Status", "Capacity", "CreatedAt")
-            VALUES ({Guid.NewGuid()}, {code}, {gameType}, {host.Id}, {status}, {capacity}, {clock.GetUtcNow()})
+            INSERT INTO "GameRooms" ("Id", "Code", "GameType", "HostPlayerId", "Status", "Capacity", "MinPlayers", "CreatedAt")
+            VALUES ({Guid.NewGuid()}, {code}, {gameType}, {host.Id}, {status}, {capacity}, 2, {clock.GetUtcNow()})
             """));
 
         Assert.Equal(sqlState, error.SqlState);
+    }
+
+    [PostgresTheory]
+    [InlineData(1, 6, "Waiting", false)] // check: minimum below two
+    [InlineData(4, 3, "Waiting", false)] // check: minimum above capacity
+    [InlineData(2, 6, "Waiting", true)] // check: a waiting room has not started
+    public async Task Database_rejects_invalid_lobby_settings(int minPlayers, int capacity, string status, bool started)
+    {
+        var host = await SavedGuest();
+        await using var db = database.CreateDbContext();
+        DateTimeOffset? startedAt = started ? clock.GetUtcNow() : null;
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "GameRooms" ("Id", "Code", "GameType", "HostPlayerId", "Status", "Capacity", "MinPlayers", "CreatedAt", "StartedAt")
+            VALUES ({Guid.NewGuid()}, 'K7QF3M', 'chog-life', {host.Id}, {status}, {capacity}, {minPlayers}, {clock.GetUtcNow()}, {startedAt})
+            """));
+
+        Assert.Equal("23514", error.SqlState);
+    }
+
+    [PostgresTheory]
+    [InlineData("Standard", null)] // check: ready needs both the kind and the id
+    [InlineData(null, "mint")]
+    [InlineData("Shiny", "mint")] // check: kind
+    public async Task Database_rejects_invalid_ready_state(string? kind, string? characterId)
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "ReadyCharacterKind" = {kind}, "ReadyCharacterId" = {characterId}
+            WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+
+        Assert.Equal(("23514", "CK_RoomMembers_Ready"), (error.SqlState, error.ConstraintName));
     }
 
     [PostgresFact]
@@ -407,8 +442,8 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         await using var db = database.CreateDbContext();
 
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO "GameRooms" ("Id", "Code", "GameType", "HostPlayerId", "Status", "Capacity", "CreatedAt")
-            VALUES ({Guid.NewGuid()}, {code}, 'chog-life', {bob.Id}, 'Waiting', 6, {clock.GetUtcNow()})
+            INSERT INTO "GameRooms" ("Id", "Code", "GameType", "HostPlayerId", "Status", "Capacity", "MinPlayers", "CreatedAt")
+            VALUES ({Guid.NewGuid()}, {code}, 'chog-life', {bob.Id}, 'Waiting', 6, 2, {clock.GetUtcNow()})
             """));
 
         Assert.Equal(("23505", "IX_GameRooms_Code"), (error.SqlState, error.ConstraintName));

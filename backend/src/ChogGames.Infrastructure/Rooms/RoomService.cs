@@ -35,9 +35,29 @@ public enum RoomOutcome
 
     /// <summary>The room's match is over or the room was cancelled.</summary>
     RoomClosed,
+
+    /// <summary>The member's ready status was set (or already had that value).</summary>
+    ReadyChanged,
+
+    Started,
+
+    /// <summary>Only the host can start the room.</summary>
+    NotHost,
+
+    /// <summary>Fewer members than the game's minimum.</summary>
+    NotEnoughPlayers,
+
+    /// <summary>A member is not ready, or changed Chog after marking ready.</summary>
+    PlayersNotReady,
+
+    /// <summary>A member's selected NFT is not owned by their wallet now; those members were set back to not ready.</summary>
+    CharacterUnavailable,
+
+    /// <summary>NFT ownership can't be read right now, so the room can't start (DEC-019); nothing changed.</summary>
+    OwnershipUnavailable,
 }
 
-/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c> or <c>AlreadyMember</c>.</param>
+/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c>, <c>AlreadyMember</c>, <c>ReadyChanged</c> or <c>Started</c>.</param>
 /// <param name="OpenRoomCode">For <c>AlreadyInRoom</c>: the code of the room the player is already in.</param>
 public sealed record RoomResult(RoomOutcome Outcome, GameRoom? Room = null, string? OpenRoomCode = null)
 {

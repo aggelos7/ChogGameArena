@@ -32,7 +32,7 @@ describe('Join room page', () => {
     expect(element().querySelector('[role="status"]')?.textContent).toContain('Joining room…');
     const req = http.expectOne('/api/rooms/K7QF3M/join');
     expect(req.request.method).toBe('POST');
-    req.flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', capacity: 6, members: [] });
+    req.flush({ code: 'K7QF3M', gameType: 'chog-life', status: 'Waiting', minPlayers: 2, capacity: 6, members: [] });
 
     expect(navigate).toHaveBeenCalledWith(['/rooms', 'K7QF3M'], { replaceUrl: true });
   });

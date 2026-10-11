@@ -12,7 +12,8 @@ namespace ChogGames.Api.Rooms;
 
 /// <summary>
 /// Private rooms (STORY-020, ENG-001): create a room for an enabled game, join one by its code (typed or from an invite
-/// link) and read a room you are in. The player is always the session's; errors carry a stable <c>code</c> (DEC-021).
+/// link) and read a room you are in. In the lobby (STORY-021, ENG-002) members mark ready and the host starts.
+/// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022).
 /// </summary>
 public static class RoomEndpoints
 {
@@ -20,9 +21,17 @@ public static class RoomEndpoints
 
     public sealed record CreateRoomRequest(string? GameType);
 
-    public sealed record RoomMemberResponse(string DisplayName, string AvatarId, bool IsHost, bool IsYou);
+    public sealed record SetReadyRequest(bool? Ready);
 
-    public sealed record RoomResponse(string Code, string GameType, RoomStatus Status, int Capacity, RoomMemberResponse[] Members);
+    /// <summary>The member's selected Chog. <c>Color</c> is set for standard Chogs; NFTs show their token id.</summary>
+    public sealed record RoomCharacterResponse(CharacterKind Kind, string Id, string Name, string? Color);
+
+    /// <param name="Ability">The chosen ability; always null until ability selection (STORY-033).</param>
+    public sealed record RoomMemberResponse(
+        string DisplayName, string AvatarId, bool IsHost, bool IsYou, bool IsReady, RoomCharacterResponse Character, string? Ability);
+
+    public sealed record RoomResponse(
+        string Code, string GameType, RoomStatus Status, int MinPlayers, int Capacity, RoomMemberResponse[] Members);
 
     /// <summary>Stable error codes; clients rely on these, never on the message text.</summary>
     public static class ErrorCodes
@@ -34,6 +43,11 @@ public static class RoomEndpoints
         public const string RoomFull = "room_full";
         public const string RoomStarted = "room_started";
         public const string RoomClosed = "room_closed";
+        public const string NotHost = "not_host";
+        public const string NotEnoughPlayers = "not_enough_players";
+        public const string PlayersNotReady = "players_not_ready";
+        public const string CharacterUnavailable = "character_unavailable";
+        public const string OwnershipUnavailable = "ownership_unavailable";
     }
 
     public static IServiceCollection AddRooms(this IServiceCollection services, IConfiguration configuration)
@@ -62,6 +76,8 @@ public static class RoomEndpoints
         rooms.MapPost("", CreateRoomAsync).WithName("CreateRoom");
         rooms.MapPost("/{code}/join", JoinRoomAsync).WithName("JoinRoom");
         rooms.MapGet("/{code}", GetRoomAsync).WithName("GetRoom");
+        rooms.MapPut("/{code}/ready", SetReadyAsync).WithName("SetRoomReady");
+        rooms.MapPost("/{code}/start", StartRoomAsync).WithName("StartRoom");
 
         return endpoints;
     }
@@ -126,6 +142,57 @@ public static class RoomEndpoints
         return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
     }
 
+    private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, ValidationProblem, NotFound>> SetReadyAsync(
+        string code, SetReadyRequest? request, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, CancellationToken cancellationToken)
+    {
+        var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
+        if (player is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (request?.Ready is not { } ready)
+        {
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["ready"] = ["Ready must be true or false."] });
+        }
+
+        if (!RoomCode.TryParse(code, out var roomCode))
+        {
+            return Failure(new RoomResult(RoomOutcome.RoomNotFound));
+        }
+
+        var result = await lobby.SetReadyAsync(player, roomCode, ready, cancellationToken);
+        if (result.Room is not { } room)
+        {
+            return Failure(result);
+        }
+
+        return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
+    }
+
+    private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> StartRoomAsync(
+        string code, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, CancellationToken cancellationToken)
+    {
+        var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
+        if (player is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (!RoomCode.TryParse(code, out var roomCode))
+        {
+            return Failure(new RoomResult(RoomOutcome.RoomNotFound));
+        }
+
+        var result = await lobby.StartAsync(player, roomCode, cancellationToken);
+        if (result.Room is not { } room)
+        {
+            return Failure(result);
+        }
+
+        return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
+    }
+
     private static ProblemHttpResult Failure(RoomResult result)
     {
         var (status, code, detail) = result.Outcome switch
@@ -137,6 +204,13 @@ public static class RoomEndpoints
             RoomOutcome.RoomStarted => (StatusCodes.Status409Conflict, ErrorCodes.RoomStarted, "This room's game has already started."),
             RoomOutcome.RoomClosed => (StatusCodes.Status409Conflict, ErrorCodes.RoomClosed, "This room is closed."),
             RoomOutcome.RoomNotFound => (StatusCodes.Status404NotFound, ErrorCodes.RoomNotFound, "No room with this code was found."),
+            RoomOutcome.NotHost => (StatusCodes.Status403Forbidden, ErrorCodes.NotHost, "Only the host can start the game."),
+            RoomOutcome.NotEnoughPlayers => (StatusCodes.Status409Conflict, ErrorCodes.NotEnoughPlayers, "More players are needed to start."),
+            RoomOutcome.PlayersNotReady => (StatusCodes.Status409Conflict, ErrorCodes.PlayersNotReady, "Every player must be ready to start."),
+            RoomOutcome.CharacterUnavailable => (
+                StatusCodes.Status409Conflict, ErrorCodes.CharacterUnavailable, "A player no longer owns their chosen Chog and must choose again."),
+            RoomOutcome.OwnershipUnavailable => (
+                StatusCodes.Status503ServiceUnavailable, ErrorCodes.OwnershipUnavailable, "Chog ownership can't be checked right now. Try again shortly."),
             _ => throw new ArgumentOutOfRangeException(nameof(result), result.Outcome, "Not a failure."),
         };
 
@@ -154,18 +228,42 @@ public static class RoomEndpoints
         var memberIds = room.Members.Select(m => m.PlayerId).ToArray();
         var players = await db.Players.AsNoTracking()
             .Where(p => memberIds.Contains(p.Id))
-            .Select(p => new { p.Id, p.DisplayName, p.AvatarId })
             .ToDictionaryAsync(p => p.Id, cancellationToken);
 
         // Player ids stay on the server; members are described only by what the lobby shows.
         var members = room.Members
             .OrderBy(m => m.JoinedAt)
             .ThenBy(m => m.PlayerId != room.HostPlayerId)
-            .Select(m => new RoomMemberResponse(
-                players[m.PlayerId].DisplayName, players[m.PlayerId].AvatarId, m.PlayerId == room.HostPlayerId, m.PlayerId == caller.Id))
+            .Select(m =>
+            {
+                var player = players[m.PlayerId];
+                return new RoomMemberResponse(
+                    player.DisplayName,
+                    player.AvatarId,
+                    m.PlayerId == room.HostPlayerId,
+                    m.PlayerId == caller.Id,
+                    m.IsReadyWith(player),
+                    ToCharacter(player),
+                    Ability: null);
+            })
             .ToArray();
 
-        return new RoomResponse(room.Code, room.GameType, room.Status, room.Capacity, members);
+        return new RoomResponse(room.Code, room.GameType, room.Status, room.MinPlayers, room.Capacity, members);
+    }
+
+    /// <summary>
+    /// The selected Chog as stored; ownership is checked when the host starts, not here. A retired standard Chog
+    /// shows as the default, as at start.
+    /// </summary>
+    private static RoomCharacterResponse ToCharacter(Player player)
+    {
+        if (player.SelectedCharacterKind == CharacterKind.Nft)
+        {
+            return new RoomCharacterResponse(CharacterKind.Nft, player.SelectedCharacterId, $"Chog #{player.SelectedCharacterId}", null);
+        }
+
+        var standard = DefaultAvatar.TryFind(player.SelectedCharacterId, out var found) ? found : DefaultAvatar.Classic;
+        return new RoomCharacterResponse(CharacterKind.Standard, standard.Id, standard.Name, standard.Color);
     }
 
     private static Task<Player?> FindCurrentPlayerAsync(ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
@@ -180,6 +278,6 @@ public sealed class RoomOptions
 {
     public const string SectionName = "Rooms";
 
-    /// <summary>Room requests (create, join, read) per player per minute.</summary>
+    /// <summary>Room requests (create, join, read, ready, start) per player per minute.</summary>
     public int RequestsPerMinutePerPlayer { get; set; } = 60;
 }

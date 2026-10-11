@@ -247,7 +247,7 @@ Character gallery (STORY-017, NFT-002/004/005/006): the web app's **My Chogs** p
 |---|---|---|
 | `RequestsPerMinutePerPlayer` | `30` | gallery and selection requests per player per minute (1–1000); each may read the chain |
 
-Match character check (STORY-018, NFT-008/009, DEC-019): `CharacterEligibilityService.SnapshotForMatchAsync(player)` is what match start calls (STORY-023) to fix each player's character. There is no endpoint for it.
+Match character check (STORY-018, NFT-008/009, DEC-019): `CharacterEligibilityService.SnapshotForMatchAsync(player)` is what the host's start calls (STORY-021) to check each player's character. There is no endpoint for it.
 - **Standard Chog:** always eligible; no chain call.
 - **NFT:** ownership is read live with `FindOwnedAsync` every time, never from stored ownership or the gallery. The results are:
   - `Eligible` with a snapshot;
@@ -255,28 +255,32 @@ Match character check (STORY-018, NFT-008/009, DEC-019): `CharacterEligibilitySe
   - `OwnershipUnavailable`: the chain can't be read, so the match doesn't start with that NFT, though a standard Chog still works.
 - **Snapshot:** an immutable `CharacterSnapshot`: kind, id, name, image, a copy of the traits, the verified wallet and the time. Later transfers, metadata refreshes or a new gallery choice don't change it. Each match takes a new one, so ownership is checked again.
 - **Selection:** the player's saved choice is never changed by this check.
-- **Storage:** the snapshot is stored with the match player record when matches exist (STORY-023/028).
+- **Storage:** the snapshot is not stored yet; it is kept with the match player record when matches exist (STORY-023/028).
 
 Mock ownership isn't exclusive: every other wallet reports the same fixture tokens.
 
-Game registry and rooms (STORY-019/020, ENG-001, DEC-020/021): every room request runs as the session's player; player ids are never accepted from or returned to clients.
+Game registry, rooms and lobby (STORY-019/020/021, ENG-001/002, DEC-020/021/022): every room request runs as the session's player; player ids are never accepted from or returned to clients.
 - **Registered games:** the `GameDefinitions` table, seeded by migration with `chog-life` and `chog-race` (2–6 players each). A new game needs a migration and a `Games:Items` entry.
 - **Enabled games:** the `Games:Items` status; only `Available` games get rooms.
-- **Room:** status `Waiting`, the creator as host and first member, capacity from the game (6).
+- **Room:** status `Waiting`, the creator as host and first member, capacity and minimum players from the game (2–6).
 - **Code:** 6 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0, O, 1, I or L), drawn with secure randomness, unique in the database and redrawn on a collision (up to 5 times). Input is accepted in any letter case. The invite link is `/join/<code>` in the web app.
 - **One open room per player:** a player in a `Waiting` room, as host or member, can't create or join another. Each create or join locks the player's row (and, for a join, the room's row first), so concurrent requests can't get round this or overfill a room.
+- **Lobby:** each member's selected Chog, ability (always `null` until STORY-033) and ready status. Ready is recorded with the Chog selected at that moment, so choosing another Chog makes the player not ready.
+- **Start:** host only; needs between the game's minimum and capacity of members, every one ready (the host too). Every NFT Chog's ownership is then read live: a member whose NFT has left their wallet is set back to not ready and nothing starts (`character_unavailable`); if ownership can't be read nothing changes (`503 ownership_unavailable`). Otherwise the room becomes `Active` with `startedAt`. Ready and start lock the room's row and then the members' rows, so a start can't race a join or a ready change.
 
 | Endpoint | Request | Responses |
 |---|---|---|
 | `POST /api/rooms` | `{ "gameType": "chog-life" }` | `201` room, `Location: /api/rooms/<code>`; `400 unknown_game`; `409 game_unavailable` or `already_in_room` |
 | `POST /api/rooms/{code}/join` | — | `200` room (also when already a member, nothing changes); `404 room_not_found`; `409 room_full`, `room_started`, `room_closed` or `already_in_room` |
 | `GET /api/rooms/{code}` | — | `200` room for members; `404 room_not_found` for everyone else |
+| `PUT /api/rooms/{code}/ready` | `{ "ready": true }` | `200` room; `400` without a boolean `ready`; `404 room_not_found`; `409 room_started` or `room_closed` |
+| `POST /api/rooms/{code}/start` | — | `200` room (`Active`); `403 not_host`; `404 room_not_found`; `409 not_enough_players`, `players_not_ready`, `character_unavailable`, `room_started` or `room_closed`; `503 ownership_unavailable` |
 
-All three need a session (`401` without) and return `429` over the per-player limit. A room is `{ code, gameType, status, capacity, members[{ displayName, avatarId, isHost, isYou }] }`. Errors are problem details with a stable `code` (clients rely on it, never on the text); `already_in_room` also carries `roomCode`, the room the player is in.
+All of them need a session (`401` without) and return `429` over the per-player limit. A room is `{ code, gameType, status, minPlayers, capacity, members[{ displayName, avatarId, isHost, isYou, isReady, character{ kind, id, name, color }, ability }] }`; `character.color` is set for standard Chogs, and an NFT shows as `Chog #<id>`. Errors are problem details with a stable `code` (clients rely on it, never on the text); `already_in_room` also carries `roomCode`, the room the player is in.
 
 | Setting (`Rooms:`) | Default | |
 |---|---|---|
-| `RequestsPerMinutePerPlayer` | `60` | room requests per player per minute (1–1000); also limits guessing codes |
+| `RequestsPerMinutePerPlayer` | `60` | room requests (create, join, read, ready, start) per player per minute (1–1000); also limits guessing codes |
 
 Health endpoints:
 

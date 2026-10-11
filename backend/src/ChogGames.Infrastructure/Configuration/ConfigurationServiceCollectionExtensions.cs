@@ -64,6 +64,7 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddScoped<CharacterEligibilityService>();
         services.AddSingleton<IRoomCodeGenerator, SecureRoomCodeGenerator>();
         services.AddScoped<RoomService>();
+        services.AddScoped<LobbyService>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()

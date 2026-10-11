@@ -35,24 +35,73 @@
         </span>
       </section>
 
+      @if (current.status === 'Active') {
+        <p class="started" role="status" data-started>The game has started.</p>
+      } @else if (current.status !== 'Waiting') {
+        <p class="started" role="status">This room is closed.</p>
+      }
+
       <section aria-labelledby="players-heading">
         <h2 id="players-heading">Players {{ current.members.length }}/{{ current.capacity }}</h2>
         <ul class="members" data-list="members">
           @for (member of current.members; track $index) {
-            <li>
-              <span class="name">{{ member.displayName }}</span>
-              @if (member.isHost) {
-                <span class="tag host">Host</span>
-              }
-              @if (member.isYou) {
-                <span class="tag you">You</span>
-              }
+            <li [attr.data-ready]="member.isReady">
+              <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="2.5" />
+              <div class="who">
+                <p class="line">
+                  <span class="name">{{ member.displayName }}</span>
+                  @if (member.isHost) {
+                    <span class="tag host">Host</span>
+                  }
+                  @if (member.isYou) {
+                    <span class="tag you">You</span>
+                  }
+                </p>
+                <p class="details">
+                  <span data-chog>{{ member.character.name }}</span>
+                  ·
+                  <span data-ability>{{ member.ability ?? 'Ability not chosen yet' }}</span>
+                </p>
+              </div>
+              <span class="readiness" [class.ready]="member.isReady" data-readiness>
+                {{ member.isReady ? 'Ready' : 'Not ready' }}
+              </span>
             </li>
           }
         </ul>
-        <p class="hint">Others don’t appear automatically yet: refresh to see who joined.</p>
+        <p class="hint">Others don’t appear automatically yet: refresh to see who joined and who is ready.</p>
         <button type="button" (click)="load()">Refresh</button>
       </section>
+
+      @if (current.status === 'Waiting' && you(); as me) {
+        <section class="lobby" aria-labelledby="lobby-heading">
+          <h2 id="lobby-heading">Get ready</h2>
+          <p class="hint">
+            You’re playing as <strong>{{ me.character.name }}</strong>.
+            <a routerLink="/chogs">Change Chog</a> (you’ll need to mark ready again).
+          </p>
+          <button type="button" class="primary" [disabled]="busy()" (click)="toggleReady()">
+            {{ me.isReady ? 'Not ready' : 'I’m ready' }}
+          </button>
+
+          @if (me.isHost) {
+            <button type="button" class="primary" [disabled]="busy() || !canStart()" (click)="start()">Start game</button>
+            <p class="hint" data-start-hint>
+              @if (canStart()) {
+                Everyone is ready.
+              } @else {
+                Starts with {{ current.minPlayers }}–{{ current.capacity }} players, all ready, including you.
+              }
+            </p>
+          } @else {
+            <p class="hint">The host starts the game when everyone is ready.</p>
+          }
+
+          @if (actionError(); as failure) {
+            <p class="action-error" role="alert" data-error="action">{{ message(failure) }}</p>
+          }
+        </section>
+      }
     }
   }
 }
