@@ -53,6 +53,20 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<string>("SelectedCharacterId")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(78)
+                        .HasColumnType("character varying(78)")
+                        .HasDefaultValue("classic");
+
+                    b.Property<string>("SelectedCharacterKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Standard");
+
                     b.Property<string>("WalletAddress")
                         .HasMaxLength(42)
                         .HasColumnType("character varying(42)");
@@ -70,6 +84,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.ToTable("Players", null, t =>
                         {
                             t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");
+
+                            t.HasCheckConstraint("CK_Players_SelectedCharacter", "(\"SelectedCharacterKind\" = 'Standard' AND \"SelectedCharacterId\" ~ '^[a-z0-9-]{1,32}$') OR (\"SelectedCharacterKind\" = 'Nft' AND \"Kind\" = 'Wallet' AND \"SelectedCharacterId\" ~ '^(0|[1-9][0-9]{0,77})$')");
 
                             t.HasCheckConstraint("CK_Players_WalletAddress_Format", "\"WalletAddress\" ~ '^0x[0-9a-f]{40}$'");
 

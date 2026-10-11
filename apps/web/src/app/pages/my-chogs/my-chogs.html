@@ -1,0 +1,127 @@
+<h1>My Chogs</h1>
+
+@switch (loadState()) {
+  @case ('loading') {
+    <app-loading-state message="Loading your Chogs…" />
+  }
+  @case ('error') {
+    <app-error-state message="Your Chogs could not be loaded." (retry)="load()" />
+  }
+  @case ('ready') {
+    @if (characters(); as current) {
+      <p class="intro">Choose the Chog you play as in your next match. Every Chog has the same abilities.</p>
+
+      <fieldset class="choice">
+        <legend class="visually-hidden">Character for your next match</legend>
+
+        <section aria-labelledby="nft-heading">
+          <h2 id="nft-heading">Your Chog NFTs</h2>
+          @switch (current.nftStatus) {
+            @case ('NoWallet') {
+              <app-empty-state message="Sign in with your wallet to see the Chog NFTs you own.">
+                <a routerLink="/profile">Sign in on your profile</a>
+              </app-empty-state>
+            }
+            @case ('Unavailable') {
+              <app-error-state
+                message="Your Chog NFTs cannot be loaded right now. You can still choose a standard Chog."
+                (retry)="load()"
+              />
+            }
+            @default {
+              @if (current.nfts.length === 0) {
+                <app-empty-state message="This wallet holds no Chog NFTs. Choose a standard Chog below." />
+              } @else {
+                <ul class="grid" data-list="nfts">
+                  @for (nft of current.nfts; track nft.tokenId) {
+                    <li class="card" [class.picked]="isPicked({ kind: 'Nft', id: nft.tokenId })" [attr.data-token-id]="nft.tokenId">
+                      @if (nft.imageUrl && !brokenImages().has(nft.tokenId)) {
+                        <img
+                          class="art"
+                          [src]="nft.imageUrl"
+                          alt=""
+                          width="240"
+                          height="240"
+                          loading="lazy"
+                          decoding="async"
+                          referrerpolicy="no-referrer"
+                          (error)="imageFailed(nft.tokenId)"
+                        />
+                      } @else {
+                        <div class="art placeholder" data-placeholder>No image</div>
+                      }
+                      <h3>{{ nft.name }}</h3>
+                      <p class="token">Token #{{ nft.tokenId }}</p>
+                      @if (nft.traits.length > 0) {
+                        <dl class="traits">
+                          @for (trait of nft.traits; track $index) {
+                            <div>
+                              <dt>{{ trait.type }}</dt>
+                              <dd>{{ trait.value }}</dd>
+                            </div>
+                          }
+                        </dl>
+                      } @else {
+                        <p class="hint">No traits</p>
+                      }
+                      <label class="choose">
+                        <input
+                          type="radio"
+                          name="character"
+                          [checked]="isPicked({ kind: 'Nft', id: nft.tokenId })"
+                          (change)="pick({ kind: 'Nft', id: nft.tokenId })"
+                        />
+                        Choose<span class="visually-hidden">&nbsp;{{ nft.name }}, token {{ nft.tokenId }}</span>
+                      </label>
+                      @if (isInUse({ kind: 'Nft', id: nft.tokenId })) {
+                        <span class="in-use">In use</span>
+                      }
+                    </li>
+                  }
+                </ul>
+              }
+            }
+          }
+        </section>
+
+        <section aria-labelledby="standard-heading">
+          <h2 id="standard-heading">Standard Chogs</h2>
+          <p class="hint">Available to every player, with or without NFTs.</p>
+          <ul class="grid standard" data-list="standard">
+            @for (standard of current.standard; track standard.id) {
+              <li class="card" [class.picked]="isPicked({ kind: 'Standard', id: standard.id })" [attr.data-standard-id]="standard.id">
+                <app-avatar-badge [avatar]="standard" name="Chog" [size]="4" />
+                <h3>{{ standard.name }}</h3>
+                <label class="choose">
+                  <input
+                    type="radio"
+                    name="character"
+                    [checked]="isPicked({ kind: 'Standard', id: standard.id })"
+                    (change)="pick({ kind: 'Standard', id: standard.id })"
+                  />
+                  Choose<span class="visually-hidden">&nbsp;{{ standard.name }} standard Chog</span>
+                </label>
+                @if (isInUse({ kind: 'Standard', id: standard.id })) {
+                  <span class="in-use">In use</span>
+                }
+              </li>
+            }
+          </ul>
+        </section>
+      </fieldset>
+
+      <button type="button" class="save" [disabled]="selectState() === 'saving'" (click)="save()">Save choice</button>
+      @switch (selectState()) {
+        @case ('saving') {
+          <p role="status" class="status">Saving your choice…</p>
+        }
+        @case ('saved') {
+          <p role="status" class="status saved">Your choice is saved.</p>
+        }
+        @case ('error') {
+          <p role="alert" class="status field-error">{{ selectError() }}</p>
+        }
+      }
+    }
+  }
+}
