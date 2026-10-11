@@ -1,0 +1,75 @@
+section {
+  margin-block: 1.5rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+}
+
+.invite {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.invite h2 {
+  margin-top: 0;
+}
+
+.code {
+  font-family: ui-monospace, monospace;
+  font-size: 1.75rem;
+  letter-spacing: 0.15em;
+}
+
+.link {
+  font-family: ui-monospace, monospace;
+  user-select: all;
+}
+
+.copy-status {
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+}
+
+.members {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.members li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap-target);
+  border-bottom: 1px solid var(--border);
+}
+
+.name {
+  font-weight: 600;
+}
+
+.tag {
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: var(--surface-muted);
+}
+
+.tag.host {
+  color: #fff;
+  background: var(--brand);
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.not-found a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+}

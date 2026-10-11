@@ -20,6 +20,16 @@ export const appRoutes: Route[] = [
     loadComponent: () => import('./pages/game-lobby/game-lobby').then((m) => m.GameLobby),
   },
   {
+    path: 'join/:code',
+    title: 'Join room · Chog Game Arena',
+    loadComponent: () => import('./pages/join-room/join-room').then((m) => m.JoinRoomPage),
+  },
+  {
+    path: 'rooms/:code',
+    title: 'Room · Chog Game Arena',
+    loadComponent: () => import('./pages/room/room').then((m) => m.RoomPage),
+  },
+  {
     path: 'chogs',
     title: 'My Chogs · Chog Game Arena',
     loadComponent: () => import('./pages/my-chogs/my-chogs').then((m) => m.MyChogsPage),
