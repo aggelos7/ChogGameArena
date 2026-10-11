@@ -97,6 +97,8 @@ public sealed class LobbyEndpointTests(MigratedPostgresDatabase database) : ICla
 
     private static Task<HttpResponseMessage> StartAsync(HttpClient client, string code) => client.PostAsync($"/api/rooms/{code}/start", null);
 
+    private static Task<HttpResponseMessage> LeaveAsync(HttpClient client, string code) => client.PostAsync($"/api/rooms/{code}/leave", null);
+
     private static async Task ProblemAsync(HttpResponseMessage response, HttpStatusCode status, string code)
     {
         Assert.Equal(status, response.StatusCode);
@@ -301,6 +303,63 @@ public sealed class LobbyEndpointTests(MigratedPostgresDatabase database) : ICla
 
             var room = await ViewAsync(alice, code);
             Assert.Equal(("Waiting", true), (room.Status, room.Members.All(m => m.IsReady)));
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_member_leaves_and_is_free_to_create_a_room()
+    {
+        var (code, alice, bob) = await PairAsync();
+        using (alice)
+        using (bob)
+        {
+            using var response = await LeaveAsync(bob, code);
+
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            var room = await ViewAsync(alice, code);
+            Assert.Equal("Waiting", room.Status);
+            Assert.Equal(["Alice"], room.Members.Select(m => m.DisplayName));
+            await ProblemAsync(await bob.GetAsync($"/api/rooms/{code}"), HttpStatusCode.NotFound, "room_not_found");
+            await CreatedRoomAsync(bob);
+        }
+    }
+
+    [PostgresFact]
+    public async Task The_host_leaving_closes_the_room_for_everyone()
+    {
+        var (code, alice, bob) = await PairAsync();
+        using (alice)
+        using (bob)
+        using (var carol = await GuestAsync("Carol"))
+        {
+            using var response = await LeaveAsync(alice, code);
+
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            Assert.Equal("Cancelled", (await ViewAsync(bob, code)).Status);
+            await ProblemAsync(await carol.PostAsync($"/api/rooms/{code}/join", null), HttpStatusCode.Conflict, "room_closed");
+            await ProblemAsync(await LeaveAsync(bob, code), HttpStatusCode.Conflict, "room_closed");
+            await CreatedRoomAsync(bob);
+            await CreatedRoomAsync(alice);
+        }
+    }
+
+    [PostgresFact]
+    public async Task Leaving_is_refused_for_non_members_and_started_rooms()
+    {
+        var (code, alice, bob) = await PairAsync();
+        using (alice)
+        using (bob)
+        using (var mallory = await GuestAsync("Mallory"))
+        {
+            await ProblemAsync(await LeaveAsync(mallory, code), HttpStatusCode.NotFound, "room_not_found");
+            await ProblemAsync(await LeaveAsync(mallory, "not-a-code"), HttpStatusCode.NotFound, "room_not_found");
+
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            (await StartAsync(alice, code)).Dispose();
+
+            await ProblemAsync(await LeaveAsync(bob, code), HttpStatusCode.Conflict, "room_started");
+            Assert.Equal(2, (await ViewAsync(alice, code)).Members.Length);
         }
     }
 

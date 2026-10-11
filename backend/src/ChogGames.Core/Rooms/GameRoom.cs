@@ -96,6 +96,23 @@ public sealed class GameRoom
 
     public void MarkNotReady(Guid playerId) => MemberForChange(playerId).MarkNotReady();
 
+    /// <summary>
+    /// <paramref name="playerId"/> leaves the waiting room (STORY-063, DEC-023). A member is removed, freeing their
+    /// seat; nobody else's ready status changes. When the host leaves, the room is cancelled for everyone and its
+    /// members stay listed, so they can see it was closed.
+    /// </summary>
+    public void Leave(Guid playerId)
+    {
+        var member = MemberForChange(playerId);
+        if (playerId == HostPlayerId)
+        {
+            Status = RoomStatus.Cancelled;
+            return;
+        }
+
+        _members.Remove(member);
+    }
+
     /// <summary>Why the host can't start now, or null if they can. <paramref name="players"/> are the members' current players.</summary>
     public RoomStartProblem? CheckStart(Guid callerId, IReadOnlyCollection<Player> players)
     {
@@ -139,7 +156,7 @@ public sealed class GameRoom
     {
         if (Status != RoomStatus.Waiting)
         {
-            throw new InvalidOperationException("Ready status can only change in a waiting room.");
+            throw new InvalidOperationException("Members can only change in a waiting room.");
         }
 
         return _members.SingleOrDefault(m => m.PlayerId == playerId)
@@ -199,7 +216,7 @@ public sealed class RoomMember
     }
 }
 
-/// <summary>Room lifecycle (architecture: Waiting -> Active -> Completed; cancellation by explicit policy). Start (Waiting -> Active) is STORY-021; the full state machine is STORY-023.</summary>
+/// <summary>Room lifecycle (architecture: Waiting -> Active -> Completed; cancellation by explicit policy). Start (Waiting -> Active) is STORY-021, the host leaving (Waiting -> Cancelled) is STORY-063; the full state machine is STORY-023.</summary>
 public enum RoomStatus
 {
     Waiting,

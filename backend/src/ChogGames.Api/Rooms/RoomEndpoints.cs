@@ -12,7 +12,8 @@ namespace ChogGames.Api.Rooms;
 
 /// <summary>
 /// Private rooms (STORY-020, ENG-001): create a room for an enabled game, join one by its code (typed or from an invite
-/// link) and read a room you are in. In the lobby (STORY-021, ENG-002) members mark ready and the host starts.
+/// link) and read a room you are in. In the lobby (STORY-021, ENG-002) members mark ready and the host starts;
+/// members may leave a waiting room, and the host leaving cancels it (STORY-063).
 /// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022).
 /// </summary>
 public static class RoomEndpoints
@@ -78,6 +79,7 @@ public static class RoomEndpoints
         rooms.MapGet("/{code}", GetRoomAsync).WithName("GetRoom");
         rooms.MapPut("/{code}/ready", SetReadyAsync).WithName("SetRoomReady");
         rooms.MapPost("/{code}/start", StartRoomAsync).WithName("StartRoom");
+        rooms.MapPost("/{code}/leave", LeaveRoomAsync).WithName("LeaveRoom");
 
         return endpoints;
     }
@@ -193,6 +195,24 @@ public static class RoomEndpoints
         return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
     }
 
+    private static async Task<Results<NoContent, ProblemHttpResult, NotFound>> LeaveRoomAsync(
+        string code, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, CancellationToken cancellationToken)
+    {
+        var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
+        if (player is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (!RoomCode.TryParse(code, out var roomCode))
+        {
+            return Failure(new RoomResult(RoomOutcome.RoomNotFound));
+        }
+
+        var result = await lobby.LeaveAsync(player, roomCode, cancellationToken);
+        return result.Succeeded ? TypedResults.NoContent() : Failure(result);
+    }
+
     private static ProblemHttpResult Failure(RoomResult result)
     {
         var (status, code, detail) = result.Outcome switch
@@ -278,6 +298,6 @@ public sealed class RoomOptions
 {
     public const string SectionName = "Rooms";
 
-    /// <summary>Room requests (create, join, read, ready, start) per player per minute.</summary>
+    /// <summary>Room requests (create, join, read, ready, start, leave) per player per minute.</summary>
     public int RequestsPerMinutePerPlayer { get; set; } = 60;
 }

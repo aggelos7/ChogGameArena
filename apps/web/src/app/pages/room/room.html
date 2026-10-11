@@ -38,7 +38,9 @@
       @if (current.status === 'Active') {
         <p class="started" role="status" data-started>The game has started.</p>
       } @else if (current.status !== 'Waiting') {
-        <p class="started" role="status">This room is closed.</p>
+        <p class="started" role="status" data-closed>
+          This room is closed. <a routerLink="/games">Find another game</a>
+        </p>
       }
 
       <section aria-labelledby="players-heading">
@@ -96,6 +98,16 @@
           } @else {
             <p class="hint">The host starts the game when everyone is ready.</p>
           }
+
+          <div class="leave" data-leave>
+            @if (confirmingLeave()) {
+              <p class="warning" role="alert">You’re the host: leaving closes this room for everyone.</p>
+              <button type="button" class="danger" [disabled]="busy()" (click)="leave()">Leave and close room</button>
+              <button type="button" [disabled]="busy()" (click)="confirmingLeave.set(false)">Stay</button>
+            } @else {
+              <button type="button" [disabled]="busy()" (click)="leave()">Leave room</button>
+            }
+          </div>
 
           @if (actionError(); as failure) {
             <p class="action-error" role="alert" data-error="action">{{ message(failure) }}</p>

@@ -55,9 +55,12 @@ public enum RoomOutcome
 
     /// <summary>NFT ownership can't be read right now, so the room can't start (DEC-019); nothing changed.</summary>
     OwnershipUnavailable,
+
+    /// <summary>The member left the room; when the host left, the room was cancelled (DEC-023).</summary>
+    Left,
 }
 
-/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c>, <c>AlreadyMember</c>, <c>ReadyChanged</c> or <c>Started</c>.</param>
+/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c>, <c>AlreadyMember</c>, <c>ReadyChanged</c>, <c>Started</c> or <c>Left</c>.</param>
 /// <param name="OpenRoomCode">For <c>AlreadyInRoom</c>: the code of the room the player is already in.</param>
 public sealed record RoomResult(RoomOutcome Outcome, GameRoom? Room = null, string? OpenRoomCode = null)
 {
