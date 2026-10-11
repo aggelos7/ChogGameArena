@@ -26,6 +26,9 @@ public sealed class NftOptions
 
     public NftProviderKind Provider { get; set; } = NftProviderKind.None;
 
+    /// <summary>Character gallery and selection requests per player per minute; each may read the chain.</summary>
+    public int RequestsPerMinutePerPlayer { get; set; } = 30;
+
     public MockNftOptions Mock { get; set; } = new();
 
     public MonadNftOptions Monad { get; set; } = new();

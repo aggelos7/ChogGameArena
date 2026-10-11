@@ -8,6 +8,7 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
 - DEC-003: Chog Race reaction windows and card resolution ordering — Pending before card engine.
 - DEC-004: Guest-to-wallet profile linking and account merge behavior — Pending before linking. Sign-in binding decided in DEC-015; merging two existing histories is still open.
 - DEC-005: Game branding/assets and permissions — Pending before public launch.
+- DEC-018: Uploaded profile avatars (STORY-062) — Pending before that story. Open: which image library re-encodes uploads (new dependency to approve, e.g. SkiaSharp MIT with native libraries, or ImageSharp under its licence terms); moderation (reporting and removing an avatar, terms of use) and deleting a player's photo on request. Proposed storage: re-encoded images in PostgreSQL, so no new container, volume or cloud service.
 
 ## Confirmed
 
@@ -48,4 +49,8 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Outage fallback (NFT-003):** listing may use a wallet's stored scan for up to 10 minutes while the chain can't be read. Match admission (single-token checks) always reads the chain.
   - **Metadata facts:** names are those of the shuffled metadata files, e.g. token 1 is "CHOG #1462". There are 12 traits (Background, Base, Skin, Side, Body, Mouth, Eyes, Head, Accessory, Form, Tier, Naked) and a `.webp` image of about 300 KB.
   - Image hosting and artwork rights remain DEC-005.
+- DEC-017 (2026-10-11, STORY-017 — confirmed by product owner): Character gallery and preferred character.
+  - **Standard Chogs (NFT-005):** the built-in profile avatars (`classic`, `mint`, `sunset`, `ocean`, `berry`, `gold`) double as standard Chog characters for everyone, holders included. They're drawn from their colour until artwork is approved (DEC-005); there is no separate catalogue.
+  - **Preferred character:** the gallery saves one choice per player on the server (`PUT /api/characters/selected`). An NFT choice needs a wallet player and a live `ownerOf` check; a refused choice changes nothing. It's a preference only: ownership is verified again and the character locked at match start (STORY-018, NFT-008/009).
+  - **Page:** a separate My Chogs page (`/chogs`) in the main navigation.
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.

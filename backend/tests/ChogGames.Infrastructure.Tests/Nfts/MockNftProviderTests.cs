@@ -172,4 +172,22 @@ public class MockNftProviderTests
         Assert.True(result.Failed);
         Assert.Contains("'Nfts:Mock:OtherWallets'", result.FailureMessage);
     }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(1000, true)]
+    [InlineData(1001, false)]
+    public void Per_player_request_limit_is_bounded(int limit, bool valid)
+    {
+        var validator = new NftOptionsValidator(new HostingEnvironment { EnvironmentName = Environments.Development });
+
+        var result = validator.Validate(null, new NftOptions { Provider = NftProviderKind.Mock, RequestsPerMinutePerPlayer = limit });
+
+        Assert.Equal(valid, result.Succeeded);
+        if (!valid)
+        {
+            Assert.Contains("'Nfts:RequestsPerMinutePerPlayer'", result.FailureMessage);
+        }
+    }
 }

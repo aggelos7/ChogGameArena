@@ -1,3 +1,4 @@
+using ChogGames.Core.Nfts;
 using ChogGames.Core.Wallets;
 
 namespace ChogGames.Core.Players;
@@ -20,6 +21,15 @@ public sealed class Player
     public string? WalletAddress { get; private set; }
 
     public DateTimeOffset CreatedAt { get; private set; }
+
+    /// <summary>
+    /// Preferred character for the next match (NFT-004/NFT-005): a standard Chog or one NFT. A preference only;
+    /// NFT ownership is verified again before a match starts (NFT-008).
+    /// </summary>
+    public CharacterKind SelectedCharacterKind { get; private set; } = CharacterKind.Standard;
+
+    /// <summary>A <see cref="DefaultAvatar"/> id for standard Chogs, a canonical token id for NFTs.</summary>
+    public string SelectedCharacterId { get; private set; } = DefaultAvatar.Classic.Id;
 
     /// <summary>Completed matches. Maintained by the server when matches finish, never by clients.</summary>
     public int GamesPlayed { get; private set; }
@@ -66,10 +76,34 @@ public sealed class Player
     public void Rename(PlayerDisplayName displayName) => DisplayName = displayName.Value;
 
     public void ChangeAvatar(DefaultAvatar avatar) => AvatarId = avatar.Id;
+
+    public void SelectStandardCharacter(DefaultAvatar character)
+    {
+        SelectedCharacterKind = CharacterKind.Standard;
+        SelectedCharacterId = character.Id;
+    }
+
+    /// <summary>Selects an NFT whose ownership by this player's wallet the caller has just verified on chain.</summary>
+    public void SelectNftCharacter(NftTokenId tokenId)
+    {
+        if (Kind != PlayerKind.Wallet)
+        {
+            throw new InvalidOperationException("Only a wallet player can select an NFT character.");
+        }
+
+        SelectedCharacterKind = CharacterKind.Nft;
+        SelectedCharacterId = tokenId.ToString();
+    }
 }
 
 public enum PlayerKind
 {
     Guest,
     Wallet,
+}
+
+public enum CharacterKind
+{
+    Standard,
+    Nft,
 }

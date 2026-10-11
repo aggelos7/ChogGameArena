@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ChogGames.Api.Catalog;
+using ChogGames.Api.Characters;
 using ChogGames.Api.Health;
 using ChogGames.Api.Identity;
 using ChogGames.Api.Profile;
@@ -13,13 +14,16 @@ builder.Services.AddGameCatalog(builder.Configuration);
 builder.Services.AddGuestIdentity();
 builder.Services.AddWalletChain(builder.Configuration);
 builder.Services.AddWalletSignIn();
+builder.Services.AddCharacters();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
 
-app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// After authentication, so limits can be partitioned per player.
+app.UseRateLimiter();
 
 app.MapHealthEndpoints();
 app.MapGameCatalogEndpoints();
@@ -27,6 +31,7 @@ app.MapIdentityEndpoints();
 app.MapProfileEndpoints();
 app.MapWalletEndpoints();
 app.MapWalletSignInEndpoints();
+app.MapCharacterEndpoints();
 
 app.Run();
 

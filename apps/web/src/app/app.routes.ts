@@ -20,6 +20,11 @@ export const appRoutes: Route[] = [
     loadComponent: () => import('./pages/game-lobby/game-lobby').then((m) => m.GameLobby),
   },
   {
+    path: 'chogs',
+    title: 'My Chogs · Chog Game Arena',
+    loadComponent: () => import('./pages/my-chogs/my-chogs').then((m) => m.MyChogsPage),
+  },
+  {
     path: 'profile',
     title: 'Profile · Chog Game Arena',
     loadComponent: () => import('./pages/profile/profile').then((m) => m.ProfilePage),

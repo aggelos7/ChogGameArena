@@ -1,0 +1,165 @@
+.intro {
+  margin: 0 0 1.5rem;
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  &.standard {
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  }
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 2px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+
+  &.picked {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 1px var(--brand);
+  }
+
+  &:has(input:focus-visible) {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+}
+
+.art {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  background: var(--surface-muted);
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.token,
+.hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.375rem;
+    background: var(--surface-muted);
+    font-size: 0.8125rem;
+  }
+
+  dt {
+    color: var(--text-muted);
+  }
+
+  dd {
+    margin: 0;
+    font-weight: 600;
+  }
+}
+
+.choose {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap-target);
+  margin-top: auto;
+  font-weight: 600;
+  cursor: pointer;
+
+  /* The whole card selects the Chog, not only the label. */
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  input {
+    width: 1.25rem;
+    height: 1.25rem;
+    margin: 0;
+    accent-color: var(--brand);
+  }
+}
+
+.in-use {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--brand);
+}
+
+.save {
+  margin-top: 1.5rem;
+  min-height: var(--tap-target);
+  padding: 0.5rem 1.25rem;
+  border: none;
+  border-radius: 0.5rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--brand);
+}
+
+.status {
+  margin: 1rem 0 0;
+}
+
+.saved {
+  color: #116329;
+}
+
+.field-error {
+  color: var(--danger);
+}
