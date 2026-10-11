@@ -1,0 +1,46 @@
+<h1>{{ game().name }}</h1>
+
+<section class="panel" aria-labelledby="create-heading">
+  <h2 id="create-heading">Create a room</h2>
+  <p>Start a private room and invite 1 to 5 friends with its code or link.</p>
+  <button type="button" class="primary" (click)="create()" [disabled]="creating()">
+    {{ creating() ? 'Creating…' : 'Create room' }}
+  </button>
+  @if (createError(); as error) {
+    <p class="field-error" role="alert" data-error="create">
+      {{ message(error) }}
+      @if (error.roomCode) {
+        <a [routerLink]="['/rooms', error.roomCode]">Open room {{ error.roomCode }}</a>
+      }
+    </p>
+  }
+</section>
+
+<section class="panel" aria-labelledby="join-heading">
+  <h2 id="join-heading">Join with a code</h2>
+  <form (ngSubmit)="join()" novalidate>
+    <label for="room-code">Room code</label>
+    <div class="join-row">
+      <input
+        id="room-code"
+        name="code"
+        [ngModel]="code()"
+        (ngModelChange)="code.set($event)"
+        autocomplete="off"
+        autocapitalize="characters"
+        spellcheck="false"
+        maxlength="6"
+        placeholder="K7QF3M"
+        aria-describedby="room-code-hint"
+        [attr.aria-invalid]="codeInvalid()"
+      />
+      <button type="submit">Join</button>
+    </div>
+    <p id="room-code-hint" class="hint">Six letters and digits, from the host’s invite.</p>
+    @if (codeInvalid()) {
+      <p class="field-error" role="alert" data-error="code">Enter the six-character room code.</p>
+    }
+  </form>
+</section>
+
+<a class="back" routerLink="/games">Back to games</a>

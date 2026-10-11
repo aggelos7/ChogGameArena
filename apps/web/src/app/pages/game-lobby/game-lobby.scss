@@ -1,0 +1,64 @@
+.panel {
+  margin-block: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+
+.primary {
+  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+label {
+  display: block;
+  font-weight: 600;
+}
+
+.join-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.join-row input {
+  flex: 1;
+  min-width: 0;
+  max-width: 12rem;
+  min-height: var(--tap-target);
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.hint {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.field-error {
+  color: var(--danger);
+}
+
+.field-error a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  margin-left: 0.25rem;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+}

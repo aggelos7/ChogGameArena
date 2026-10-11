@@ -306,7 +306,7 @@
 
 #### STORY-020 — Create/join room API
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Create room and join by code or link with membership validation.

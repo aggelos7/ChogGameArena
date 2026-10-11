@@ -61,4 +61,9 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Registry:** supported games are rows in a `GameDefinitions` table seeded by reviewed migrations (`chog-life`, `chog-race`, 2–6 players), so rooms reference them with a foreign key. Whether a game is enabled stays in the `Games:Items` configuration; a room needs both.
   - **Room codes:** 6 characters from 31 letters and digits without look-alikes (no 0, O, 1, I or L), about 887 million codes, drawn with cryptographically secure randomness. Uniqueness is a database index; a collision draws another code.
   - **Hosting:** a player may host one `Waiting` room at a time (filtered unique index). Rate limits come with the room API (STORY-020).
+- DEC-021 (2026-10-11, STORY-020 — confirmed by product owner): Joining rooms.
+  - **One open room per player:** a player who is in a `Waiting` room, as host or member, can't create or join another; the refusal names that room. Whether an `Active` match also blocks this is decided with the match lifecycle (STORY-023).
+  - **Rejoining:** joining a room you're already in succeeds and changes nothing, so invite links and double taps are safe.
+  - **Errors:** problem details with a stable `code`: `unknown_game` (400), `room_not_found` (404, also for malformed codes and for rooms the caller isn't in), `game_unavailable`, `already_in_room`, `room_full`, `room_started`, `room_closed` (409).
+  - **Web:** a minimal create/join screen and room page; members appear on refresh until live updates (STORY-022).
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.
