@@ -179,7 +179,7 @@ On success the session cookie is replaced; the old cookie stops working. Each ch
 
 Every deployment must set `WalletAuth:Domain` and `Uri` to the address users open; the API refuses to start without them. Wallets show this domain and warn when it doesn't match the page.
 
-NFT ownership (STORY-014/015, ADR-006, DEC-001): server code reads Chog NFTs through `INftProvider` (Core). It lists a wallet's NFTs, or checks whether a wallet owns one token. Callers pass only the server-verified wallet address from the session, never one from a request. Tokens are normalized: a canonical uint256 id, a name, an optional image (`null` when unusable) and any trait types and values, known or not. There are no NFT endpoints yet.
+NFT ownership (STORY-014/015, ADR-006, DEC-001): server code reads Chog NFTs through `INftProvider` (Core). It lists a wallet's NFTs, or checks whether a wallet owns one token. Callers pass only the server-verified wallet address from the session, never one from a request. Tokens are normalized: a canonical uint256 id, a name, an optional image (`null` when unusable) and any trait types and values, known or not. The NFT endpoints are under Character gallery below.
 
 | Setting (`Nfts:`) | Default (`appsettings.json`) | |
 |---|---|---|
@@ -229,6 +229,23 @@ The mock provider needs no RPC or network; images are inline SVG. Its fixture wa
 | `0x…c001` | token 1 |
 | `0x…c002` | tokens 7, 42 (no image), 108 (unknown and non-ASCII traits, maximum-length value) and 1969 (no traits) |
 | `0x…c003` | every lookup fails as if the RPC were down |
+
+Character gallery (STORY-017, NFT-002/004/005/006): the web app's **My Chogs** page (`/chogs`) lists the signed-in wallet's verified Chog NFTs and the standard Chogs, and saves the one character the player uses next. Standard Chogs are the built-in avatars (`classic` … `gold`), available to everyone, drawn from their colour until artwork is approved (DEC-005).
+
+| Endpoint | Request | Response |
+|---|---|---|
+| `GET /api/characters` | session cookie | `200 { nftStatus, nfts: [{ tokenId, name, imageUrl, traits: [{ type, value }] }], standard: [{ id, name, color }], selected: { kind, id } }`; `401`; `429` |
+| `PUT /api/characters/selected` | session cookie; `{ "kind": "Standard" \| "Nft", "id": string }` | `200 { kind, id }`; `400` with `errors.kind` (unknown kind, or an NFT for a guest) or `errors.id` (unknown standard Chog, malformed token id, or a token the wallet doesn't own); `503` ownership can't be checked; `401`; `429`. A refused request changes nothing |
+
+- **`nftStatus`:** `Available` (the list may be empty), `NoWallet` for guests, or `Unavailable` when ownership can't be read. Standard Chogs are always listed.
+- **Token ids** are decimal strings (uint256), never numbers.
+- **The NFT list** comes only from the server's ownership check of the session's wallet. Choosing an NFT reads `ownerOf` live; the browser's list is never trusted.
+- **`selected`** is the stored preference. A stored NFT that the wallet was just shown not to own any more is reported as `classic`. During an outage the stored choice is shown as is. Ownership is verified again when a match starts (STORY-018).
+- **Database:** `Players.SelectedCharacterKind` / `SelectedCharacterId` (migration `AddPlayerSelectedCharacter`). A check constraint allows an NFT choice only for wallet players.
+
+| Setting (`Nfts:`) | Default | |
+|---|---|---|
+| `RequestsPerMinutePerPlayer` | `30` | gallery and selection requests per player per minute (1–1000); each may read the chain |
 
 Mock ownership isn't exclusive: every other wallet reports the same fixture tokens.
 

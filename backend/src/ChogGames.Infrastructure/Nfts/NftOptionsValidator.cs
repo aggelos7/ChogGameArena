@@ -29,6 +29,11 @@ public sealed class NftOptionsValidator(IHostEnvironment environment) : IValidat
             errors.Add($"'{Section}:Mock:OtherWallets' must be one of: {string.Join(", ", Enum.GetNames<MockNftHolding>())}.");
         }
 
+        if (options.RequestsPerMinutePerPlayer is < 1 or > 1000)
+        {
+            errors.Add($"'{Section}:RequestsPerMinutePerPlayer' must be between 1 and 1000.");
+        }
+
         if (options.Provider == NftProviderKind.Monad)
         {
             ValidateMonad(options.Monad, errors);

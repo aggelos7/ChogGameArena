@@ -48,6 +48,14 @@ describe('app routes', () => {
     expect(TestBed.inject(Title).getTitle()).toBe('Games · Chog Game Arena');
   });
 
+  it('renders the My Chogs page at /chogs', async () => {
+    await harness.navigateByUrl('/chogs');
+    http.expectOne('/api/characters').flush({ nftStatus: 'NoWallet', nfts: [], standard: [], selected: { kind: 'Standard', id: 'classic' } });
+
+    expect(heading()).toBe('My Chogs');
+    expect(TestBed.inject(Title).getTitle()).toBe('My Chogs · Chog Game Arena');
+  });
+
   it('redirects unknown URLs to the home page', async () => {
     await harness.navigateByUrl('/does-not-exist');
 
