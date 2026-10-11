@@ -274,7 +274,7 @@
 
 #### STORY-018 — Character eligibility snapshot
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E03
 - **Implementation:** Verify selected NFT ownership before match start; snapshot character metadata and prevent mid-match swap.

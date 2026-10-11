@@ -1,3 +1,4 @@
+using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Nfts;
 using ChogGames.Infrastructure.Identity;
@@ -58,6 +59,7 @@ public static class ConfigurationServiceCollectionExtensions
             .Bind(configuration.GetSection(WalletAuthOptions.SectionName))
             .ValidateOnStart();
         services.AddScoped<WalletSignInService>();
+        services.AddScoped<CharacterEligibilityService>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()

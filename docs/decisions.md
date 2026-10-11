@@ -53,4 +53,8 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Standard Chogs (NFT-005):** the built-in profile avatars (`classic`, `mint`, `sunset`, `ocean`, `berry`, `gold`) double as standard Chog characters for everyone, holders included. They're drawn from their colour until artwork is approved (DEC-005); there is no separate catalogue.
   - **Preferred character:** the gallery saves one choice per player on the server (`PUT /api/characters/selected`). An NFT choice needs a wallet player and a live `ownerOf` check; a refused choice changes nothing. It's a preference only: ownership is verified again and the character locked at match start (STORY-018, NFT-008/009).
   - **Page:** a separate My Chogs page (`/chogs`) in the main navigation.
+- DEC-019 (2026-10-11, STORY-018 — confirmed by product owner): Character check at match start.
+  - **Outage:** if NFT ownership can't be read when a match starts, the player can't start with that NFT; there is no silent switch to a standard Chog. They can choose a standard Chog and play right away. This follows NFT-008: ownership is verified before start.
+  - **Unowned NFT:** the start is refused (`NftNotOwned`) and the player chooses again; the saved choice isn't changed by the check.
+  - **Storage:** the immutable `CharacterSnapshot` is built now. It is stored with the match player record when matches exist (STORY-023/028); there is no separate table.
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.
