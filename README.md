@@ -267,6 +267,7 @@ Game registry, rooms and lobby (STORY-019/020/021/063, ENG-001/002, DEC-020 to D
 - **One open room per player:** a player in a `Waiting` room, as host or member, can't create or join another. Each create or join locks the player's row (and, for a join, the room's row first), so concurrent requests can't get round this or overfill a room.
 - **Lobby:** each member's selected Chog, ability (always `null` until STORY-033) and ready status. Ready is recorded with the Chog selected at that moment, so choosing another Chog makes the player not ready.
 - **Start:** host only; needs between the game's minimum and capacity of members, every one ready (the host too). Every NFT Chog's ownership is then read live: a member whose NFT has left their wallet is set back to not ready and nothing starts (`character_unavailable`); if ownership can't be read nothing changes (`503 ownership_unavailable`). Otherwise the room becomes `Active` with `startedAt`. Ready and start lock the room's row and then the members' rows, so a start can't race a join or a ready change.
+- **Web lobby:** follows the room live (below); Refresh appears only while live updates are down.
 - **Leaving:** a member can leave a `Waiting` room; their seat and their one open room are freed and nobody else's ready status changes. When the host leaves, the room becomes `Cancelled` for everyone: its members still see it (closed), nobody can join it any more (`room_closed`), and its members are free to create or join other rooms. Hosting is never passed on. Leaving a started match isn't possible yet (STORY-023/025/027).
 
 | Endpoint | Request | Responses |
@@ -280,9 +281,17 @@ Game registry, rooms and lobby (STORY-019/020/021/063, ENG-001/002, DEC-020 to D
 
 All of them need a session (`401` without) and return `429` over the per-player limit. A room is `{ code, gameType, status, minPlayers, capacity, members[{ displayName, avatarId, isHost, isYou, isReady, character{ kind, id, name, color }, ability }] }`; `character.color` is set for standard Chogs, and an NFT shows as `Chog #<id>`. Errors are problem details with a stable `code` (clients rely on it, never on the text); `already_in_room` also carries `roomCode`, the room the player is in.
 
+Live room updates (STORY-022, ENG-005, DEC-024): a SignalR hub at `/api/hubs/rooms`, WebSockets only (clients skip negotiation), authenticated by the session cookie (`401` without one).
+- **Client → server:** `SubscribeRoom(code)` starts notices for a room the player is in; anything else (unknown code, someone else's room, malformed code) fails with the hub error `room_not_found`. `UnsubscribeRoom(code)` always succeeds. There are no other hub methods; room changes go through the endpoints above, and game commands come with STORY-024.
+- **Server → client:** `RoomChanged(code)` after every committed join, ready change, start, refused start that un-readied someone, leave, and Chog change of a member of a waiting room. It carries no state: clients fetch `GET /api/rooms/{code}`.
+- **Groups:** a member who leaves hears of their own leave, then all their connections are taken out of the room's group. A reconnect must subscribe again.
+- **Limits:** opening a connection counts as a room request; hub calls have their own per-player budget of the same size (`rate_limited` hub error).
+- **Scale:** subscriptions are tracked in memory, so this is for a single API instance (a backplane comes with scale-out, ADR-010).
+- **Dev proxy:** `apps/web/proxy.conf.json` proxies `/api` with `ws: true`, so the hub works through `:4200`.
+
 | Setting (`Rooms:`) | Default | |
 |---|---|---|
-| `RequestsPerMinutePerPlayer` | `60` | room requests (create, join, read, ready, start, leave) per player per minute (1–1000); also limits guessing codes |
+| `RequestsPerMinutePerPlayer` | `60` | room requests (create, join, read, ready, start, leave, opening a live connection) per player per minute (1–1000); also limits guessing codes. Hub calls get a separate budget of the same size |
 
 Health endpoints:
 

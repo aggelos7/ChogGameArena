@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (after PR #99).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-022).
 
 ## Stories done
 
@@ -29,6 +29,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-020 | #94 | Create, join and read room API, one open room per player, invite links `/join/CODE`, minimal room page (DEC-021). |
 | STORY-021 | #97 | Lobby: ready with the chosen Chog, host start with a live NFT check, room becomes Active (DEC-022). |
 | STORY-063 | #99 | Leave a waiting room; the host leaving cancels it for everyone (DEC-023). Added during STORY-021. |
+| STORY-022 | (this PR) | SignalR room hub: cookie-authenticated, membership checked before subscribing, leavers removed from groups; `RoomChanged` notices drive a live web lobby (DEC-024). |
 
 ## Key architectural decisions
 
@@ -50,14 +51,16 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Errors:**
   - Room APIs return problem details with a stable `code` such as `room_full` or `not_host`; clients rely on the code, never the text.
   - Unknown codes and rooms the caller isn't in both return `404 room_not_found`, so codes can't be probed.
+- **Realtime:** one SignalR hub (`/api/hubs/rooms`, WebSockets only). It only says `RoomChanged(code)`; clients refetch the REST snapshot. Subscribing checks membership in the database; leavers are removed from the group via an in-memory connection registry (single instance). Hub calls have their own per-player rate limit (DEC-024).
 - **Rate limits:** a per-player fixed window for each feature area, configured in settings such as `Rooms:RequestsPerMinutePerPlayer`.
-- **Dependencies:** BouncyCastle (for keccak-256 and secp256k1) is the only approved crypto library. Wallets and NFTs use no SDKs.
+- **Dependencies:** BouncyCastle (for keccak-256 and secp256k1) is the only approved crypto library. Wallets and NFTs use no SDKs. `@microsoft/signalr` (web) and `Microsoft.AspNetCore.SignalR.Client` (backend tests) are approved for realtime (DEC-024).
 
 ## Testing decisions
 
 - **Backend:** xUnit.
   - Postgres integration tests use `[PostgresFact]` and `[PostgresTheory]`. They run only when `CHOG_TEST_POSTGRES` is set and are otherwise skipped silently, so always set it before claiming backend tests pass.
   - Helpers: `MigratedPostgresDatabase` (class fixture), `ApiFactory` with `.CreateHttpsClient()`, `ManualTimeProvider`, and `TestWallet` for signatures.
+  - Hub tests (`RoomHubTests`) connect over TestServer WebSockets with the session cookie copied from a client created with `HandleCookies = false`.
   - External services (the chain, IPFS, the catalogue) are hand-written fakes inside the test classes; there are no mocking libraries.
   - Concurrency is tested with real parallel requests against Postgres. Those tests are run about 8 times in a row before a PR.
   - Each migration's check constraints get raw-SQL tests that try invalid rows.
@@ -83,7 +86,9 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 - **Character snapshot:** checked at start but not stored yet; it belongs on the match player record (STORY-023/028).
 - **Started matches:** an `Active` match doesn't stop a player from joining or creating another room (DEC-021; decide in STORY-023). Players also can't leave an Active match yet (STORY-023/025/027).
-- **Lobby updates:** refresh only; live updates come with SignalR (STORY-022/026).
+- **Lobby updates:** each `RoomChanged` notice costs every viewer one `GET`, which counts against the per-player room limit. Versioned snapshots come with STORY-026.
+- **Live connections keep their identity:** a hub connection keeps the player it was opened with, even after sign-out or a wallet switch, until it reconnects. It only ever gets notices for rooms that player is in.
+- **Single instance realtime:** the connection registry is in memory; scale-out needs a backplane and shared tracking.
 - **Lobby display:** NFT Chogs show as `Chog #<id>` without an image.
 - **Start holds a lock during chain calls:** start runs up to six live ownership checks while holding the room's row lock. That's acceptable at this scale, but worth revisiting if the chain is slow.
 - **Duplicated code:**
@@ -102,9 +107,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-022 — SignalR auth and groups:** hub connections authenticated with the session cookie, room membership checked before subscribing, and group messages reaching members only. Live lobby updates then replace the Refresh button.
-2. **STORY-023 — Authoritative match state machine:** settle the Active-room rule, leaving a started match, and storing the character snapshot.
-3. **Then:** STORY-024 (command envelope and idempotency), STORY-025 (turn and AFK timer), STORY-026 to 029, then E05 abilities (STORY-030 to 034).
+1. **STORY-023 — Authoritative match state machine:** settle the Active-room rule, leaving a started match, and storing the character snapshot.
+2. **Then:** STORY-024 (command envelope and idempotency), STORY-025 (turn and AFK timer), STORY-026 to 029, then E05 abilities (STORY-030 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

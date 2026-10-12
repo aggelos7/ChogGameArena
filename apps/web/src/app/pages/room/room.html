@@ -71,8 +71,16 @@
             </li>
           }
         </ul>
-        <p class="hint">Others don’t appear automatically yet: refresh to see who joined and who is ready.</p>
-        <button type="button" (click)="load()">Refresh</button>
+        <p class="hint live-status" role="status" [attr.data-live]="liveState()">
+          @switch (liveState()) {
+            @case ('live') { Players appear and get ready here as it happens. }
+            @case ('connecting') { Connecting for live updates… }
+            @case ('offline') { Live updates are off: refresh to see who joined and who is ready. }
+          }
+        </p>
+        @if (liveState() === 'offline') {
+          <button type="button" (click)="reconnect()">Refresh</button>
+        }
       </section>
 
       @if (current.status === 'Waiting' && you(); as me) {
