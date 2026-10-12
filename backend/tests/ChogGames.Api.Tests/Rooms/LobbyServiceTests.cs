@@ -41,7 +41,7 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
     {
         Assert.True(PlayerDisplayName.TryCreate("Holder", out var name));
         Assert.True(WalletAddress.TryParse("0x" + Convert.ToHexString(RandomNumberGenerator.GetBytes(20)).ToLowerInvariant(), out var wallet));
-        var nft = new OwnedNft(NftTokenId.From(tokenId), $"Chog #{tokenId}", null, []);
+        var nft = new OwnedNft(NftTokenId.From(tokenId), $"Chog #{tokenId}", null, [new NftTrait("Eyes", "Laser")]);
         chain.Holdings[wallet] = [nft];
         var player = Player.CreateForWallet(wallet, name, clock.GetUtcNow());
         player.SelectNftCharacter(nft.TokenId);
@@ -329,14 +329,11 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
     [InlineData(RoomStatus.Active, RoomOutcome.RoomStarted)]
     [InlineData(RoomStatus.Completed, RoomOutcome.RoomClosed)]
     [InlineData(RoomStatus.Cancelled, RoomOutcome.RoomClosed)]
+    [InlineData(RoomStatus.Abandoned, RoomOutcome.RoomClosed)]
     public async Task Nothing_changes_once_the_room_is_not_waiting(RoomStatus status, RoomOutcome expected)
     {
         var (room, host, bob) = await ReadyPair();
-        await using (var db = database.CreateDbContext())
-        {
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE \"GameRooms\" SET \"Status\" = {status.ToString()}, \"StartedAt\" = {clock.GetUtcNow()} WHERE \"Id\" = {room.Id}");
-        }
+        await SetStatus(room, status);
 
         Assert.Equal(expected, (await Ready(bob, room, ready: false)).Outcome);
         Assert.Equal(expected, (await Start(host, room)).Outcome);
@@ -447,20 +444,192 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
     }
 
     [PostgresTheory]
-    [InlineData(RoomStatus.Active, RoomOutcome.RoomStarted)]
-    [InlineData(RoomStatus.Completed, RoomOutcome.RoomClosed)]
-    public async Task Nobody_leaves_once_the_room_is_not_waiting(RoomStatus status, RoomOutcome expected)
+    [InlineData(RoomStatus.Completed)]
+    [InlineData(RoomStatus.Abandoned)]
+    public async Task Nobody_leaves_a_match_that_has_ended(RoomStatus status)
     {
         var (room, host, bob) = await ReadyPair();
-        await using (var db = database.CreateDbContext())
+        Assert.Equal(RoomOutcome.Started, (await Start(host, room)).Outcome);
+        await SetStatus(room, status);
+
+        Assert.Equal(RoomOutcome.RoomClosed, (await Leave(bob, room)).Outcome);
+        Assert.Equal(RoomOutcome.RoomClosed, (await Leave(host, room)).Outcome);
+        var stored = await Stored(room);
+        Assert.Equal((status, 2), (stored.Status, stored.Members.Count));
+        Assert.All(stored.Members, m => Assert.False(m.HasLeft));
+    }
+
+    [PostgresFact]
+    public async Task Starting_stores_each_members_character_snapshot()
+    {
+        var host = await SavedGuest("gold");
+        var (holder, wallet) = await SavedHolder(7);
+        var room = await SavedRoom(host, holder);
+        await Ready(host, room);
+        await Ready(holder, room);
+        clock.Advance(TimeSpan.FromMinutes(2));
+
+        Assert.Equal(RoomOutcome.Started, (await Start(host, room)).Outcome);
+
+        var stored = await Stored(room);
+        var standard = stored.Members.Single(m => m.PlayerId == host.Id).Character!;
+        Assert.Equal((CharacterKind.Standard, "gold", "Gold", (string?)null, clock.GetUtcNow()), (standard.Kind, standard.CharacterId, standard.Name, standard.WalletAddress, standard.VerifiedAt));
+        var nft = stored.Members.Single(m => m.PlayerId == holder.Id).Character!;
+        Assert.Equal((CharacterKind.Nft, "7", "Chog #7", wallet.Value), (nft.Kind, nft.CharacterId, nft.Name, nft.WalletAddress));
+        Assert.Equal([new NftTrait("Eyes", "Laser")], nft.Traits);
+    }
+
+    [PostgresFact]
+    public async Task A_refused_start_stores_no_snapshots()
+    {
+        var host = await SavedGuest();
+        var (holder, wallet) = await SavedHolder(7);
+        var room = await SavedRoom(host, holder);
+        await Ready(host, room);
+        await Ready(holder, room);
+        chain.Holdings[wallet] = [];
+
+        Assert.Equal(RoomOutcome.CharacterUnavailable, (await Start(host, room)).Outcome);
+
+        Assert.All((await Stored(room)).Members, m => Assert.Null(m.Character));
+    }
+
+    [PostgresFact]
+    public async Task The_snapshot_stays_when_the_nft_is_transferred_during_the_match()
+    {
+        var host = await SavedGuest();
+        var (holder, wallet) = await SavedHolder(7);
+        var room = await SavedRoom(host, holder);
+        await Ready(host, room);
+        await Ready(holder, room);
+        Assert.Equal(RoomOutcome.Started, (await Start(host, room)).Outcome);
+
+        chain.Holdings[wallet] = [];
+        await SelectStandard(holder, "berry");
+
+        var stored = await Stored(room);
+        Assert.Equal((RoomStatus.Active, "7"), (stored.Status, stored.Members.Single(m => m.PlayerId == holder.Id).Character!.CharacterId));
+    }
+
+    [PostgresFact]
+    public async Task Leaving_a_started_match_is_a_forfeit_and_frees_the_player()
+    {
+        var (room, host, bob, carol) = await StartedTrio();
+        clock.Advance(TimeSpan.FromMinutes(4));
+
+        Assert.Equal(RoomOutcome.Left, (await Leave(bob, room)).Outcome);
+
+        var stored = await Stored(room);
+        Assert.Equal((RoomStatus.Active, 3, (DateTimeOffset?)null), (stored.Status, stored.Members.Count, stored.EndedAt));
+        var left = stored.Members.Single(m => m.PlayerId == bob.Id);
+        Assert.Equal((clock.GetUtcNow(), true), (left.LeftAt, left.Character is not null));
+        Assert.False(stored.HasLeft(carol.Id));
+
+        Assert.Equal(RoomOutcome.RoomStarted, (await JoinRoom(bob, room)).Outcome);
+        var other = await SavedRoom(await SavedGuest());
+        Assert.Equal(RoomOutcome.Joined, (await JoinRoom(bob, other)).Outcome);
+        Assert.Equal(RoomOutcome.AlreadyInRoom, (await JoinRoom(host, other)).Outcome);
+    }
+
+    [PostgresFact]
+    public async Task A_match_started_before_snapshots_were_stored_can_be_left()
+    {
+        // Rooms that became Active before STORY-023 have members without a snapshot.
+        var host = await SavedGuest();
+        var bob = await SavedGuest();
+        var carol = await SavedGuest();
+        var room = await SavedRoom(host, bob, carol);
+        await SetStatus(room, RoomStatus.Active);
+
+        Assert.Equal(RoomOutcome.Left, (await Leave(bob, room)).Outcome);
+        Assert.Equal(RoomOutcome.Left, (await Leave(host, room)).Outcome);
+
+        var stored = await Stored(room);
+        Assert.Equal(RoomStatus.Abandoned, stored.Status);
+        Assert.All(stored.Members, m => Assert.Null(m.Character));
+        Assert.True(stored.HasLeft(bob.Id) && stored.HasLeft(host.Id));
+    }
+
+    [PostgresFact]
+    public async Task Leaving_a_match_again_changes_nothing()
+    {
+        var (room, _, bob, _) = await StartedTrio();
+        Assert.Equal(RoomOutcome.Left, (await Leave(bob, room)).Outcome);
+        var leftAt = clock.GetUtcNow();
+        clock.Advance(TimeSpan.FromMinutes(1));
+
+        Assert.Equal(RoomOutcome.AlreadyLeft, (await Leave(bob, room)).Outcome);
+
+        var stored = await Stored(room);
+        Assert.Equal((RoomStatus.Active, leftAt), (stored.Status, stored.Members.Single(m => m.PlayerId == bob.Id).LeftAt));
+    }
+
+    [PostgresFact]
+    public async Task The_host_leaving_a_started_match_does_not_end_it()
+    {
+        var (room, host, bob, carol) = await StartedTrio();
+
+        Assert.Equal(RoomOutcome.Left, (await Leave(host, room)).Outcome);
+
+        var stored = await Stored(room);
+        Assert.Equal(RoomStatus.Active, stored.Status);
+        Assert.True(stored.IsPlaying(bob.Id) && stored.IsPlaying(carol.Id));
+    }
+
+    [PostgresFact]
+    public async Task A_match_left_with_one_player_is_abandoned_and_frees_everyone()
+    {
+        var (room, host, bob) = await ReadyPair();
+        Assert.Equal(RoomOutcome.Started, (await Start(host, room)).Outcome);
+        clock.Advance(TimeSpan.FromMinutes(6));
+
+        Assert.Equal(RoomOutcome.Left, (await Leave(bob, room)).Outcome);
+
+        var stored = await Stored(room);
+        Assert.Equal((RoomStatus.Abandoned, clock.GetUtcNow()), (stored.Status, stored.EndedAt));
+        Assert.Equal(RoomOutcome.RoomClosed, (await Leave(host, room)).Outcome);
+        Assert.Equal(RoomOutcome.RoomClosed, (await JoinRoom(await SavedGuest(), room)).Outcome);
+        var other = await SavedRoom(await SavedGuest());
+        Assert.Equal(RoomOutcome.Joined, (await JoinRoom(host, other)).Outcome);
+        Assert.Equal(RoomOutcome.Joined, (await JoinRoom(bob, other)).Outcome);
+    }
+
+    [PostgresFact]
+    public async Task Concurrent_forfeits_abandon_the_match_once()
+    {
+        for (var round = 0; round < 10; round++)
         {
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE \"GameRooms\" SET \"Status\" = {status.ToString()}, \"StartedAt\" = {clock.GetUtcNow()} WHERE \"Id\" = {room.Id}");
+            var (room, host, bob, carol) = await StartedTrio();
+
+            var results = await Task.WhenAll(new[] { host, bob, carol }.Select(player => Task.Run(() => Leave(player, room))));
+
+            // The first two leave; the last finds the match already abandoned.
+            Assert.Equal(2, results.Count(r => r.Outcome == RoomOutcome.Left));
+            Assert.Single(results, r => r.Outcome == RoomOutcome.RoomClosed);
+            var stored = await Stored(room);
+            Assert.Equal((RoomStatus.Abandoned, 2), (stored.Status, stored.Members.Count(m => m.HasLeft)));
+        }
+    }
+
+    private async Task SetStatus(GameRoom room, RoomStatus status)
+    {
+        await using var db = database.CreateDbContext();
+        await RoomStatusOverride.SetAsync(db, room.Code, status, clock.GetUtcNow());
+    }
+
+    private async Task<(GameRoom Room, Player Host, Player Bob, Player Carol)> StartedTrio()
+    {
+        var host = await SavedGuest();
+        var bob = await SavedGuest();
+        var carol = await SavedGuest();
+        var room = await SavedRoom(host, bob, carol);
+        foreach (var player in new[] { host, bob, carol })
+        {
+            await Ready(player, room);
         }
 
-        Assert.Equal(expected, (await Leave(bob, room)).Outcome);
-        Assert.Equal(expected, (await Leave(host, room)).Outcome);
-        Assert.Equal((status, 2), ((await Stored(room)).Status, (await Stored(room)).Members.Count));
+        Assert.Equal(RoomOutcome.Started, (await Start(host, room)).Outcome);
+        return (room, host, bob, carol);
     }
 
     [PostgresFact]
@@ -477,8 +646,10 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
             var stored = await Stored(room);
             if (started.Outcome == RoomOutcome.Started)
             {
-                Assert.Equal(RoomOutcome.RoomStarted, left.Outcome);
-                Assert.Equal((RoomStatus.Active, 2), (stored.Status, stored.Members.Count));
+                // Leaving right after the start is a forfeit, which leaves one player: the match is abandoned (DEC-025).
+                Assert.Equal(RoomOutcome.Left, left.Outcome);
+                Assert.Equal((RoomStatus.Abandoned, 2), (stored.Status, stored.Members.Count));
+                Assert.True(stored.HasLeft(bob.Id));
             }
             else
             {

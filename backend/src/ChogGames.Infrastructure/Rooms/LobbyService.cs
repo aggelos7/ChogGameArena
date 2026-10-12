@@ -10,7 +10,8 @@ namespace ChogGames.Infrastructure.Rooms;
 /// <summary>
 /// The waiting room's lobby (STORY-021, ENG-002): members mark ready with their chosen Chog, leave (STORY-063) and the
 /// host starts the match. The room's row is locked first and then the members' rows, the same order as joining, so a
-/// start cannot race a join, a leave, a ready change or a Chog change. Every member's Chog is checked live at start (STORY-018, DEC-022).
+/// start cannot race a join, a leave, a ready change or a Chog change. Every member's Chog is checked live at start
+/// (STORY-018, DEC-022) and its snapshot stored with the member (STORY-023, DEC-025); leaving a started match is a forfeit.
 /// </summary>
 public sealed class LobbyService(
     ChogGamesDbContext db,
@@ -49,7 +50,10 @@ public sealed class LobbyService(
         return new RoomResult(RoomOutcome.ReadyChanged, room);
     }
 
-    /// <summary>The player leaves a waiting room; the host leaving cancels it for everyone (DEC-023).</summary>
+    /// <summary>
+    /// The player leaves: a waiting room, where the host leaving cancels it for everyone (DEC-023), or a started match,
+    /// which is a forfeit (DEC-025). Leaving a match already left changes nothing.
+    /// </summary>
     public async Task<RoomResult> LeaveAsync(Player player, RoomCode code, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -59,12 +63,17 @@ public sealed class LobbyService(
             return new RoomResult(RoomOutcome.RoomNotFound);
         }
 
-        if (StatusFailure(room) is { } failure)
+        if (room.Status == RoomStatus.Active && room.HasLeft(player.Id))
         {
-            return failure;
+            return new RoomResult(RoomOutcome.AlreadyLeft, room);
         }
 
-        room.Leave(player.Id);
+        if (room.Status is not (RoomStatus.Waiting or RoomStatus.Active))
+        {
+            return new RoomResult(RoomOutcome.RoomClosed);
+        }
+
+        room.Leave(player.Id, timeProvider.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.Left, room);
@@ -95,7 +104,8 @@ public sealed class LobbyService(
                 return new RoomResult(RoomOutcome.PlayersNotReady);
         }
 
-        // Ownership is read live for every NFT; the snapshot is kept with the match from STORY-023/028.
+        // Ownership is read live for every NFT; the snapshots are stored with the members (DEC-025).
+        var characters = new Dictionary<Guid, CharacterSnapshot>();
         var notOwned = new List<Guid>();
         var unavailable = false;
         foreach (var player in players)
@@ -103,6 +113,9 @@ public sealed class LobbyService(
             var result = await eligibility.SnapshotForMatchAsync(player, cancellationToken);
             switch (result.Status)
             {
+                case CharacterEligibilityStatus.Eligible:
+                    characters[player.Id] = result.Snapshot!;
+                    break;
                 case CharacterEligibilityStatus.NftNotOwned:
                     notOwned.Add(player.Id);
                     break;
@@ -131,7 +144,7 @@ public sealed class LobbyService(
             return new RoomResult(RoomOutcome.OwnershipUnavailable);
         }
 
-        room.Start(caller.Id, players, timeProvider.GetUtcNow());
+        room.Start(caller.Id, players, characters, timeProvider.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.Started, room);

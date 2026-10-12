@@ -23,7 +23,8 @@ const NFT_COLOR = 'var(--brand)';
 
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
- * status, the player's ready toggle, the host's start and leaving (STORY-063). It follows the room live (STORY-022): each
+ * status, the player's ready toggle, the host's start and leaving (STORY-063). Once started it shows each player's locked
+ * Chog, and leaving forfeits the game (STORY-023, DEC-025). It follows the room live (STORY-022): each
  * change notice fetches the room again, and Refresh is offered only while live updates are down.
  * The server decides who may start; the button state here is only a hint.
  */
@@ -53,7 +54,7 @@ export class RoomPage implements OnInit {
   protected readonly copyState = signal<'idle' | 'copied' | 'failed'>('idle');
   protected readonly busy = signal(false);
   protected readonly actionError = signal<RoomError | null>(null);
-  /** The host confirms first, since leaving closes the room for everyone. */
+  /** Confirmed first when leaving costs something: the host closes the room for everyone; a player forfeits a started game. */
   protected readonly confirmingLeave = signal(false);
   protected readonly liveState = signal<RoomLiveStatus>('connecting');
   protected readonly message = roomErrorMessage;
@@ -150,7 +151,8 @@ export class RoomPage implements OnInit {
     if (!room) {
       return;
     }
-    if (this.you()?.isHost && !this.confirmingLeave()) {
+    const costly = room.status === 'Active' || !!this.you()?.isHost;
+    if (costly && !this.confirmingLeave()) {
       this.confirmingLeave.set(true);
       return;
     }

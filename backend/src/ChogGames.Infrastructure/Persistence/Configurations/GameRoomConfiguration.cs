@@ -41,8 +41,14 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
                 $"\"Capacity\" BETWEEN {GameDefinition.MinRoomPlayers} AND {GameDefinition.MaxRoomPlayers}");
             table.HasCheckConstraint("CK_GameRooms_Status", $"\"Status\" IN ({statuses})");
             table.HasCheckConstraint("CK_GameRooms_MinPlayers", $"\"MinPlayers\" >= {GameDefinition.MinRoomPlayers} AND \"MinPlayers\" <= \"Capacity\"");
+
+            // Started exactly when the room left Waiting other than by being cancelled; ended exactly in a final status (DEC-025).
             table.HasCheckConstraint(
-                "CK_GameRooms_StartedAt", $"\"StartedAt\" IS NULL OR \"Status\" <> '{nameof(RoomStatus.Waiting)}'");
+                "CK_GameRooms_StartedAt",
+                $"(\"StartedAt\" IS NULL) = (\"Status\" IN ('{nameof(RoomStatus.Waiting)}', '{nameof(RoomStatus.Cancelled)}'))");
+            table.HasCheckConstraint(
+                "CK_GameRooms_EndedAt",
+                $"(\"EndedAt\" IS NULL) = (\"Status\" IN ('{nameof(RoomStatus.Waiting)}', '{nameof(RoomStatus.Active)}'))");
         });
         builder.HasKey(r => r.Id);
         builder.Property(r => r.Id).ValueGeneratedNever();
@@ -65,13 +71,22 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
 {
     public void Configure(EntityTypeBuilder<RoomMember> builder)
     {
-        builder.ToTable("RoomMembers", table => table.HasCheckConstraint(
-            "CK_RoomMembers_Ready",
-            "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) "
-            + "AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))"));
+        builder.ToTable("RoomMembers", table =>
+        {
+            table.HasCheckConstraint(
+                "CK_RoomMembers_Ready",
+                "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) "
+                + "AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))");
+
+            // A snapshot is a JSON object. It isn't required to leave: matches started before STORY-023 have none (DEC-025).
+            table.HasCheckConstraint("CK_RoomMembers_Character", "\"Character\" IS NULL OR jsonb_typeof(\"Character\") = 'object'");
+        });
         builder.HasKey(m => new { m.RoomId, m.PlayerId });
         builder.Property(m => m.ReadyCharacterKind).HasConversion<string>().HasMaxLength(16);
         builder.Property(m => m.ReadyCharacterId).HasMaxLength(NftTokenId.MaxDigits);
+        builder.Property(m => m.Character)
+            .HasColumnType("jsonb")
+            .HasConversion(CharacterSnapshotConversion.Converter, CharacterSnapshotConversion.Comparer);
         builder.HasIndex(m => m.PlayerId);
         builder.HasOne<Player>().WithMany().HasForeignKey(m => m.PlayerId).OnDelete(DeleteBehavior.Restrict);
     }

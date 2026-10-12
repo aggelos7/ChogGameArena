@@ -29,6 +29,7 @@ describe('Room page', () => {
       isReady: false,
       character: { kind: 'Standard', id: 'classic', name: 'Classic', color: '#5b2bd6' },
       ability: null,
+      hasLeft: false,
       ...overrides,
     };
   }
@@ -367,6 +368,56 @@ describe('Room page', () => {
 
       expect(navigate).not.toHaveBeenCalled();
       expect(element().querySelector('[data-started]')?.textContent).toBe('The game has started.');
+      expect(maybeButton('Leave room')).toBeUndefined();
+    });
+
+    it('asks before forfeiting a started game, then returns to the game', () => {
+      load({ ...room, status: 'Active' });
+
+      expect(element().querySelector('.match')?.textContent).toContain('You’re playing as Mint for this game.');
+      expect(column('[data-readiness]')).toEqual([]);
+      button('Leave game').click();
+      fixture.detectChanges();
+      http.expectNone('/api/rooms/K7QF3M/leave');
+      expect(element().querySelector('[data-leave] [role="alert"]')?.textContent).toContain('forfeits this game');
+
+      button('Stay').click();
+      fixture.detectChanges();
+      expect(maybeButton('Leave and forfeit')).toBeUndefined();
+
+      button('Leave game').click();
+      fixture.detectChanges();
+      button('Leave and forfeit').click();
+      const leave = http.expectOne('/api/rooms/K7QF3M/leave');
+      expect(leave.request.method).toBe('POST');
+      leave.flush(null, { status: 204, statusText: 'No Content' });
+
+      expect(navigate).toHaveBeenCalledWith(['/games', 'chog-life']);
+    });
+
+    it('shows who left a started game', () => {
+      load({ ...room, status: 'Active', members: [member('Alice', { isHost: true, hasLeft: true }), member('Bob', { isYou: true })] });
+
+      expect(members()).toEqual(['Alice Host Left', 'Bob You']);
+      expect(element().querySelector('[data-started]')?.textContent).toBe('The game has started.');
+      expect(maybeButton('Leave game')).toBeDefined();
+    });
+
+    it('tells a player who left the game that they are out of it', () => {
+      load({ ...room, status: 'Active', members: [member('Alice', { isHost: true }), member('Bob', { isYou: true, hasLeft: true })] });
+
+      expect(element().querySelector('[data-left]')?.textContent).toContain('You left this game.');
+      expect(element().querySelector('[data-left] a')?.getAttribute('href')).toBe('/games');
+      expect(element().querySelector('[data-started]')).toBeNull();
+      expect(maybeButton('Leave game')).toBeUndefined();
+    });
+
+    it('tells players when a game ended because too many left', () => {
+      load({ ...room, status: 'Abandoned', members: [member('Alice', { isHost: true, hasLeft: true }), member('Bob', { isYou: true })] });
+
+      expect(element().querySelector('[data-closed]')?.textContent).toContain('This game ended early: too many players left.');
+      expect(element().querySelector('[data-closed] a')?.getAttribute('href')).toBe('/games');
+      expect(maybeButton('Leave game')).toBeUndefined();
       expect(maybeButton('Leave room')).toBeUndefined();
     });
 

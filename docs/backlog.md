@@ -358,7 +358,7 @@
 
 #### STORY-023 — Authoritative match state machine
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Model Waiting, Active, Completed, Cancelled and allowed transitions.
