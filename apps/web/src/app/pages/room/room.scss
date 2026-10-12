@@ -63,6 +63,11 @@ h2 {
   background: var(--brand);
 }
 
+.tag.rank.winner {
+  color: #fff;
+  background: #116329;
+}
+
 .hint {
   color: var(--text-muted);
   font-size: 0.875rem;

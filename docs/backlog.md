@@ -423,7 +423,7 @@
 
 #### STORY-028 — Match persistence and result records
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Persist snapshots/checkpoints and final results with player stats updates.

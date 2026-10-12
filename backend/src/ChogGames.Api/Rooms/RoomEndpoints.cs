@@ -36,6 +36,7 @@ public static class RoomEndpoints
     /// <param name="Ability">The chosen ability; always null until ability selection (STORY-033).</param>
     /// <param name="HasLeft">The member left the started match (DEC-025).</param>
     /// <param name="IsTurn">It is this member's turn in the active match (DEC-027).</param>
+    /// <param name="Rank">The member's final place in a completed match, from 1 for the winners; null otherwise (DEC-030).</param>
     public sealed record RoomMemberResponse(
         string DisplayName,
         string AvatarId,
@@ -45,7 +46,8 @@ public static class RoomEndpoints
         RoomCharacterResponse Character,
         string? Ability,
         bool HasLeft,
-        bool IsTurn);
+        bool IsTurn,
+        int? Rank);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>

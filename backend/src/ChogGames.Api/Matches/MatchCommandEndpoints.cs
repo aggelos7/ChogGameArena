@@ -44,8 +44,9 @@ public static class MatchCommandEndpoints
         public const string TurnExpired = "turn_expired";
     }
 
-    /// <summary>Runs the turn scheduler (DEC-027).</summary>
-    public static IServiceCollection AddMatchTurns(this IServiceCollection services) => services.AddHostedService<TurnTimeoutWorker>();
+    /// <summary>Resumes active matches at startup (DEC-030), before the turn scheduler (DEC-027) starts.</summary>
+    public static IServiceCollection AddMatchTurns(this IServiceCollection services) =>
+        services.AddHostedService<MatchRecoveryStartup>().AddHostedService<TurnTimeoutWorker>();
 
     public static IEndpointRouteBuilder MapMatchCommandEndpoints(this IEndpointRouteBuilder endpoints)
     {

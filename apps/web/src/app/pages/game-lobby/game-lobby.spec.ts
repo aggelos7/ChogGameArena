@@ -28,6 +28,7 @@ describe('Game lobby page', () => {
         ability: null,
         hasLeft: false,
         isTurn: false,
+        rank: null,
       },
     ],
   };
