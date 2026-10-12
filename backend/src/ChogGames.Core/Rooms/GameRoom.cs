@@ -10,7 +10,8 @@ namespace ChogGames.Core.Rooms;
 /// members mark ready with their chosen Chog, and the host starts once enough members are ready. Once started the room
 /// is the match (STORY-023, ENG-010, DEC-025): its members are the match players, each with their character snapshot,
 /// and every status change goes through <see cref="RoomLifecycle"/>. Every change bumps <see cref="Version"/>, and players act
-/// on the match through versioned, idempotent commands (STORY-024, DEC-026).
+/// on the match through versioned, idempotent commands (STORY-024, DEC-026). The engine owns the turn (STORY-025, DEC-027):
+/// players take turns in seat order, only the current player may act, and a turn that runs out is timed out once.
 /// </summary>
 public sealed class GameRoom
 {
@@ -49,6 +50,18 @@ public sealed class GameRoom
     /// <summary>The game's own match state as a JSON object, owned by its rules; null until their first accepted command.</summary>
     public string? State { get; private set; }
 
+    /// <summary>How long each turn of this match lasts, fixed from configuration at the start (DEC-027); null before it.</summary>
+    public TimeSpan? TurnTimeout { get; private set; }
+
+    /// <summary>The turn being played, counted from 1 at the start; 0 before it. Kept once the match ends.</summary>
+    public int TurnNumber { get; private set; }
+
+    /// <summary>Whose turn it is; set exactly while the match is Active.</summary>
+    public Guid? CurrentPlayerId { get; private set; }
+
+    /// <summary>When the current turn runs out (ENG-007); set exactly while the match is Active.</summary>
+    public DateTimeOffset? TurnEndsAt { get; private set; }
+
     public IReadOnlyList<RoomMember> Members => _members;
 
     private GameRoom()
@@ -83,6 +96,9 @@ public sealed class GameRoom
     public bool IsPlaying(Guid playerId) => _members.Any(m => m.PlayerId == playerId && !m.HasLeft);
 
     public bool IsFull => _members.Count >= Capacity;
+
+    /// <summary>The current turn ran out and has not been timed out yet.</summary>
+    public bool IsTurnOverdue(DateTimeOffset now) => Status == RoomStatus.Active && now >= TurnEndsAt;
 
     /// <summary>
     /// Adds <paramref name="player"/> to a waiting room with a free seat. The caller has checked that the player is
@@ -147,12 +163,7 @@ public sealed class GameRoom
         {
             var player = _members.SingleOrDefault(m => m.PlayerId == playerId && !m.HasLeft)
                 ?? throw new InvalidOperationException("The player is not playing in this match.");
-            player.Forfeit(now);
-            if (_members.Count(m => !m.HasLeft) < GameDefinition.MinRoomPlayers)
-            {
-                MoveTo(RoomStatus.Abandoned, now);
-            }
-
+            Forfeit(player, now);
             return;
         }
 
@@ -164,6 +175,23 @@ public sealed class GameRoom
         }
 
         _members.Remove(member);
+    }
+
+    /// <summary>
+    /// <paramref name="player"/> is out of the match: when fewer than two players remain it is abandoned, and when it was
+    /// their turn the next player's begins (DEC-027).
+    /// </summary>
+    private void Forfeit(RoomMember player, DateTimeOffset now)
+    {
+        player.Forfeit(now);
+        if (_members.Count(m => !m.HasLeft) < GameDefinition.MinRoomPlayers)
+        {
+            MoveTo(RoomStatus.Abandoned, now);
+        }
+        else if (player.PlayerId == CurrentPlayerId)
+        {
+            NextTurn(now);
+        }
     }
 
     /// <summary>Why the host can't start now, or null if they can. <paramref name="players"/> are the members' current players.</summary>
@@ -192,15 +220,23 @@ public sealed class GameRoom
 
     /// <summary>
     /// Starts the match: the room becomes Active and each member's character is locked with the snapshot taken for
-    /// them (DEC-019, DEC-025). The caller has checked <see cref="CheckStart"/> and verified every member's Chog
-    /// (STORY-018); <paramref name="characters"/> holds a snapshot for every member.
+    /// them (DEC-019, DEC-025). Members are seated in turn order, the host first and then in the order they joined, and
+    /// the first turn begins with <paramref name="turnTimeout"/> to play it (DEC-027). The caller has checked
+    /// <see cref="CheckStart"/> and verified every member's Chog (STORY-018); <paramref name="characters"/> holds a
+    /// snapshot for every member.
     /// </summary>
     public void Start(
         Guid callerId,
         IReadOnlyCollection<Player> players,
         IReadOnlyDictionary<Guid, CharacterSnapshot> characters,
+        TimeSpan turnTimeout,
         DateTimeOffset now)
     {
+        if (turnTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(turnTimeout), turnTimeout, "A turn must last some time.");
+        }
+
         if (CheckStart(callerId, players) is { } problem)
         {
             throw new InvalidOperationException($"The room cannot start: {problem}.");
@@ -218,6 +254,14 @@ public sealed class GameRoom
             member.LockCharacter(characters[member.PlayerId]);
         }
 
+        var seat = 0;
+        foreach (var member in _members.OrderBy(m => m.PlayerId != HostPlayerId).ThenBy(m => m.JoinedAt).ThenBy(m => m.PlayerId))
+        {
+            member.TakeSeat(++seat);
+        }
+
+        TurnTimeout = turnTimeout;
+        BeginTurn(_members.Single(m => m.Seat == 1), now);
         Version++;
     }
 
@@ -229,10 +273,44 @@ public sealed class GameRoom
     }
 
     /// <summary>
-    /// Why <paramref name="playerId"/> can't act on this match with <paramref name="command"/> now, or null if they can
-    /// (STORY-024, DEC-026). The caller has checked that the player is a member.
+    /// Times out the overdue turn (ENG-007, DEC-027): <paramref name="state"/> is the game's safe default for it, or null
+    /// when the turn is just skipped. The current player has now missed one more turn in a row; at
+    /// <paramref name="maxMissedTurns"/> they forfeit, otherwise the next player's turn begins.
     /// </summary>
-    public MatchCommandProblem? CheckCommand(Guid playerId, MatchCommand command)
+    /// <returns>Whether the current player forfeited.</returns>
+    public bool TimeOutTurn(string? state, int maxMissedTurns, DateTimeOffset now)
+    {
+        if (!IsTurnOverdue(now))
+        {
+            throw new InvalidOperationException("Only an overdue turn of an active match can time out.");
+        }
+
+        if (state is not null)
+        {
+            State = state;
+        }
+
+        var current = CurrentMember();
+        var forfeited = current.MissTurn() >= maxMissedTurns;
+        if (forfeited)
+        {
+            Forfeit(current, now);
+        }
+        else
+        {
+            NextTurn(now);
+        }
+
+        Version++;
+        return forfeited;
+    }
+
+    /// <summary>
+    /// Why <paramref name="playerId"/> can't act on this match with <paramref name="command"/> now, or null if they can
+    /// (STORY-024, DEC-026): only the current player acts, before their turn runs out (STORY-025, DEC-027). The caller has
+    /// checked that the player is a member.
+    /// </summary>
+    public MatchCommandProblem? CheckCommand(Guid playerId, MatchCommand command, DateTimeOffset now)
     {
         if (command.MatchId != Id)
         {
@@ -254,21 +332,38 @@ public sealed class GameRoom
             return MatchCommandProblem.NotPlaying;
         }
 
-        return command.ExpectedVersion == Version ? null : MatchCommandProblem.StaleVersion;
+        if (command.ExpectedVersion != Version)
+        {
+            return MatchCommandProblem.StaleVersion;
+        }
+
+        if (playerId != CurrentPlayerId)
+        {
+            return MatchCommandProblem.NotYourTurn;
+        }
+
+        return IsTurnOverdue(now) ? MatchCommandProblem.TurnExpired : null;
     }
 
     /// <summary>
-    /// Applies a command the game's rules accepted: stores their new <paramref name="state"/>, bumps the version and
-    /// returns the record that makes a retry of the same action return this result (DEC-026).
+    /// Applies a command the game's rules accepted: stores their new <paramref name="state"/>, ends the turn when the
+    /// rules say so, bumps the version and returns the record that makes a retry of the same action return this result
+    /// (DEC-026, DEC-027). Acting resets the player's missed turns.
     /// </summary>
-    public MatchAction ApplyCommand(Guid playerId, MatchCommand command, string state, DateTimeOffset now)
+    public MatchAction ApplyCommand(Guid playerId, MatchCommand command, string state, bool endsTurn, DateTimeOffset now)
     {
-        if (CheckCommand(playerId, command) is { } problem)
+        if (CheckCommand(playerId, command, now) is { } problem)
         {
             throw new InvalidOperationException($"The command cannot be applied: {problem}.");
         }
 
         State = state;
+        CurrentMember().Act();
+        if (endsTurn)
+        {
+            NextTurn(now);
+        }
+
         Version++;
         return new MatchAction(Id, command.ActionId, playerId, command.Type, command.Payload.GetRawText(), Version, now);
     }
@@ -285,7 +380,26 @@ public sealed class GameRoom
         if (RoomLifecycle.IsFinal(next))
         {
             EndedAt = now;
+            CurrentPlayerId = null;
+            TurnEndsAt = null;
         }
+    }
+
+    private RoomMember CurrentMember() => _members.Single(m => m.PlayerId == CurrentPlayerId);
+
+    /// <summary>The next player still playing after the current one, in seat order, starts a new turn.</summary>
+    private void NextTurn(DateTimeOffset now)
+    {
+        var seat = CurrentMember().Seat;
+        var playing = _members.Where(m => !m.HasLeft).OrderBy(m => m.Seat).ToList();
+        BeginTurn(playing.FirstOrDefault(m => m.Seat > seat) ?? playing[0], now);
+    }
+
+    private void BeginTurn(RoomMember player, DateTimeOffset now)
+    {
+        CurrentPlayerId = player.PlayerId;
+        TurnNumber++;
+        TurnEndsAt = now + TurnTimeout!.Value;
     }
 
     private RoomMember MemberForChange(Guid playerId)
@@ -316,6 +430,12 @@ public enum MatchCommandProblem
 
     /// <summary>The command's expected version is not the current one.</summary>
     StaleVersion,
+
+    /// <summary>Another player is playing the current turn.</summary>
+    NotYourTurn,
+
+    /// <summary>The player's turn ran out; it is about to be timed out.</summary>
+    TurnExpired,
 }
 
 public enum RoomStartProblem
@@ -351,6 +471,12 @@ public sealed class RoomMember
     public DateTimeOffset? LeftAt { get; private set; }
 
     public bool HasLeft => LeftAt is not null;
+
+    /// <summary>The member's place in the turn order, from 1, given at the start (DEC-027); null before it.</summary>
+    public int? Seat { get; private set; }
+
+    /// <summary>Turns in a row that ran out on the member; acting resets it (DEC-027).</summary>
+    public int MissedTurns { get; private set; }
 
     /// <summary>Ready, and still with the Chog <paramref name="player"/> has selected now.</summary>
     public bool IsReadyWith(Player player) =>
@@ -394,6 +520,13 @@ public sealed class RoomMember
     internal void LockCharacter(CharacterSnapshot character) => Character = character;
 
     internal void Forfeit(DateTimeOffset now) => LeftAt = now;
+
+    internal void TakeSeat(int seat) => Seat = seat;
+
+    /// <summary>Returns the turns now missed in a row.</summary>
+    internal int MissTurn() => ++MissedTurns;
+
+    internal void Act() => MissedTurns = 0;
 }
 
 /// <summary>Room and match lifecycle (ENG-010, DEC-025); <see cref="RoomLifecycle"/> lists the allowed transitions.</summary>

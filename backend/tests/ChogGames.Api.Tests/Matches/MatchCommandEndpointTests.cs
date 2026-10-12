@@ -149,7 +149,7 @@ public sealed class MatchCommandEndpointTests(MigratedPostgresDatabase database)
         using (alice)
         using (bob)
         {
-            using var response = await SendAsync(bob, room.Code, Command(room, payload: new { by = 3 }));
+            using var response = await SendAsync(alice, room.Code, Command(room, payload: new { by = 3 }));
 
             var result = await AcceptedAsync(response);
             Assert.Equal(("ADD", room.Version + 1, room.Version + 1, false), (result.Type, result.Version, result.CurrentVersion, result.Replayed));
@@ -187,7 +187,7 @@ public sealed class MatchCommandEndpointTests(MigratedPostgresDatabase database)
         {
             var actionId = Guid.NewGuid();
             var first = await AcceptedAsync(await SendAsync(alice, room.Code, Command(room, actionId)));
-            await AcceptedAsync(await SendAsync(bob, room.Code, Command(room, expectedVersion: first.Version)));
+            await AcceptedAsync(await SendAsync(alice, room.Code, Command(room, expectedVersion: first.Version)));
 
             var replayed = await AcceptedAsync(await SendAsync(alice, room.Code, Command(room, actionId)));
 
@@ -239,7 +239,7 @@ public sealed class MatchCommandEndpointTests(MigratedPostgresDatabase database)
         using (alice)
         using (bob)
         {
-            var sends = Enumerable.Range(0, 8).Select(i => SendAsync(i % 2 == 0 ? alice : bob, room.Code, Command(room))).ToArray();
+            var sends = Enumerable.Range(0, 8).Select(_ => SendAsync(alice, room.Code, Command(room))).ToArray();
             var responses = await Task.WhenAll(sends);
 
             Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
@@ -524,7 +524,8 @@ public sealed class MatchCommandEndpointTests(MigratedPostgresDatabase database)
 
     /// <summary>
     /// A stand-in game: <c>ADD</c> adds <c>by</c> (default 1) to a counter and refuses negative steps; <c>DOUBLE</c> is
-    /// known but never allowed. Like real rules, it is deterministic and keeps no state of its own.
+    /// known but never allowed. Like real rules, it is deterministic and keeps no state of its own. Turns are covered by
+    /// <see cref="MatchTurnTests"/>.
     /// </summary>
     private sealed class CounterRules : IMatchRules
     {
@@ -549,5 +550,7 @@ public sealed class MatchCommandEndpointTests(MigratedPostgresDatabase database)
                     return MatchRuleDecision.Unknown;
             }
         }
+
+        public JsonElement? TimeOutTurn(MatchTurnContext context) => null;
     }
 }

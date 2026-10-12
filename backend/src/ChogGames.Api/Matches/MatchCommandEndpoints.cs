@@ -15,7 +15,9 @@ namespace ChogGames.Api.Matches;
 /// Match commands (STORY-024, ENG-003, ENG-009, DEC-026): a player sends an intent in an envelope with an
 /// <c>actionId</c>, the <c>matchId</c> and the <c>expectedVersion</c> they acted on. A retry returns the first result,
 /// and a command built on an older version is refused. The player is always the session's; accepted commands are
-/// announced to the room's members over SignalR (STORY-022). Shares the room endpoints' rate limit.
+/// announced to the room's members over SignalR (STORY-022). Only the current player acts, before their turn runs out;
+/// turns that run out are timed out by <see cref="TurnTimeoutWorker"/> (STORY-025, DEC-027). Shares the room endpoints'
+/// rate limit.
 /// </summary>
 public static class MatchCommandEndpoints
 {
@@ -38,7 +40,12 @@ public static class MatchCommandEndpoints
         public const string StaleVersion = "stale_version";
         public const string UnknownCommand = "unknown_command";
         public const string CommandRejected = "command_rejected";
+        public const string NotYourTurn = "not_your_turn";
+        public const string TurnExpired = "turn_expired";
     }
+
+    /// <summary>Runs the turn scheduler (DEC-027).</summary>
+    public static IServiceCollection AddMatchTurns(this IServiceCollection services) => services.AddHostedService<TurnTimeoutWorker>();
 
     public static IEndpointRouteBuilder MapMatchCommandEndpoints(this IEndpointRouteBuilder endpoints)
     {
@@ -141,6 +148,8 @@ public static class MatchCommandEndpoints
                 StatusCodes.Status409Conflict, ErrorCodes.StaleVersion, "The game has changed since this command was made. Refresh and try again."),
             MatchCommandOutcome.UnknownCommand => (
                 StatusCodes.Status400BadRequest, ErrorCodes.UnknownCommand, "This game has no such command."),
+            MatchCommandOutcome.NotYourTurn => (StatusCodes.Status409Conflict, ErrorCodes.NotYourTurn, "It isn't your turn."),
+            MatchCommandOutcome.TurnExpired => (StatusCodes.Status409Conflict, ErrorCodes.TurnExpired, "Your turn has run out."),
             MatchCommandOutcome.Rejected => (
                 StatusCodes.Status409Conflict, ErrorCodes.CommandRejected, "This command isn't allowed right now."),
             _ => throw new ArgumentOutOfRangeException(nameof(result), result.Outcome, "Not a failure."),

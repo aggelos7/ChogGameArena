@@ -33,6 +33,7 @@ public static class RoomEndpoints
     /// <param name="Character">The selected Chog while waiting; the Chog locked at start once the match has started.</param>
     /// <param name="Ability">The chosen ability; always null until ability selection (STORY-033).</param>
     /// <param name="HasLeft">The member left the started match (DEC-025).</param>
+    /// <param name="IsTurn">It is this member's turn in the active match (DEC-027).</param>
     public sealed record RoomMemberResponse(
         string DisplayName,
         string AvatarId,
@@ -41,12 +42,24 @@ public static class RoomEndpoints
         bool IsReady,
         RoomCharacterResponse Character,
         string? Ability,
-        bool HasLeft);
+        bool HasLeft,
+        bool IsTurn);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>
+    /// <param name="TurnNumber">The turn being played, from 1; 0 before the start (DEC-027).</param>
+    /// <param name="TurnEndsAt">When the current turn runs out; null unless the match is active.</param>
     public sealed record RoomResponse(
-        string Code, Guid MatchId, long Version, string GameType, RoomStatus Status, int MinPlayers, int Capacity, RoomMemberResponse[] Members);
+        string Code,
+        Guid MatchId,
+        long Version,
+        string GameType,
+        RoomStatus Status,
+        int MinPlayers,
+        int Capacity,
+        int TurnNumber,
+        DateTimeOffset? TurnEndsAt,
+        RoomMemberResponse[] Members);
 
     /// <summary>Stable error codes; clients rely on these, never on the message text.</summary>
     public static class ErrorCodes
@@ -311,11 +324,13 @@ public static class RoomEndpoints
                     m.IsReadyWith(player),
                     m.Character is { } locked ? ToCharacter(locked) : ToCharacter(player),
                     Ability: null,
-                    m.HasLeft);
+                    m.HasLeft,
+                    m.PlayerId == room.CurrentPlayerId);
             })
             .ToArray();
 
-        return new RoomResponse(room.Code, room.Id, room.Version, room.GameType, room.Status, room.MinPlayers, room.Capacity, members);
+        return new RoomResponse(
+            room.Code, room.Id, room.Version, room.GameType, room.Status, room.MinPlayers, room.Capacity, room.TurnNumber, room.TurnEndsAt, members);
     }
 
     /// <summary>
