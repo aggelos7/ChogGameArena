@@ -1,4 +1,5 @@
 using ChogGames.Core.Games;
+using ChogGames.Core.Matches;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
@@ -49,12 +50,22 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
             table.HasCheckConstraint(
                 "CK_GameRooms_EndedAt",
                 $"(\"EndedAt\" IS NULL) = (\"Status\" IN ('{nameof(RoomStatus.Waiting)}', '{nameof(RoomStatus.Active)}'))");
+            table.HasCheckConstraint("CK_GameRooms_Version", "\"Version\" >= 0");
+
+            // Game state is a JSON object, and only a started match has any (DEC-026).
+            table.HasCheckConstraint(
+                "CK_GameRooms_State",
+                $"\"State\" IS NULL OR (jsonb_typeof(\"State\") = 'object' AND \"StartedAt\" IS NOT NULL)");
         });
         builder.HasKey(r => r.Id);
         builder.Property(r => r.Id).ValueGeneratedNever();
         builder.Property(r => r.Code).HasMaxLength(RoomCode.Length).IsFixedLength();
         builder.Property(r => r.GameType).HasMaxLength(GameDefinition.MaxIdLength);
         builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
+
+        // Rooms change under a row lock; the version check also refuses a write from a copy that went stale (DEC-026).
+        builder.Property(r => r.Version).IsConcurrencyToken();
+        builder.Property(r => r.State).HasColumnType("jsonb");
         builder.HasIndex(r => r.Code).IsUnique();
 
         // One open room per host (DEC-020).
@@ -89,5 +100,26 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
             .HasConversion(CharacterSnapshotConversion.Converter, CharacterSnapshotConversion.Comparer);
         builder.HasIndex(m => m.PlayerId);
         builder.HasOne<Player>().WithMany().HasForeignKey(m => m.PlayerId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+internal sealed class MatchActionConfiguration : IEntityTypeConfiguration<MatchAction>
+{
+    public void Configure(EntityTypeBuilder<MatchAction> builder)
+    {
+        builder.ToTable("MatchActions", table =>
+        {
+            table.HasCheckConstraint("CK_MatchActions_Type_Format", "\"Type\" ~ '^[A-Z][A-Z0-9_]{0,31}$'");
+            table.HasCheckConstraint("CK_MatchActions_Payload", "jsonb_typeof(\"Payload\") = 'object'");
+            table.HasCheckConstraint("CK_MatchActions_Version", "\"Version\" >= 1");
+        });
+
+        // An action id is processed once per match (DEC-026).
+        builder.HasKey(a => new { a.RoomId, a.ActionId });
+        builder.Property(a => a.Type).HasMaxLength(MatchCommand.MaxTypeLength);
+        builder.Property(a => a.Payload).HasColumnType("jsonb");
+        builder.HasOne<GameRoom>().WithMany().HasForeignKey(a => a.RoomId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<Player>().WithMany().HasForeignKey(a => a.PlayerId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(a => a.PlayerId);
     }
 }

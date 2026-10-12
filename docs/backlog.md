@@ -371,7 +371,7 @@
 
 #### STORY-024 — Command envelope and idempotency
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Define actionId, matchId, expectedVersion, payload; reject duplicates/stale commands.

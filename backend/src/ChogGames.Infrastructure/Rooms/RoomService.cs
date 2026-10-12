@@ -144,15 +144,11 @@ public sealed class RoomService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         // Room first, then player: the same order everywhere, so concurrent joins cannot deadlock.
-        var roomIds = await db.Database
-            .SqlQuery<Guid>($"""SELECT "Id" AS "Value" FROM "GameRooms" WHERE "Code" = {code.Value} FOR UPDATE""")
-            .ToListAsync(cancellationToken);
-        if (roomIds is not [var roomId])
+        var room = await db.LockRoomAsync(code, cancellationToken);
+        if (room is null)
         {
             return new RoomResult(RoomOutcome.RoomNotFound);
         }
-
-        var room = await db.GameRooms.SingleAsync(r => r.Id == roomId, cancellationToken);
 
         // A player who left a started match can't come back (DEC-025); they fall through to the status refusal.
         if (room.IsPlaying(player.Id))

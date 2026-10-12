@@ -1,0 +1,139 @@
+using System.Text.Json;
+using ChogGames.Core.Matches;
+using ChogGames.Core.Players;
+using ChogGames.Core.Rooms;
+using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Rooms;
+using Microsoft.EntityFrameworkCore;
+
+namespace ChogGames.Infrastructure.Matches;
+
+public enum MatchCommandOutcome
+{
+    /// <summary>The rules accepted the command; the match changed and the action was recorded.</summary>
+    Applied,
+
+    /// <summary>The action had already been applied; its stored result is returned and nothing changed.</summary>
+    Replayed,
+
+    /// <summary>No such room, the player isn't a member, or the command names another match.</summary>
+    RoomNotFound,
+
+    /// <summary>The action id was already used in this match with another type, payload or player.</summary>
+    ActionConflict,
+
+    /// <summary>The room is still waiting.</summary>
+    NotStarted,
+
+    /// <summary>The match is over or the room was cancelled.</summary>
+    RoomClosed,
+
+    /// <summary>The player left (forfeited) this match.</summary>
+    NotPlaying,
+
+    /// <summary>The command's expected version is not the current one.</summary>
+    StaleVersion,
+
+    /// <summary>The match's game has no command of this type.</summary>
+    UnknownCommand,
+
+    /// <summary>The game's rules refused the command now; see <see cref="MatchCommandResult.Reason"/>.</summary>
+    Rejected,
+}
+
+/// <param name="Action">For <c>Applied</c> and <c>Replayed</c>: the recorded action, with the version it produced.</param>
+/// <param name="CurrentVersion">The room's version now, for <c>Applied</c>, <c>Replayed</c> and <c>StaleVersion</c>.</param>
+/// <param name="Reason">For <c>Rejected</c>: the rules' stable reason code.</param>
+public sealed record MatchCommandResult(
+    MatchCommandOutcome Outcome, MatchAction? Action = null, long? CurrentVersion = null, string? Reason = null)
+{
+    public bool Succeeded => Action is not null;
+}
+
+/// <summary>
+/// Runs match commands (STORY-024, ENG-009, DEC-026). Each runs in a transaction under the room's row lock, so commands
+/// for one match are processed one at a time: a retried action id returns its first result, a command built on an older
+/// version is refused, and of several commands built on the same version exactly one can succeed. The game's
+/// <see cref="IMatchRules"/> decide what an accepted command does; the player is always the session's.
+/// </summary>
+public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatchRules> rules, TimeProvider timeProvider)
+{
+    private readonly Dictionary<string, IMatchRules> _rulesByGame = rules.ToDictionary(r => r.GameType, StringComparer.Ordinal);
+
+    public async Task<MatchCommandResult> ExecuteAsync(Player player, RoomCode code, MatchCommand command, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var room = await db.LockRoomAsync(code, cancellationToken);
+
+        // A command for another match looks like an unknown room, as for non-members.
+        if (room is null || !room.IsMember(player.Id) || command.MatchId != room.Id)
+        {
+            return new MatchCommandResult(MatchCommandOutcome.RoomNotFound);
+        }
+
+        // Retries are answered before any other check, so a retry still gets its result after the match moved on or ended.
+        var payload = command.Payload.GetRawText();
+        var processed = await db.MatchActions.AsNoTracking()
+            .SingleOrDefaultAsync(a => a.RoomId == room.Id && a.ActionId == command.ActionId, cancellationToken);
+        if (processed is not null)
+        {
+            return await IsSameActionAsync(processed, player, command.Type, payload, cancellationToken)
+                ? new MatchCommandResult(MatchCommandOutcome.Replayed, processed, room.Version)
+                : new MatchCommandResult(MatchCommandOutcome.ActionConflict);
+        }
+
+        switch (room.CheckCommand(player.Id, command))
+        {
+            case MatchCommandProblem.WrongMatch:
+                return new MatchCommandResult(MatchCommandOutcome.RoomNotFound);
+            case MatchCommandProblem.NotStarted:
+                return new MatchCommandResult(MatchCommandOutcome.NotStarted);
+            case MatchCommandProblem.Closed:
+                return new MatchCommandResult(MatchCommandOutcome.RoomClosed);
+            case MatchCommandProblem.NotPlaying:
+                return new MatchCommandResult(MatchCommandOutcome.NotPlaying);
+            case MatchCommandProblem.StaleVersion:
+                return new MatchCommandResult(MatchCommandOutcome.StaleVersion, CurrentVersion: room.Version);
+        }
+
+        if (!_rulesByGame.TryGetValue(room.GameType, out var gameRules))
+        {
+            return new MatchCommandResult(MatchCommandOutcome.UnknownCommand);
+        }
+
+        using var state = room.State is null ? null : JsonDocument.Parse(room.State);
+        var decision = gameRules.Apply(new MatchCommandContext(room, player.Id, command.Type, command.Payload, state?.RootElement));
+        switch (decision.Outcome)
+        {
+            case MatchRuleOutcome.UnknownCommand:
+                return new MatchCommandResult(MatchCommandOutcome.UnknownCommand);
+            case MatchRuleOutcome.Rejected:
+                return new MatchCommandResult(MatchCommandOutcome.Rejected, Reason: decision.Reason);
+        }
+
+        if (decision.State is not { ValueKind: JsonValueKind.Object } newState)
+        {
+            throw new InvalidOperationException($"The {room.GameType} rules accepted {command.Type} without a JSON object state.");
+        }
+
+        var action = room.ApplyCommand(player.Id, command, newState.GetRawText(), timeProvider.GetUtcNow());
+        db.MatchActions.Add(action);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new MatchCommandResult(MatchCommandOutcome.Applied, action, room.Version);
+    }
+
+    /// <summary>Same player, type and payload; payloads are compared as JSON, so key order and spacing don't matter.</summary>
+    private async Task<bool> IsSameActionAsync(
+        MatchAction processed, Player player, string type, string payload, CancellationToken cancellationToken)
+    {
+        if (processed.PlayerId != player.Id || !string.Equals(processed.Type, type, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return await db.Database
+            .SqlQuery<bool>($"""SELECT CAST({processed.Payload} AS jsonb) = CAST({payload} AS jsonb) AS "Value" """)
+            .SingleAsync(cancellationToken);
+    }
+}

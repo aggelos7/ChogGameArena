@@ -43,8 +43,10 @@ public static class RoomEndpoints
         string? Ability,
         bool HasLeft);
 
+    /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
+    /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>
     public sealed record RoomResponse(
-        string Code, string GameType, RoomStatus Status, int MinPlayers, int Capacity, RoomMemberResponse[] Members);
+        string Code, Guid MatchId, long Version, string GameType, RoomStatus Status, int MinPlayers, int Capacity, RoomMemberResponse[] Members);
 
     /// <summary>Stable error codes; clients rely on these, never on the message text.</summary>
     public static class ErrorCodes
@@ -313,7 +315,7 @@ public static class RoomEndpoints
             })
             .ToArray();
 
-        return new RoomResponse(room.Code, room.GameType, room.Status, room.MinPlayers, room.Capacity, members);
+        return new RoomResponse(room.Code, room.Id, room.Version, room.GameType, room.Status, room.MinPlayers, room.Capacity, members);
     }
 
     /// <summary>
@@ -352,7 +354,7 @@ public sealed class RoomOptions
     public const string SectionName = "Rooms";
 
     /// <summary>
-    /// Room requests (create, join, read, ready, start, leave, opening a live connection) per player per minute; calls
+    /// Room requests (create, join, read, ready, start, leave, match commands, opening a live connection) per player per minute; calls
     /// over a live connection have their own budget of the same size.
     /// </summary>
     public int RequestsPerMinutePerPlayer { get; set; } = 60;
