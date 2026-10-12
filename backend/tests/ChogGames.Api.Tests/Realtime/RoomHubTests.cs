@@ -270,6 +270,40 @@ public sealed class RoomHubTests(MigratedPostgresDatabase database) : IClassFixt
     }
 
     [PostgresFact]
+    public async Task A_player_who_leaves_a_started_match_stops_hearing_about_it()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var carol = await GuestAsync("Carol");
+        var code = await CreateRoomAsync(alice);
+        await JoinAsync(bob, code);
+        await JoinAsync(carol, code);
+        foreach (var player in new[] { alice, bob, carol })
+        {
+            await ReadyAsync(player, code);
+        }
+
+        await SendAsync(alice, HttpMethod.Post, $"/api/rooms/{code}/start");
+        var aliceLive = await ConnectAsync(alice);
+        await aliceLive.SubscribeAsync(code);
+        var bobLive = await ConnectAsync(bob);
+        await bobLive.SubscribeAsync(code);
+
+        await LeaveAsync(bob, code);
+        Assert.Equal(code, await aliceLive.NextChangeAsync());
+        Assert.Equal(code, await bobLive.NextChangeAsync());
+
+        // Carol leaving abandons the match: Alice hears of it, Bob, who already left, does not.
+        await LeaveAsync(carol, code);
+        Assert.Equal(code, await aliceLive.NextChangeAsync());
+        await bobLive.AssertNothingReceivedAsync();
+        await AssertRefusedAsync(bobLive, code);
+
+        using var view = await alice.Client.GetAsync($"/api/rooms/{code}");
+        Assert.Equal("Abandoned", (await view.Content.ReadFromJsonAsync<RoomDto>(Json))!.Status);
+    }
+
+    [PostgresFact]
     public async Task Members_hear_when_the_host_leaves_and_cancels_the_room()
     {
         var alice = await GuestAsync("Alice");

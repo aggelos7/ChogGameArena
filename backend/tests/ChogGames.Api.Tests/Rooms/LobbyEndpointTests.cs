@@ -20,7 +20,7 @@ public sealed class LobbyEndpointTests(MigratedPostgresDatabase database) : ICla
     private sealed record CharacterDto(string Kind, string Id, string Name, string? Color);
 
     private sealed record MemberDto(
-        string DisplayName, string AvatarId, bool IsHost, bool IsYou, bool IsReady, CharacterDto Character, string? Ability);
+        string DisplayName, string AvatarId, bool IsHost, bool IsYou, bool IsReady, CharacterDto Character, string? Ability, bool HasLeft);
 
     private sealed record RoomDto(string Code, string GameType, string Status, int MinPlayers, int Capacity, MemberDto[] Members);
 
@@ -134,8 +134,8 @@ public sealed class LobbyEndpointTests(MigratedPostgresDatabase database) : ICla
 
             Assert.Equal(
                 [
-                    new MemberDto("Alice", "classic", IsHost: true, IsYou: false, IsReady: false, new("Standard", "classic", "Classic", "#5b2bd6"), null),
-                    new MemberDto("Bob", "classic", IsHost: false, IsYou: true, IsReady: true, new("Standard", "mint", "Mint", "#1a7f5a"), null),
+                    new MemberDto("Alice", "classic", IsHost: true, IsYou: false, IsReady: false, new("Standard", "classic", "Classic", "#5b2bd6"), null, HasLeft: false),
+                    new MemberDto("Bob", "classic", IsHost: false, IsYou: true, IsReady: true, new("Standard", "mint", "Mint", "#1a7f5a"), null, HasLeft: false),
                 ],
                 room.Members);
             Assert.Equal(room.Members.Select(m => (m.DisplayName, m.IsReady, m.Character)), seenByHost.Members.Select(m => (m.DisplayName, m.IsReady, m.Character)));
@@ -344,7 +344,7 @@ public sealed class LobbyEndpointTests(MigratedPostgresDatabase database) : ICla
     }
 
     [PostgresFact]
-    public async Task Leaving_is_refused_for_non_members_and_started_rooms()
+    public async Task Leaving_is_refused_for_non_members()
     {
         var (code, alice, bob) = await PairAsync();
         using (alice)
@@ -354,12 +354,86 @@ public sealed class LobbyEndpointTests(MigratedPostgresDatabase database) : ICla
             await ProblemAsync(await LeaveAsync(mallory, code), HttpStatusCode.NotFound, "room_not_found");
             await ProblemAsync(await LeaveAsync(mallory, "not-a-code"), HttpStatusCode.NotFound, "room_not_found");
 
-            await ReadiedAsync(alice, code);
-            await ReadiedAsync(bob, code);
-            (await StartAsync(alice, code)).Dispose();
-
-            await ProblemAsync(await LeaveAsync(bob, code), HttpStatusCode.Conflict, "room_started");
             Assert.Equal(2, (await ViewAsync(alice, code)).Members.Length);
+        }
+    }
+
+    /// <summary>A started match of Alice (host), Bob and Carol.</summary>
+    private async Task<(string Code, HttpClient Alice, HttpClient Bob, HttpClient Carol)> StartedTrioAsync()
+    {
+        var (code, alice, bob) = await PairAsync();
+        var carol = await GuestAsync("Carol");
+        await JoinedAsync(carol, code);
+        foreach (var player in new[] { alice, bob, carol })
+        {
+            await ReadiedAsync(player, code);
+        }
+
+        Assert.Equal("Active", (await RoomAsync(await StartAsync(alice, code))).Status);
+        return (code, alice, bob, carol);
+    }
+
+    [PostgresFact]
+    public async Task A_started_match_shows_the_chog_locked_at_start()
+    {
+        var (code, alice, bob, carol) = await StartedTrioAsync();
+        using (alice)
+        using (bob)
+        using (carol)
+        {
+            using var gold = await bob.PutAsJsonAsync("/api/characters/selected", new { kind = "Standard", id = "gold" });
+            Assert.Equal(HttpStatusCode.OK, gold.StatusCode);
+
+            var room = await ViewAsync(alice, code);
+            Assert.Equal(new CharacterDto("Standard", "classic", "Classic", "#5b2bd6"), room.Members.Single(m => m.DisplayName == "Bob").Character);
+        }
+    }
+
+    [PostgresFact]
+    public async Task Leaving_a_started_match_forfeits_it_and_frees_the_player()
+    {
+        var (code, alice, bob, carol) = await StartedTrioAsync();
+        using (alice)
+        using (bob)
+        using (carol)
+        {
+            using var response = await LeaveAsync(bob, code);
+
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            var room = await ViewAsync(alice, code);
+            Assert.Equal("Active", room.Status);
+            Assert.Equal([false, true, false], room.Members.Select(m => m.HasLeft));
+
+            // Bob can still read the match, can't come back, and is free to play elsewhere; Alice is still playing.
+            Assert.True((await ViewAsync(bob, code)).Members.Single(m => m.IsYou).HasLeft);
+            await ProblemAsync(await bob.PostAsync($"/api/rooms/{code}/join", null), HttpStatusCode.Conflict, "room_started");
+            using (var again = await LeaveAsync(bob, code))
+            {
+                Assert.Equal(HttpStatusCode.NoContent, again.StatusCode);
+            }
+
+            await CreatedRoomAsync(bob);
+            await ProblemAsync(await alice.PostAsJsonAsync("/api/rooms", new { gameType = "chog-life" }), HttpStatusCode.Conflict, "already_in_room");
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_match_with_one_player_left_is_abandoned()
+    {
+        var (code, alice, bob, carol) = await StartedTrioAsync();
+        using (alice)
+        using (bob)
+        using (carol)
+        {
+            (await LeaveAsync(alice, code)).Dispose();
+            Assert.Equal("Active", (await ViewAsync(bob, code)).Status);
+
+            using var response = await LeaveAsync(carol, code);
+
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            Assert.Equal("Abandoned", (await ViewAsync(bob, code)).Status);
+            await ProblemAsync(await LeaveAsync(bob, code), HttpStatusCode.Conflict, "room_closed");
+            await CreatedRoomAsync(bob);
         }
     }
 

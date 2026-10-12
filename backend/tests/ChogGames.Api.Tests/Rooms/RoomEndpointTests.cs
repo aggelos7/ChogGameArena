@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ChogGames.Core.Rooms;
 using Microsoft.EntityFrameworkCore;
 
 namespace ChogGames.Api.Tests.Rooms;
@@ -16,7 +17,7 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
     private sealed record CharacterDto(string Kind, string Id, string Name, string? Color);
 
     private sealed record MemberDto(
-        string DisplayName, string AvatarId, bool IsHost, bool IsYou, bool IsReady, CharacterDto Character, string? Ability);
+        string DisplayName, string AvatarId, bool IsHost, bool IsYou, bool IsReady, CharacterDto Character, string? Ability, bool HasLeft);
 
     private sealed record RoomDto(string Code, string GameType, string Status, int MinPlayers, int Capacity, MemberDto[] Members);
 
@@ -84,7 +85,7 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
     private async Task SetStatusAsync(string code, string status)
     {
         await using var db = database.CreateDbContext();
-        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"GameRooms\" SET \"Status\" = {status} WHERE \"Code\" = {code}");
+        await RoomStatusOverride.SetAsync(db, code, Enum.Parse<RoomStatus>(status), DateTimeOffset.UtcNow);
     }
 
     [PostgresFact]
@@ -115,7 +116,7 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
         Assert.Matches("^[2-9A-HJKMNP-Z]{6}$", room.Code);
         Assert.Equal($"/api/rooms/{room.Code}", response.Headers.Location?.OriginalString);
         Assert.Equal(("chog-life", "Waiting", 2, 6), (room.GameType, room.Status, room.MinPlayers, room.Capacity));
-        Assert.Equal([new MemberDto("Alice", "classic", IsHost: true, IsYou: true, IsReady: false, Classic, Ability: null)], room.Members);
+        Assert.Equal([new MemberDto("Alice", "classic", IsHost: true, IsYou: true, IsReady: false, Classic, Ability: null, HasLeft: false)], room.Members);
     }
 
     [PostgresFact]
@@ -194,8 +195,8 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
         Assert.Equal(created.Code, joined.Code);
         Assert.Equal(
             [
-                new MemberDto("Alice", "classic", IsHost: true, IsYou: false, IsReady: false, Classic, Ability: null),
-                new MemberDto("Bob", "classic", IsHost: false, IsYou: true, IsReady: false, Classic, Ability: null),
+                new MemberDto("Alice", "classic", IsHost: true, IsYou: false, IsReady: false, Classic, Ability: null, HasLeft: false),
+                new MemberDto("Bob", "classic", IsHost: false, IsYou: true, IsReady: false, Classic, Ability: null, HasLeft: false),
             ],
             joined.Members);
         Assert.Equal([true, false], seenByHost!.Members.Select(m => m.IsYou));
@@ -251,6 +252,7 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
     [InlineData("Active", "room_started")]
     [InlineData("Completed", "room_closed")]
     [InlineData("Cancelled", "room_closed")]
+    [InlineData("Abandoned", "room_closed")]
     public async Task Room_that_is_no_longer_waiting_is_refused(string status, string code)
     {
         using var alice = await GuestAsync("Alice");

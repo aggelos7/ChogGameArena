@@ -21,6 +21,7 @@ describe('Game lobby page', () => {
         isReady: false,
         character: { kind: 'Standard', id: 'classic', name: 'Classic', color: '#5b2bd6' },
         ability: null,
+        hasLeft: false,
       },
     ],
   };

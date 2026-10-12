@@ -14,7 +14,8 @@ namespace ChogGames.Api.Rooms;
 /// <summary>
 /// Private rooms (STORY-020, ENG-001): create a room for an enabled game, join one by its code (typed or from an invite
 /// link) and read a room you are in. In the lobby (STORY-021, ENG-002) members mark ready and the host starts;
-/// members may leave a waiting room, and the host leaving cancels it (STORY-063).
+/// members may leave a waiting room, and the host leaving cancels it (STORY-063). Leaving a started match is a
+/// forfeit, and a started room shows each member's locked Chog (STORY-023, DEC-025).
 /// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022). Every committed change
 /// is announced to the room's subscribed members over SignalR (STORY-022).
 /// </summary>
@@ -29,9 +30,18 @@ public static class RoomEndpoints
     /// <summary>The member's selected Chog. <c>Color</c> is set for standard Chogs; NFTs show their token id.</summary>
     public sealed record RoomCharacterResponse(CharacterKind Kind, string Id, string Name, string? Color);
 
+    /// <param name="Character">The selected Chog while waiting; the Chog locked at start once the match has started.</param>
     /// <param name="Ability">The chosen ability; always null until ability selection (STORY-033).</param>
+    /// <param name="HasLeft">The member left the started match (DEC-025).</param>
     public sealed record RoomMemberResponse(
-        string DisplayName, string AvatarId, bool IsHost, bool IsYou, bool IsReady, RoomCharacterResponse Character, string? Ability);
+        string DisplayName,
+        string AvatarId,
+        bool IsHost,
+        bool IsYou,
+        bool IsReady,
+        RoomCharacterResponse Character,
+        string? Ability,
+        bool HasLeft);
 
     public sealed record RoomResponse(
         string Code, string GameType, RoomStatus Status, int MinPlayers, int Capacity, RoomMemberResponse[] Members);
@@ -238,8 +248,12 @@ public static class RoomEndpoints
             return Failure(result);
         }
 
-        // A host who leaves stays listed in the cancelled room; a member who leaves is gone from it.
-        await notifier.RoomChangedAsync(room.Code, room.IsMember(player.Id) ? null : player.Id);
+        // A host who leaves stays subscribed to the cancelled room; anyone else who leaves stops getting its updates.
+        if (result.Outcome == RoomOutcome.Left)
+        {
+            await notifier.RoomChangedAsync(room.Code, room.IsPlaying(player.Id) ? null : player.Id);
+        }
+
         return TypedResults.NoContent();
     }
 
@@ -293,8 +307,9 @@ public static class RoomEndpoints
                     m.PlayerId == room.HostPlayerId,
                     m.PlayerId == caller.Id,
                     m.IsReadyWith(player),
-                    ToCharacter(player),
-                    Ability: null);
+                    m.Character is { } locked ? ToCharacter(locked) : ToCharacter(player),
+                    Ability: null,
+                    m.HasLeft);
             })
             .ToArray();
 
@@ -315,6 +330,14 @@ public static class RoomEndpoints
         var standard = DefaultAvatar.TryFind(player.SelectedCharacterId, out var found) ? found : DefaultAvatar.Classic;
         return new RoomCharacterResponse(CharacterKind.Standard, standard.Id, standard.Name, standard.Color);
     }
+
+    /// <summary>The Chog locked when the match started, with its stored name.</summary>
+    private static RoomCharacterResponse ToCharacter(CharacterSnapshot snapshot) =>
+        new(
+            snapshot.Kind,
+            snapshot.CharacterId,
+            snapshot.Name,
+            snapshot.Kind == CharacterKind.Standard && DefaultAvatar.TryFind(snapshot.CharacterId, out var standard) ? standard.Color : null);
 
     private static Task<Player?> FindCurrentPlayerAsync(ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
     {

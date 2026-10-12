@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-022).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-023).
 
 ## Stories done
 
@@ -29,7 +29,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-020 | #94 | Create, join and read room API, one open room per player, invite links `/join/CODE`, minimal room page (DEC-021). |
 | STORY-021 | #97 | Lobby: ready with the chosen Chog, host start with a live NFT check, room becomes Active (DEC-022). |
 | STORY-063 | #99 | Leave a waiting room; the host leaving cancels it for everyone (DEC-023). Added during STORY-021. |
-| STORY-022 | (this PR) | SignalR room hub: cookie-authenticated, membership checked before subscribing, leavers removed from groups; `RoomChanged` notices drive a live web lobby (DEC-024). |
+| STORY-022 | #103 | SignalR room hub: cookie-authenticated, membership checked before subscribing, leavers removed from groups; `RoomChanged` notices drive a live web lobby (DEC-024). |
+| STORY-023 | (this PR) | Match state machine: Waiting → Active → Completed/Abandoned, Waiting → Cancelled; an Active match blocks other rooms; leaving a started match is a forfeit; character snapshots stored on room members (DEC-025). |
 
 ## Key architectural decisions
 
@@ -42,11 +43,14 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Abilities:** MVP uses `SharedAbilityPool` only. The lobby's ability field stays `null` until STORY-033.
 - **Rooms:**
   - Supported games are seeded `GameDefinitions` rows; whether a game is enabled comes from `Games:Items` configuration.
-  - A player can be in one open (`Waiting`) room at a time, as host or member.
+  - A player can be in one open room at a time: a `Waiting` room (as host or member) or an `Active` match they haven't left.
+  - Lifecycle (DEC-025): Waiting → Active (start) or Cancelled (host leaves); Active → Completed (game rules, later) or Abandoned (fewer than two players left). Every status change goes through `RoomLifecycle`; final states get `EndedAt`.
+  - The room is the match: each `RoomMember` is the match player record, with its `CharacterSnapshot` (jsonb) and `LeftAt`.
+  - Leaving a started match is a forfeit; the host has no special role after the start.
   - Rejoining a room changes nothing.
   - Ready is stored together with the chosen Chog.
   - The host starts once enough players are ready.
-  - A host who leaves cancels the room.
+  - A host who leaves a waiting room cancels it.
 - **Concurrency:** writes that must not race take Postgres row locks (`SELECT … FOR UPDATE`), always in the order room, then players sorted by id. The database backs the important rules with check constraints and filtered unique indexes.
 - **Errors:**
   - Room APIs return problem details with a stable `code` such as `room_full` or `not_host`; clients rely on the code, never the text.
@@ -84,8 +88,10 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## Known issues and tech debt
 
-- **Character snapshot:** checked at start but not stored yet; it belongs on the match player record (STORY-023/028).
-- **Started matches:** an `Active` match doesn't stop a player from joining or creating another room (DEC-021; decide in STORY-023). Players also can't leave an Active match yet (STORY-023/025/027).
+- **Completing a match:** `GameRoom.Complete` exists but nothing calls it yet; game rules (Chog Life/Race) and the 20-minute cap (ENG-011) will. Results and stats are STORY-028.
+- **Stuck matches:** an `Active` match whose players all go silent stays Active and blocks them from other rooms until they leave it. AFK handling (STORY-025) and the time cap should end such matches.
+- **Matches started before STORY-023** have no character snapshots; the room shows their current Chog, and they can still be left. Migration `AddMatchLifecycle` reclassifies a started-then-cancelled room as `Abandoned`, so rolling it back and forward is lossless.
+- **Started rooms in the lobby UI:** the web shows "The game has started" and a Leave game button; there's no game screen yet.
 - **Lobby updates:** each `RoomChanged` notice costs every viewer one `GET`, which counts against the per-player room limit. Versioned snapshots come with STORY-026.
 - **Live connections keep their identity:** a hub connection keeps the player it was opened with, even after sign-out or a wallet switch, until it reconnects. It only ever gets notices for rooms that player is in.
 - **Single instance realtime:** the connection registry is in memory; scale-out needs a backplane and shared tracking.
@@ -107,8 +113,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-023 — Authoritative match state machine:** settle the Active-room rule, leaving a started match, and storing the character snapshot.
-2. **Then:** STORY-024 (command envelope and idempotency), STORY-025 (turn and AFK timer), STORY-026 to 029, then E05 abilities (STORY-030 to 034).
+1. **STORY-024 — Command envelope and idempotency:** `actionId`, `matchId`, `expectedVersion` and payload; reject duplicates and stale commands.
+2. **Then:** STORY-025 (turn and AFK timer), STORY-026 to 029, then E05 abilities (STORY-030 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

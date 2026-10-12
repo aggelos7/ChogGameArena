@@ -2,7 +2,10 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-/** Mirrors `RoomCharacterResponse`: the member's selected Chog. `color` is set for standard Chogs only. */
+/**
+ * Mirrors `RoomCharacterResponse`: the member's selected Chog, or the one locked at start once the game has started.
+ * `color` is set for standard Chogs only.
+ */
 export interface RoomCharacter {
   kind: 'Standard' | 'Nft';
   id: string;
@@ -21,9 +24,12 @@ export interface RoomMember {
   character: RoomCharacter;
   /** Always null until ability selection (STORY-033). */
   ability: string | null;
+  /** Left the started match: a forfeit (DEC-025). */
+  hasLeft: boolean;
 }
 
-export type RoomStatus = 'Waiting' | 'Active' | 'Completed' | 'Cancelled';
+/** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */
+export type RoomStatus = 'Waiting' | 'Active' | 'Completed' | 'Cancelled' | 'Abandoned';
 
 /** Mirrors `RoomResponse` from the `/api/rooms` endpoints. */
 export interface Room {
@@ -123,7 +129,10 @@ export class RoomsApi {
     return this.http.post<Room>(`/api/rooms/${encodeURIComponent(code)}/start`, null);
   }
 
-  /** Leaves a waiting room; when the host leaves, the room is closed for everyone. */
+  /**
+   * Leaves the room. In a waiting room the host leaving closes it for everyone; leaving a started game forfeits it
+   * (DEC-025).
+   */
   leave(code: string): Observable<void> {
     return this.http.post<void>(`/api/rooms/${encodeURIComponent(code)}/leave`, null);
   }

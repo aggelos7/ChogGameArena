@@ -77,7 +77,11 @@ public sealed class RoomHub(ChogGamesDbContext db, RoomConnectionRegistry connec
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupName(roomCode));
     }
 
-    /// <summary>A fresh read each time: membership may have changed since the last one.</summary>
+    /// <summary>
+    /// A fresh read each time: membership may have changed since the last one. A player who left a started match is
+    /// no longer a member here (DEC-025).
+    /// </summary>
     private Task<bool> IsMemberAsync(Guid playerId, RoomCode code) =>
-        db.GameRooms.AsNoTracking().AnyAsync(r => r.Code == code.Value && r.Members.Any(m => m.PlayerId == playerId), Context.ConnectionAborted);
+        db.GameRooms.AsNoTracking().AnyAsync(
+            r => r.Code == code.Value && r.Members.Any(m => m.PlayerId == playerId && m.LeftAt == null), Context.ConnectionAborted);
 }
