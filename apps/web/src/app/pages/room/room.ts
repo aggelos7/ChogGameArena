@@ -1,8 +1,9 @@
 import { DOCUMENT } from '@angular/common';
-import { Component, OnInit, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, input, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { GameCatalog } from '../../games/game-catalog';
-import { Observable } from 'rxjs';
+import { Observable, Subject, Subscription, catchError, of, switchMap } from 'rxjs';
 import { Avatar } from '../../profile/profile-api';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import {
@@ -14,6 +15,7 @@ import {
   roomErrorMessage,
   toRoomError,
 } from '../../rooms/rooms-api';
+import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
@@ -21,7 +23,8 @@ const NFT_COLOR = 'var(--brand)';
 
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
- * status, the player's ready toggle, the host's start and leaving (STORY-063). Refreshed on demand until live updates (STORY-022).
+ * status, the player's ready toggle, the host's start and leaving (STORY-063). It follows the room live (STORY-022): each
+ * change notice fetches the room again, and Refresh is offered only while live updates are down.
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
@@ -35,6 +38,11 @@ export class RoomPage implements OnInit {
   private readonly catalog = inject(GameCatalog);
   private readonly document = inject(DOCUMENT);
   private readonly router = inject(Router);
+  private readonly live = inject(RoomLiveUpdates);
+  private readonly destroyRef = inject(DestroyRef);
+  /** Quiet re-fetches; a newer one replaces one still in flight, so an older answer never wins. */
+  private readonly refreshes = new Subject<string>();
+  private liveSubscription?: Subscription;
 
   readonly code = input.required<string>();
 
@@ -47,6 +55,7 @@ export class RoomPage implements OnInit {
   protected readonly actionError = signal<RoomError | null>(null);
   /** The host confirms first, since leaving closes the room for everyone. */
   protected readonly confirmingLeave = signal(false);
+  protected readonly liveState = signal<RoomLiveStatus>('connecting');
   protected readonly message = roomErrorMessage;
 
   protected readonly you = computed(() => this.room()?.members.find((member) => member.isYou) ?? null);
@@ -67,8 +76,42 @@ export class RoomPage implements OnInit {
     return room ? `${this.document.location.origin}/join/${room.code}` : '';
   });
 
+  constructor() {
+    this.refreshes
+      .pipe(
+        switchMap((code) => this.api.get(code).pipe(catchError(() => of(null)))),
+        takeUntilDestroyed(),
+      )
+      .subscribe((current) => {
+        if (current) {
+          this.room.set(current);
+        }
+      });
+    this.destroyRef.onDestroy(() => this.liveSubscription?.unsubscribe());
+  }
+
   ngOnInit(): void {
     this.load();
+    this.followLive();
+  }
+
+  /** Refresh while live updates are down: loads the room and tries to go live again. */
+  protected reconnect(): void {
+    this.load();
+    this.followLive();
+  }
+
+  private followLive(): void {
+    this.liveSubscription?.unsubscribe();
+    this.liveSubscription = this.live.watch(normalizeRoomCode(this.code())).subscribe((event) => {
+      if (event.type === 'status') {
+        this.liveState.set(event.status);
+      }
+      // Once (re)subscribed, fetch whatever changed while not listening.
+      if (event.type === 'changed' || (event.type === 'status' && event.status === 'live')) {
+        this.refreshQuietly();
+      }
+    });
   }
 
   protected load(): void {
@@ -151,7 +194,7 @@ export class RoomPage implements OnInit {
   private refreshQuietly(): void {
     const room = this.room();
     if (room) {
-      this.api.get(room.code).subscribe({ next: (current) => this.room.set(current), error: () => undefined });
+      this.refreshes.next(room.code);
     }
   }
 
