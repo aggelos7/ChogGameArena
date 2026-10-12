@@ -68,7 +68,16 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddScoped<LobbyService>();
 
         // Games add their IMatchRules as their rules are built (DEC-026); until then every command type is unknown.
+        services.AddOptions<MatchOptions>()
+            .Bind(configuration.GetSection(MatchOptions.SectionName))
+            .Validate(o => o.TurnTimeout >= MatchOptions.MinTurnTimeout && o.TurnTimeout <= MatchOptions.MaxTurnTimeout,
+                $"Matches:TurnTimeout must be between {MatchOptions.MinTurnTimeout} and {MatchOptions.MaxTurnTimeout}.")
+            .Validate(o => o.MaxMissedTurns is >= 1 and <= 20, "Matches:MaxMissedTurns must be between 1 and 20.")
+            .Validate(o => o.TimeoutCheckInterval >= TimeSpan.FromMilliseconds(100) && o.TimeoutCheckInterval <= TimeSpan.FromMinutes(1),
+                "Matches:TimeoutCheckInterval must be between 100 milliseconds and 1 minute.")
+            .ValidateOnStart();
         services.AddScoped<MatchCommandService>();
+        services.AddScoped<TurnTimeoutService>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()

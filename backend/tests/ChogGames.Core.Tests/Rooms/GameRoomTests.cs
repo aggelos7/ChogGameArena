@@ -10,6 +10,8 @@ public class GameRoomTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
 
+    private static readonly TimeSpan Turn = TimeSpan.FromSeconds(20);
+
     private static Player Guest()
     {
         Assert.True(PlayerDisplayName.TryCreate("Alice", out var name));
@@ -92,12 +94,13 @@ public class GameRoomTests
         Assert.Throws<ArgumentException>(() => GameDefinition.Create(id, 2, 6));
     }
 
+    /// <summary>A waiting room; the others join one second apart, in the order given.</summary>
     private static GameRoom RoomOf(Player host, params Player[] others)
     {
         var room = NewRoom(host);
-        foreach (var other in others)
+        for (var i = 0; i < others.Length; i++)
         {
-            room.Join(other, Now);
+            room.Join(others[i], Now.AddSeconds(i + 1));
         }
 
         return room;
@@ -171,7 +174,7 @@ public class GameRoomTests
 
         room.MarkReady(host);
         room.MarkReady(bob);
-        room.Start(host.Id, [host, bob], Snapshots(host, bob), Now);
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now);
 
         Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(bob.Id));
         Assert.Throws<InvalidOperationException>(() => room.MarkReady(bob));
@@ -187,7 +190,7 @@ public class GameRoomTests
         room.MarkReady(bob);
 
         Assert.Null(room.CheckStart(host.Id, [host, bob]));
-        room.Start(host.Id, [host, bob], Snapshots(host, bob), Now.AddMinutes(2));
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now.AddMinutes(2));
 
         Assert.Equal((RoomStatus.Active, Now.AddMinutes(2)), (room.Status, room.StartedAt));
         Assert.Equal(RoomStartProblem.NotWaiting, room.CheckStart(host.Id, [host, bob]));
@@ -218,7 +221,7 @@ public class GameRoomTests
         room.MarkReady(bob);
 
         Assert.Equal(RoomStartProblem.NotHost, room.CheckStart(bob.Id, [host, bob]));
-        Assert.Throws<InvalidOperationException>(() => room.Start(bob.Id, [host, bob], Snapshots(host, bob), Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(bob.Id, [host, bob], Snapshots(host, bob), Turn, Now));
         Assert.Equal(RoomStatus.Waiting, room.Status);
     }
 
@@ -230,7 +233,7 @@ public class GameRoomTests
         room.MarkReady(host);
 
         Assert.Equal(RoomStartProblem.NotEnoughPlayers, room.CheckStart(host.Id, [host]));
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Turn, Now));
     }
 
     [Fact]
@@ -345,7 +348,7 @@ public class GameRoomTests
             room.MarkReady(player);
         }
 
-        room.Start(players[0].Id, players, Snapshots(players), Now.AddMinutes(1));
+        room.Start(players[0].Id, players, Snapshots(players), Turn, StartedAt);
         return room;
     }
 
@@ -397,7 +400,7 @@ public class GameRoomTests
             [bob.Id] = CharacterSnapshot.Standard(mint, Now),
         };
 
-        room.Start(host.Id, [host, bob], characters, Now.AddMinutes(1));
+        room.Start(host.Id, [host, bob], characters, Turn, Now.AddMinutes(1));
 
         Assert.Equal((RoomStatus.Active, Now.AddMinutes(1), (DateTimeOffset?)null), (room.Status, room.StartedAt, room.EndedAt));
         Assert.Equal(characters[host.Id], room.Members.Single(m => m.PlayerId == host.Id).Character);
@@ -413,7 +416,7 @@ public class GameRoomTests
         room.MarkReady(host);
         room.MarkReady(bob);
 
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host), Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host), Turn, Now));
 
         Assert.Equal((RoomStatus.Waiting, (DateTimeOffset?)null), (room.Status, room.StartedAt));
         Assert.All(room.Members, m => Assert.Null(m.Character));
@@ -429,7 +432,7 @@ public class GameRoomTests
 
         Assert.Equal((RoomStatus.Cancelled, (DateTimeOffset?)null, Now.AddMinutes(3)), (room.Status, room.StartedAt, room.EndedAt));
         Assert.Throws<InvalidOperationException>(() => room.Complete(Now));
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Turn, Now));
         Assert.Equal(RoomStatus.Cancelled, room.Status);
     }
 
@@ -510,7 +513,7 @@ public class GameRoomTests
 
         Assert.Throws<InvalidOperationException>(() => room.Join(Guest(), Now));
         Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(bob.Id));
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now));
         Assert.Equal((RoomStatus.Active, 2), (room.Status, room.Members.Count));
     }
 
@@ -565,7 +568,7 @@ public class GameRoomTests
         room.Leave(carol.Id, Now);
         Assert.Equal(7, room.Version);
 
-        room.Start(host.Id, [host, bob], Snapshots(host, bob), Now);
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now);
         Assert.Equal(8, room.Version);
 
         room.Complete(Now);
@@ -596,8 +599,8 @@ public class GameRoomTests
 
         room.Leave(carol.Id, Now);
 
-        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, command));
-        Assert.Null(room.CheckCommand(alice.Id, Command(room)));
+        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, command, Now));
+        Assert.Null(room.CheckCommand(alice.Id, Command(room), Now));
     }
 
     [Fact]
@@ -608,11 +611,11 @@ public class GameRoomTests
         var version = room.Version;
         var command = Command(room) with { Payload = JsonSerializer.SerializeToElement(new { steps = 3 }) };
 
-        var action = room.ApplyCommand(bob.Id, command, """{"count":1}""", Now);
+        var action = room.ApplyCommand(alice.Id, command, """{"count":1}""", endsTurn: false, Now);
 
         Assert.Equal(("""{"count":1}""", version + 1), (room.State, room.Version));
         Assert.Equal(
-            (room.Id, command.ActionId, bob.Id, "ROLL", """{"steps":3}""", version + 1, Now),
+            (room.Id, command.ActionId, alice.Id, "ROLL", """{"steps":3}""", version + 1, Now),
             (action.RoomId, action.ActionId, action.PlayerId, action.Type, action.Payload, action.Version, action.CreatedAt));
     }
 
@@ -621,18 +624,18 @@ public class GameRoomTests
     {
         var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
         var waiting = RoomOf(alice, bob);
-        Assert.Equal(MatchCommandProblem.NotStarted, waiting.CheckCommand(alice.Id, Command(waiting)));
+        Assert.Equal(MatchCommandProblem.NotStarted, waiting.CheckCommand(alice.Id, Command(waiting), Now));
 
         var room = Started(alice, bob, carol);
-        Assert.Equal(MatchCommandProblem.WrongMatch, room.CheckCommand(alice.Id, Command(room, matchId: Guid.NewGuid())));
-        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, Command(room, expectedVersion: room.Version - 1)));
-        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, Command(room, expectedVersion: room.Version + 1)));
+        Assert.Equal(MatchCommandProblem.WrongMatch, room.CheckCommand(alice.Id, Command(room, matchId: Guid.NewGuid()), Now));
+        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, Command(room, expectedVersion: room.Version - 1), Now));
+        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, Command(room, expectedVersion: room.Version + 1), Now));
 
         room.Leave(carol.Id, Now);
-        Assert.Equal(MatchCommandProblem.NotPlaying, room.CheckCommand(carol.Id, Command(room)));
+        Assert.Equal(MatchCommandProblem.NotPlaying, room.CheckCommand(carol.Id, Command(room), Now));
 
         room.Complete(Now);
-        Assert.Equal(MatchCommandProblem.Closed, room.CheckCommand(alice.Id, Command(room)));
+        Assert.Equal(MatchCommandProblem.Closed, room.CheckCommand(alice.Id, Command(room), Now));
     }
 
     [Fact]
@@ -642,10 +645,215 @@ public class GameRoomTests
         var room = Started(alice, bob);
         var version = room.Version;
 
-        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(alice.Id, Command(room, expectedVersion: 0), "{}", Now));
-        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(Guid.NewGuid(), Command(room), "{}", Now));
+        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(alice.Id, Command(room, expectedVersion: 0), "{}", endsTurn: false, Now));
+        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(Guid.NewGuid(), Command(room), "{}", endsTurn: false, Now));
 
         Assert.Equal((version, (string?)null), (room.Version, room.State));
+    }
+
+    /// <summary>When <see cref="Started"/> matches start.</summary>
+    private static readonly DateTimeOffset StartedAt = Now.AddMinutes(1);
+
+    private static MatchAction Act(GameRoom room, Player player, DateTimeOffset at, bool endsTurn = true) =>
+        room.ApplyCommand(player.Id, Command(room), "{}", endsTurn, at);
+
+    [Fact]
+    public void Start_seats_the_host_first_then_by_joining_and_begins_the_first_turn()
+    {
+        var (host, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = NewRoom(host);
+        room.Join(carol, Now.AddSeconds(1));
+        room.Join(bob, Now.AddSeconds(2));
+        foreach (var player in new[] { host, bob, carol })
+        {
+            room.MarkReady(player);
+        }
+
+        room.Start(host.Id, [host, bob, carol], Snapshots(host, bob, carol), Turn, StartedAt);
+
+        Assert.Equal([host.Id, carol.Id, bob.Id], room.Members.OrderBy(m => m.Seat).Select(m => m.PlayerId));
+        Assert.Equal([1, 2, 3], room.Members.Select(m => m.Seat!.Value).Order());
+        Assert.Equal((Turn, 1, host.Id, StartedAt + Turn), (room.TurnTimeout, room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
+    }
+
+    [Fact]
+    public void A_waiting_room_has_no_turn()
+    {
+        var room = RoomOf(Guest(), Guest());
+
+        Assert.Equal(((TimeSpan?)null, 0, (Guid?)null, (DateTimeOffset?)null), (room.TurnTimeout, room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
+        Assert.All(room.Members, m => Assert.Null(m.Seat));
+        Assert.False(room.IsTurnOverdue(Now.AddYears(1)));
+    }
+
+    [Fact]
+    public void A_turn_must_last_some_time()
+    {
+        var (host, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), TimeSpan.Zero, Now));
+        Assert.Equal(RoomStatus.Waiting, room.Status);
+    }
+
+    [Fact]
+    public void Only_the_current_player_may_act()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        var version = room.Version;
+
+        Assert.Equal(MatchCommandProblem.NotYourTurn, room.CheckCommand(bob.Id, Command(room), StartedAt));
+        Assert.Throws<InvalidOperationException>(() => Act(room, bob, StartedAt));
+        Assert.Null(room.CheckCommand(alice.Id, Command(room), StartedAt));
+
+        Assert.Equal((version, alice.Id, (string?)null), (room.Version, room.CurrentPlayerId, room.State));
+    }
+
+    [Fact]
+    public void A_command_that_ends_the_turn_passes_it_to_the_next_seat_and_round_again()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+
+        Act(room, alice, StartedAt.AddSeconds(3), endsTurn: false);
+        Assert.Equal((1, alice.Id, StartedAt + Turn), (room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
+
+        Act(room, alice, StartedAt.AddSeconds(5));
+        Assert.Equal((2, bob.Id, StartedAt.AddSeconds(5) + Turn), (room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
+
+        Act(room, bob, StartedAt.AddSeconds(6));
+        Act(room, carol, StartedAt.AddSeconds(7));
+        Assert.Equal((4, alice.Id), (room.TurnNumber, room.CurrentPlayerId));
+    }
+
+    [Fact]
+    public void A_turn_that_ran_out_takes_no_more_commands()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        var deadline = room.TurnEndsAt!.Value;
+
+        Assert.Null(room.CheckCommand(alice.Id, Command(room), deadline.AddTicks(-1)));
+        Assert.Equal(MatchCommandProblem.TurnExpired, room.CheckCommand(alice.Id, Command(room), deadline));
+        Assert.Throws<InvalidOperationException>(() => Act(room, alice, deadline));
+        Assert.True(room.IsTurnOverdue(deadline));
+    }
+
+    [Fact]
+    public void An_overdue_turn_times_out_exactly_once()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        var deadline = room.TurnEndsAt!.Value;
+        var version = room.Version;
+
+        Assert.Throws<InvalidOperationException>(() => room.TimeOutTurn(null, 3, deadline.AddTicks(-1)));
+
+        Assert.False(room.TimeOutTurn(null, 3, deadline));
+
+        Assert.Equal((version + 1, 2, bob.Id, deadline + Turn), (room.Version, room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
+        Assert.Null(room.State);
+        Assert.Throws<InvalidOperationException>(() => room.TimeOutTurn(null, 3, deadline));
+        Assert.Equal(version + 1, room.Version);
+    }
+
+    [Fact]
+    public void A_timeout_stores_the_games_safe_default()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        Act(room, alice, StartedAt, endsTurn: false);
+
+        room.TimeOutTurn("""{"skipped":true}""", 3, room.TurnEndsAt!.Value);
+
+        Assert.Equal(("""{"skipped":true}""", bob.Id), (room.State, room.CurrentPlayerId));
+    }
+
+    [Fact]
+    public void Missing_too_many_turns_in_a_row_is_a_forfeit()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+        var at = StartedAt;
+
+        for (var missed = 1; missed <= 3; missed++)
+        {
+            at = room.TurnEndsAt!.Value;
+            var forfeited = room.TimeOutTurn(null, 3, at);
+            Assert.Equal(missed == 3, forfeited);
+            Assert.Equal(missed, room.Members.Single(m => m.PlayerId == alice.Id).MissedTurns);
+            if (!forfeited)
+            {
+                Act(room, bob, at);
+                Act(room, carol, at);
+            }
+        }
+
+        Assert.True(room.HasLeft(alice.Id));
+        Assert.Equal((RoomStatus.Active, bob.Id, at + Turn), (room.Status, room.CurrentPlayerId, room.TurnEndsAt));
+    }
+
+    [Fact]
+    public void Acting_resets_the_turns_missed_in_a_row()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        room.TimeOutTurn(null, 2, room.TurnEndsAt!.Value);
+        Act(room, bob, room.TurnEndsAt!.Value.AddSeconds(-1));
+
+        Act(room, alice, room.TurnEndsAt!.Value.AddSeconds(-1));
+        room.TimeOutTurn(null, 2, room.TurnEndsAt!.Value); // bob's first miss
+        room.TimeOutTurn(null, 2, room.TurnEndsAt!.Value); // alice's first miss since acting
+
+        Assert.False(room.HasLeft(alice.Id));
+        Assert.Equal(1, room.Members.Single(m => m.PlayerId == alice.Id).MissedTurns);
+    }
+
+    [Fact]
+    public void A_forfeit_by_timeout_that_leaves_one_player_abandons_the_match()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        var deadline = room.TurnEndsAt!.Value;
+
+        Assert.True(room.TimeOutTurn(null, 1, deadline));
+
+        Assert.Equal((RoomStatus.Abandoned, deadline, (Guid?)null, (DateTimeOffset?)null), (room.Status, room.EndedAt, room.CurrentPlayerId, room.TurnEndsAt));
+        Assert.False(room.IsTurnOverdue(deadline.AddYears(1)));
+    }
+
+    [Fact]
+    public void Leaving_on_your_turn_passes_it_on_and_leavers_are_skipped()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+
+        room.Leave(bob.Id, StartedAt.AddSeconds(2));
+        Assert.Equal((1, alice.Id), (room.TurnNumber, room.CurrentPlayerId)); // not bob's turn, so nothing moves
+
+        Act(room, alice, StartedAt.AddSeconds(3));
+        Assert.Equal(carol.Id, room.CurrentPlayerId);
+
+        var at = StartedAt.AddSeconds(4);
+        var players = new[] { alice, bob, carol, Choosing("ocean") };
+        var four = Started(players);
+        four.Leave(players[0].Id, at);
+        Assert.Equal((2, players[1].Id, at + Turn), (four.TurnNumber, four.CurrentPlayerId, four.TurnEndsAt));
+    }
+
+    [Fact]
+    public void An_ended_match_has_no_current_turn()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+
+        room.Complete(StartedAt.AddMinutes(5));
+
+        Assert.Equal((1, (Guid?)null, (DateTimeOffset?)null), (room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
+        Assert.Throws<InvalidOperationException>(() => room.TimeOutTurn(null, 3, StartedAt.AddYears(1)));
     }
 
     [Theory]

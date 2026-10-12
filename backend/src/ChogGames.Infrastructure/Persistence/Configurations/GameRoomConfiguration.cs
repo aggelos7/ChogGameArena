@@ -56,6 +56,16 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
             table.HasCheckConstraint(
                 "CK_GameRooms_State",
                 $"\"State\" IS NULL OR (jsonb_typeof(\"State\") = 'object' AND \"StartedAt\" IS NOT NULL)");
+
+            // A started match has a turn timeout and has begun counting turns; exactly an active one has a current
+            // player with a deadline (DEC-027).
+            table.HasCheckConstraint(
+                "CK_GameRooms_TurnTimeout",
+                "(\"TurnTimeout\" IS NULL) = (\"StartedAt\" IS NULL) AND (\"TurnTimeout\" IS NULL OR \"TurnTimeout\" > interval '0')");
+            table.HasCheckConstraint("CK_GameRooms_TurnNumber", "\"TurnNumber\" >= 0 AND (\"TurnNumber\" = 0) = (\"StartedAt\" IS NULL)");
+            table.HasCheckConstraint(
+                "CK_GameRooms_CurrentTurn",
+                $"(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> '{nameof(RoomStatus.Active)}') AND (\"TurnEndsAt\" IS NULL) = (\"CurrentPlayerId\" IS NULL)");
         });
         builder.HasKey(r => r.Id);
         builder.Property(r => r.Id).ValueGeneratedNever();
@@ -67,6 +77,9 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
         builder.Property(r => r.Version).IsConcurrencyToken();
         builder.Property(r => r.State).HasColumnType("jsonb");
         builder.HasIndex(r => r.Code).IsUnique();
+
+        // Overdue turns are looked for every second (DEC-027).
+        builder.HasIndex(r => r.TurnEndsAt).HasFilter("\"TurnEndsAt\" IS NOT NULL");
 
         // One open room per host (DEC-020).
         builder.HasIndex(r => r.HostPlayerId).IsUnique().HasFilter($"\"Status\" = '{nameof(RoomStatus.Waiting)}'");
@@ -91,6 +104,11 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
 
             // A snapshot is a JSON object. It isn't required to leave: matches started before STORY-023 have none (DEC-025).
             table.HasCheckConstraint("CK_RoomMembers_Character", "\"Character\" IS NULL OR jsonb_typeof(\"Character\") = 'object'");
+
+            // Seats are the turn order, given at the start (DEC-027).
+            table.HasCheckConstraint(
+                "CK_RoomMembers_Seat", $"\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND {GameDefinition.MaxRoomPlayers}");
+            table.HasCheckConstraint("CK_RoomMembers_MissedTurns", "\"MissedTurns\" >= 0");
         });
         builder.HasKey(m => new { m.RoomId, m.PlayerId });
         builder.Property(m => m.ReadyCharacterKind).HasConversion<string>().HasMaxLength(16);
@@ -99,6 +117,7 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
             .HasColumnType("jsonb")
             .HasConversion(CharacterSnapshotConversion.Converter, CharacterSnapshotConversion.Comparer);
         builder.HasIndex(m => m.PlayerId);
+        builder.HasIndex(m => new { m.RoomId, m.Seat }).IsUnique().HasFilter("\"Seat\" IS NOT NULL");
         builder.HasOne<Player>().WithMany().HasForeignKey(m => m.PlayerId).OnDelete(DeleteBehavior.Restrict);
     }
 }

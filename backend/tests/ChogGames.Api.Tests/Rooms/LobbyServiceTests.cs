@@ -6,10 +6,12 @@ using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Core.Wallets;
 using ChogGames.Infrastructure.Characters;
+using ChogGames.Infrastructure.Matches;
 using ChogGames.Infrastructure.Persistence;
 using ChogGames.Infrastructure.Rooms;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace ChogGames.Api.Tests.Rooms;
 
@@ -21,6 +23,7 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
     private LobbyService Service(ChogGamesDbContext db) => new(
         db,
         new CharacterEligibilityService(chain, clock, NullLogger<CharacterEligibilityService>.Instance),
+        Options.Create(new MatchOptions()),
         clock,
         NullLogger<LobbyService>.Instance);
 

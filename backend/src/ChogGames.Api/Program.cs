@@ -20,6 +20,7 @@ builder.Services.AddWalletSignIn();
 builder.Services.AddCharacters();
 builder.Services.AddRooms(builder.Configuration);
 builder.Services.AddRealtime();
+builder.Services.AddMatchTurns();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();

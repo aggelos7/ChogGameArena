@@ -34,6 +34,12 @@ public enum MatchCommandOutcome
     /// <summary>The command's expected version is not the current one.</summary>
     StaleVersion,
 
+    /// <summary>Another player is playing the current turn.</summary>
+    NotYourTurn,
+
+    /// <summary>The player's turn ran out; it is about to be timed out.</summary>
+    TurnExpired,
+
     /// <summary>The match's game has no command of this type.</summary>
     UnknownCommand,
 
@@ -54,7 +60,8 @@ public sealed record MatchCommandResult(
 /// Runs match commands (STORY-024, ENG-009, DEC-026). Each runs in a transaction under the room's row lock, so commands
 /// for one match are processed one at a time: a retried action id returns its first result, a command built on an older
 /// version is refused, and of several commands built on the same version exactly one can succeed. The game's
-/// <see cref="IMatchRules"/> decide what an accepted command does; the player is always the session's.
+/// <see cref="IMatchRules"/> decide what an accepted command does; the player is always the session's. Only the current
+/// player acts, before their turn runs out (STORY-025, DEC-027).
 /// </summary>
 public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatchRules> rules, TimeProvider timeProvider)
 {
@@ -82,7 +89,8 @@ public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatc
                 : new MatchCommandResult(MatchCommandOutcome.ActionConflict);
         }
 
-        switch (room.CheckCommand(player.Id, command))
+        var now = timeProvider.GetUtcNow();
+        switch (room.CheckCommand(player.Id, command, now))
         {
             case MatchCommandProblem.WrongMatch:
                 return new MatchCommandResult(MatchCommandOutcome.RoomNotFound);
@@ -94,6 +102,10 @@ public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatc
                 return new MatchCommandResult(MatchCommandOutcome.NotPlaying);
             case MatchCommandProblem.StaleVersion:
                 return new MatchCommandResult(MatchCommandOutcome.StaleVersion, CurrentVersion: room.Version);
+            case MatchCommandProblem.NotYourTurn:
+                return new MatchCommandResult(MatchCommandOutcome.NotYourTurn);
+            case MatchCommandProblem.TurnExpired:
+                return new MatchCommandResult(MatchCommandOutcome.TurnExpired);
         }
 
         if (!_rulesByGame.TryGetValue(room.GameType, out var gameRules))
@@ -116,7 +128,7 @@ public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatc
             throw new InvalidOperationException($"The {room.GameType} rules accepted {command.Type} without a JSON object state.");
         }
 
-        var action = room.ApplyCommand(player.Id, command, newState.GetRawText(), timeProvider.GetUtcNow());
+        var action = room.ApplyCommand(player.Id, command, newState.GetRawText(), decision.EndsTurn, now);
         db.MatchActions.Add(action);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
