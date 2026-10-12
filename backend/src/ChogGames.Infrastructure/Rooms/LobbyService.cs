@@ -40,7 +40,7 @@ public sealed class LobbyService(
         if (ready)
         {
             // Ready is for the Chog selected now, read under the player's lock rather than from the caller's copy.
-            await LockPlayersAsync([player.Id], cancellationToken);
+            await db.LockPlayersAsync([player.Id], cancellationToken);
             var current = await db.Players.AsNoTracking().SingleAsync(p => p.Id == player.Id, cancellationToken);
             room.MarkReady(current);
         }
@@ -93,7 +93,7 @@ public sealed class LobbyService(
         }
 
         var memberIds = room.Members.Select(m => m.PlayerId).ToArray();
-        await LockPlayersAsync(memberIds, cancellationToken);
+        await db.LockPlayersAsync(memberIds, cancellationToken);
         var players = await db.Players.AsNoTracking().Where(p => memberIds.Contains(p.Id)).ToListAsync(cancellationToken);
 
         switch (room.CheckStart(caller.Id, players))
@@ -160,10 +160,4 @@ public sealed class LobbyService(
         RoomStatus.Active => new RoomResult(RoomOutcome.RoomStarted),
         _ => new RoomResult(RoomOutcome.RoomClosed),
     };
-
-    /// <summary>Locks players in id order, so two transactions locking overlapping sets cannot deadlock.</summary>
-    private Task LockPlayersAsync(Guid[] playerIds, CancellationToken cancellationToken) =>
-        db.Database.ExecuteSqlInterpolatedAsync(
-            $"""SELECT 1 FROM (SELECT "Id" FROM "Players" WHERE "Id" = ANY({playerIds}) ORDER BY "Id" FOR UPDATE) AS locked""",
-            cancellationToken);
 }

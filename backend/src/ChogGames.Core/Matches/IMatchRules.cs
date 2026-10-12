@@ -9,7 +9,8 @@ namespace ChogGames.Core.Matches;
 /// must not keep state of their own; the match state they return is stored with the room. The engine owns the turn
 /// (STORY-025, DEC-027): only the current player's commands reach the rules, the rules say which accepted command ends
 /// the turn, and they give the safe default for a turn that runs out. Players only see the state through the rules'
-/// per-player view (STORY-026, DEC-028).
+/// per-player view (STORY-026, DEC-028). An accepted command may finish the match with the players' standings
+/// (STORY-028, DEC-030).
 /// </summary>
 public interface IMatchRules
 {
@@ -60,9 +61,22 @@ public enum MatchRuleOutcome
 
 /// <param name="Reason">For <c>Rejected</c>: a stable, lower-case code clients can rely on, such as <c>must_roll_first</c>.</param>
 /// <param name="EndsTurn">For <c>Accepted</c>: the command finished the player's turn, so the next player's begins.</param>
-public sealed record MatchRuleDecision(MatchRuleOutcome Outcome, JsonElement? State = null, string? Reason = null, bool EndsTurn = false)
+/// <param name="Standings">
+/// For <c>Accepted</c>: the command finished the match (STORY-028, DEC-030), with a rank for every player still playing;
+/// the engine completes it, ranks those who left after them and records the results once.
+/// </param>
+public sealed record MatchRuleDecision(
+    MatchRuleOutcome Outcome,
+    JsonElement? State = null,
+    string? Reason = null,
+    bool EndsTurn = false,
+    IReadOnlyList<MatchStanding>? Standings = null)
 {
     public static MatchRuleDecision Accept(JsonElement state, bool endsTurn = false) => new(MatchRuleOutcome.Accepted, state, EndsTurn: endsTurn);
+
+    /// <summary>The command ended the match with <paramref name="standings"/> for the players still playing.</summary>
+    public static MatchRuleDecision Finish(JsonElement state, IReadOnlyList<MatchStanding> standings) =>
+        new(MatchRuleOutcome.Accepted, state, Standings: standings);
 
     public static MatchRuleDecision Reject(string reason) => new(MatchRuleOutcome.Rejected, Reason: reason);
 

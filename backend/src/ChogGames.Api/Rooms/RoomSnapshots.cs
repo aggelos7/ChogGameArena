@@ -51,7 +51,8 @@ public sealed class RoomSnapshots(ChogGamesDbContext db, IEnumerable<IMatchRules
                     m.Character is { } locked ? ToCharacter(locked) : ToCharacter(player),
                     Ability: null,
                     m.HasLeft,
-                    m.PlayerId == room.CurrentPlayerId);
+                    m.PlayerId == room.CurrentPlayerId,
+                    m.Rank);
             })
             .ToArray();
 

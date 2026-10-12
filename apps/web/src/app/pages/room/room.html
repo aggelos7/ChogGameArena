@@ -41,6 +41,17 @@
         </p>
       } @else if (current.status === 'Active') {
         <p class="started" role="status" data-started>The game has started.</p>
+      } @else if (current.status === 'Completed') {
+        <p class="started" role="status" data-result>
+          @if (you()?.rank === 1) {
+            The game is over: you won!
+          } @else if (you()?.rank; as rank) {
+            The game is over: you finished {{ place(rank) }}.
+          } @else {
+            The game is over.
+          }
+          <a routerLink="/games">Play again</a>
+        </p>
       } @else if (current.status === 'Abandoned') {
         <p class="started" role="status" data-closed>
           This game ended early: too many players left. <a routerLink="/games">Find another game</a>
@@ -68,6 +79,9 @@
                   }
                   @if (member.hasLeft) {
                     <span class="tag left">Left</span>
+                  }
+                  @if (member.rank; as rank) {
+                    <span class="tag rank" [class.winner]="rank === 1" data-rank>{{ place(rank) }}</span>
                   }
                 </p>
                 <p class="details">

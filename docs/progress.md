@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-027).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-028).
 
 ## Stories done
 
@@ -34,7 +34,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-024 | #107 | Match command engine: `POST /api/rooms/{code}/commands` with `actionId`, `matchId`, `expectedVersion`, `type` and `payload`; a room-wide version; retries replay their first result; stale commands are refused; per-game `IMatchRules`, none registered yet (DEC-026). |
 | STORY-025 | #109 | Turns and AFK timer: seats in join order (host first), only the current player acts (`not_your_turn`, `turn_expired`), rules end turns, an in-process scheduler times out overdue turns exactly once with the game's safe default, and 3 missed turns in a row forfeit (DEC-027). |
 | STORY-026 | #111 | Realtime sync: the hub pushes each member their own versioned room snapshot (`RoomUpdated`), and `SubscribeRoom` returns the current one for resync. Clients keep the newest version. Snapshots carry the game state through `IMatchRules.ViewFor`, filtered per player (DEC-028). |
-| STORY-027 | (this PR) | Reconnect: `GET /api/rooms/current` finds the player's open room and a shell banner leads back to it; the web client reconnects forever with backoff, at once when back online or the tab is shown, and resyncs by subscribing. Being away never pauses the turn timer or earns a turn (DEC-029). |
+| STORY-027 | #113 | Reconnect: `GET /api/rooms/current` finds the player's open room and a shell banner leads back to it; the web client reconnects forever with backoff, at once when back online or the tab is shown, and resyncs by subscribing. Being away never pauses the turn timer or earns a turn (DEC-029). |
+| STORY-028 | (this PR) | Results and restarts: rules finish a match with standings, ranks stored once on the members with the move to Completed, stats updated in the same transaction (completed matches only, leavers count as played); on startup active matches resume with a full new turn and a bumped version (DEC-030). |
 
 ## Key architectural decisions
 
@@ -67,6 +68,10 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - The engine owns the turn: `GameRooms.CurrentPlayerId`, `TurnNumber`, `TurnEndsAt` and `TurnTimeout` (fixed per match at start); `RoomMembers.Seat` is the turn order (host first, then join order) and `MissedTurns` the AFK count.
   - Command checks: replay, status, forfeit, `expectedVersion`, then current player (`not_your_turn`) and deadline (`turn_expired`), then the rules. `MatchRuleDecision.EndsTurn` passes the turn on; `IMatchRules.TimeOutTurn` gives the safe default (null skips).
   - `TurnTimeoutWorker` (Api, `BackgroundService`) calls `TurnTimeoutService` every `Matches:TimeoutCheckInterval`; each overdue room is re-checked under its row lock, so a turn times out exactly once. `Matches:MaxMissedTurns` (3) misses in a row forfeit.
+- **Results (DEC-030):**
+  - `MatchRuleDecision.Finish(state, standings)` ends the match: a rank for every player still playing (competition ranks, ties share). `GameRoom` checks them, moves to Completed and stores `RoomMember.Rank`; leavers rank after, the latest to leave highest. There is no results table.
+  - `MatchResults.RecordStatsAsync` adds `GamesPlayed` for every member and `Wins` for rank 1, with atomic `ExecuteUpdate` after locking the players in id order, in the command's transaction. Abandoned matches change nothing.
+  - Restart: `MatchRecoveryStartup` (an `IHostedService` registered before `TurnTimeoutWorker`) runs `MatchRecoveryService` before requests are served; each active match gets `TurnEndsAt = now + TurnTimeout` and a version bump, under its row lock.
 - **Realtime:** one SignalR hub (`/api/hubs/rooms`, WebSockets only).
   - After each commit, `RoomNotifier` reads the room again and pushes every subscribed player still playing their own snapshot (`RoomUpdated`, the same `RoomResponse` as `GET`) (DEC-028). `SubscribeRoom` returns the current snapshot, which is how a client resyncs after a gap.
   - Clients keep the highest `version` they've seen. Recipients come from the in-memory connection registry, not SignalR groups (single instance). Hub calls have their own per-player rate limit (DEC-024).
@@ -84,6 +89,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - External services (the chain, IPFS, the catalogue) are hand-written fakes inside the test classes; there are no mocking libraries.
   - Concurrency is tested with real parallel requests against Postgres. Those tests are run about 8 times in a row before a PR.
   - Each migration's check constraints get raw-SQL tests that try invalid rows. `RoomStatusOverride` forces a status together with the turn columns it needs.
+  - Result tests (`MatchResultTests`) model a restart by disposing the `ApiFactory` and starting another on the same database; clients carry only the session cookie across.
   - Reconnect tests (`ReconnectTests`) model a browser refresh as a new client with only the session cookie, and drive turn timeouts by calling `TurnTimeoutService` directly.
   - Sync tests (`RoomSyncTests`) use two live hub clients and a fake game with per-player secrets to show convergence, resync and private views.
   - Turn tests (`MatchTurnTests`) use a `ManualTimeProvider`, remove `TurnTimeoutWorker` and call `TurnTimeoutService` directly; one test keeps the worker to show it runs by itself.
@@ -107,7 +113,9 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## Known issues and tech debt
 
-- **Completing a match:** `GameRoom.Complete` exists but nothing calls it yet; game rules (Chog Life/Race) and the 20-minute cap (ENG-011) will. Results and stats are STORY-028.
+- **Completing a match:** only a command can finish a match (`MatchRuleDecision.Finish`); no game has rules yet, so nothing completes in practice. The 20-minute cap (ENG-011) will need its own way to finish a match with the game's timeout scoring.
+- **Results page:** the room page shows each member's place and a "you won" / "you finished Nth" line; there's no match history list or game-specific result details (LIFE-010) yet.
+- **Restart resume runs at every start:** including a quick restart with seconds left on a turn, which then gets a full turn. If the database is down at startup, matches aren't resumed and their turns time out as before.
 - **Out-of-turn actions:** only the current player can act. Reactions by other players (Chog Race, DEC-003) will need the rules to allow them.
 - **Turn scheduler is single instance:** like the hub registry, it runs in-process; scale-out needs one runner (e.g. an advisory lock).
 - **Dev log noise:** in Development, EF logs the overdue-turn query every second.
@@ -124,7 +132,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Start holds a lock during chain calls:** start runs up to six live ownership checks while holding the room's row lock. That's acceptable at this scale, but worth revisiting if the chain is slow.
 - **Duplicated code:** `FindCurrentPlayerAsync` is repeated in each endpoint class. (The room-lock query is now shared in `RoomLocks`.)
 - **Commands return versions only:** the new state arrives as the pushed snapshot (or a `GET`).
-- **Action history grows per match:** `MatchActions` keeps every applied action; there's no clean-up yet (results and retention are STORY-028).
+- **Action history grows per match:** `MatchActions` keeps every applied action; there's no clean-up or retention policy yet.
 - **Formatting:** Prettier isn't enforced; about 54 files differ from its formatting.
 - **npm:** npm 10.9 crashes on `npm install` of new packages. Use `npx npm@11 install …` (`npm ci` is fine).
 - **Mock NFT ownership** isn't exclusive: every wallet that isn't a fixture sees the same tokens.
@@ -138,8 +146,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-028 — Match persistence and result records:** restart policy, winner stored once, stats updates.
-2. **Then:** STORY-029, then E05 abilities (STORY-030 to 034).
+1. **STORY-029 — Randomness and security tests.**
+2. **Then:** E05 abilities (STORY-030 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

@@ -109,6 +109,11 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
             table.HasCheckConstraint(
                 "CK_RoomMembers_Seat", $"\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND {GameDefinition.MaxRoomPlayers}");
             table.HasCheckConstraint("CK_RoomMembers_MissedTurns", "\"MissedTurns\" >= 0");
+
+            // Only a seated match player gets a final place, from 1 (DEC-030).
+            table.HasCheckConstraint(
+                "CK_RoomMembers_Rank",
+                $"\"Rank\" IS NULL OR (\"Rank\" BETWEEN 1 AND {GameDefinition.MaxRoomPlayers} AND \"Seat\" IS NOT NULL)");
         });
         builder.HasKey(m => new { m.RoomId, m.PlayerId });
         builder.Property(m => m.ReadyCharacterKind).HasConversion<string>().HasMaxLength(16);

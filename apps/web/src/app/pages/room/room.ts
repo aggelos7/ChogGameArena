@@ -171,6 +171,11 @@ export class RoomPage implements OnInit {
     });
   }
 
+  /** A final place as shown: 1st, 2nd, 3rd, 4th… (rooms hold at most six players). */
+  protected place(rank: number): string {
+    return `${rank}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[rank] ?? 'th'}`;
+  }
+
   protected badge(character: RoomCharacter): Avatar {
     return { id: character.id, name: character.name, color: character.color ?? NFT_COLOR };
   }
