@@ -78,6 +78,7 @@ public static class ConfigurationServiceCollectionExtensions
             .ValidateOnStart();
         services.AddScoped<MatchCommandService>();
         services.AddScoped<TurnTimeoutService>();
+        services.AddScoped<MatchRecoveryService>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()

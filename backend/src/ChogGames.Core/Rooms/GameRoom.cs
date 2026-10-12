@@ -11,7 +11,9 @@ namespace ChogGames.Core.Rooms;
 /// is the match (STORY-023, ENG-010, DEC-025): its members are the match players, each with their character snapshot,
 /// and every status change goes through <see cref="RoomLifecycle"/>. Every change bumps <see cref="Version"/>, and players act
 /// on the match through versioned, idempotent commands (STORY-024, DEC-026). The engine owns the turn (STORY-025, DEC-027):
-/// players take turns in seat order, only the current player may act, and a turn that runs out is timed out once.
+/// players take turns in seat order, only the current player may act, and a turn that runs out is timed out once. Every
+/// change is committed as it happens, so a restart resumes the match (STORY-028, DEC-030); a completed match keeps its
+/// final standings on the members.
 /// </summary>
 public sealed class GameRoom
 {
@@ -265,11 +267,32 @@ public sealed class GameRoom
         Version++;
     }
 
-    /// <summary>The game finished the match (ENG-010). Called by game rules, which decide the results (later stories).</summary>
-    public void Complete(DateTimeOffset now)
+    /// <summary>
+    /// The game finished the match (ENG-010, STORY-028, DEC-030) with <paramref name="standings"/>: a rank for every
+    /// player still playing, as its rules decided. Players who left are ranked after them, the latest to leave highest.
+    /// The ranks are stored on the members once, with the move to Completed; a finished match can't be completed again.
+    /// </summary>
+    public void Complete(IReadOnlyCollection<MatchStanding> standings, DateTimeOffset now)
     {
-        MoveTo(RoomStatus.Completed, now);
+        Finish(standings, now);
         Version++;
+    }
+
+    /// <summary>
+    /// The server restarted (STORY-028, DEC-030): the player whose turn it was gets a full new turn from
+    /// <paramref name="now"/>, without a missed turn, since the downtime wasn't theirs. Returns whether anything changed;
+    /// only an active match has a turn to restore.
+    /// </summary>
+    public bool ResumeAfterRestart(DateTimeOffset now)
+    {
+        if (Status != RoomStatus.Active)
+        {
+            return false;
+        }
+
+        TurnEndsAt = now + TurnTimeout!.Value;
+        Version++;
+        return true;
     }
 
     /// <summary>
@@ -348,18 +371,34 @@ public sealed class GameRoom
     /// <summary>
     /// Applies a command the game's rules accepted: stores their new <paramref name="state"/>, ends the turn when the
     /// rules say so, bumps the version and returns the record that makes a retry of the same action return this result
-    /// (DEC-026, DEC-027). Acting resets the player's missed turns.
+    /// (DEC-026, DEC-027). Acting resets the player's missed turns. A command that finished the match comes with the
+    /// <paramref name="standings"/> its rules decided, and the match is completed with them (STORY-028, DEC-030).
     /// </summary>
-    public MatchAction ApplyCommand(Guid playerId, MatchCommand command, string state, bool endsTurn, DateTimeOffset now)
+    public MatchAction ApplyCommand(
+        Guid playerId,
+        MatchCommand command,
+        string state,
+        bool endsTurn,
+        DateTimeOffset now,
+        IReadOnlyCollection<MatchStanding>? standings = null)
     {
         if (CheckCommand(playerId, command, now) is { } problem)
         {
             throw new InvalidOperationException($"The command cannot be applied: {problem}.");
         }
 
+        if (standings is not null)
+        {
+            CheckStandings(standings);
+        }
+
         State = state;
         CurrentMember().Act();
-        if (endsTurn)
+        if (standings is not null)
+        {
+            Finish(standings, now);
+        }
+        else if (endsTurn)
         {
             NextTurn(now);
         }
@@ -382,6 +421,47 @@ public sealed class GameRoom
             EndedAt = now;
             CurrentPlayerId = null;
             TurnEndsAt = null;
+        }
+    }
+
+    /// <summary>Completes the match and ranks every member; nothing changes if the standings are refused.</summary>
+    private void Finish(IReadOnlyCollection<MatchStanding> standings, DateTimeOffset now)
+    {
+        if (Status != RoomStatus.Active)
+        {
+            throw new InvalidOperationException($"A room cannot go from {Status} to {RoomStatus.Completed}.");
+        }
+
+        CheckStandings(standings);
+        MoveTo(RoomStatus.Completed, now);
+        foreach (var standing in standings)
+        {
+            _members.Single(m => m.PlayerId == standing.PlayerId).RankAs(standing.Rank);
+        }
+
+        // Those who left rank after everyone still playing; players who left at the same moment share a place.
+        var left = _members.Where(m => m.HasLeft).ToList();
+        foreach (var member in left)
+        {
+            member.RankAs(standings.Count + 1 + left.Count(other => other.LeftAt > member.LeftAt));
+        }
+    }
+
+    /// <summary>
+    /// Standings must rank every player still playing exactly once, with competition ranks: each rank is one more than
+    /// the number of players ranked above it, so the best rank is 1 and ties skip the places they share (1, 1, 3).
+    /// </summary>
+    private void CheckStandings(IReadOnlyCollection<MatchStanding> standings)
+    {
+        var playing = _members.Where(m => !m.HasLeft).Select(m => m.PlayerId).ToHashSet();
+        if (standings.Count != playing.Count || !standings.Select(s => s.PlayerId).ToHashSet().SetEquals(playing))
+        {
+            throw new InvalidOperationException("The standings must rank every player still playing exactly once.");
+        }
+
+        if (standings.Any(s => s.Rank != 1 + standings.Count(other => other.Rank < s.Rank)))
+        {
+            throw new InvalidOperationException("The standings must use competition ranks from 1.");
         }
     }
 
@@ -478,6 +558,15 @@ public sealed class RoomMember
     /// <summary>Turns in a row that ran out on the member; acting resets it (DEC-027).</summary>
     public int MissedTurns { get; private set; }
 
+    /// <summary>
+    /// The member's final place, from 1 for the winners, set once when the match is completed (STORY-028, DEC-030);
+    /// null in any other status, so an abandoned match has no winner.
+    /// </summary>
+    public int? Rank { get; private set; }
+
+    /// <summary>Ranked first in a completed match; tied winners all win.</summary>
+    public bool Won => Rank == 1;
+
     /// <summary>Ready, and still with the Chog <paramref name="player"/> has selected now.</summary>
     public bool IsReadyWith(Player player) =>
         player.Id == PlayerId
@@ -527,6 +616,8 @@ public sealed class RoomMember
     internal int MissTurn() => ++MissedTurns;
 
     internal void Act() => MissedTurns = 0;
+
+    internal void RankAs(int rank) => Rank = rank;
 }
 
 /// <summary>Room and match lifecycle (ENG-010, DEC-025); <see cref="RoomLifecycle"/> lists the allowed transitions.</summary>

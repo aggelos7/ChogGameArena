@@ -31,6 +31,7 @@ describe('Room page', () => {
       ability: null,
       hasLeft: false,
       isTurn: false,
+      rank: null,
       ...overrides,
     };
   }
@@ -423,6 +424,43 @@ describe('Room page', () => {
       expect(element().querySelector('[data-left] a')?.getAttribute('href')).toBe('/games');
       expect(element().querySelector('[data-started]')).toBeNull();
       expect(maybeButton('Leave game')).toBeUndefined();
+    });
+
+    it('shows the final standings and congratulates the winner', () => {
+      load({
+        ...room,
+        status: 'Completed',
+        members: [
+          member('Alice', { isHost: true, isYou: true, rank: 1 }),
+          member('Bob', { rank: 3 }),
+          member('Carol', { rank: 2, hasLeft: false }),
+        ],
+      });
+
+      expect(members()).toEqual(['Alice Host You 1st', 'Bob 3rd', 'Carol 2nd']);
+      expect(element().querySelector('[data-result]')?.textContent).toContain('The game is over: you won!');
+      expect(element().querySelector('[data-result] a')?.getAttribute('href')).toBe('/games');
+      expect(element().querySelector('[data-started]')).toBeNull();
+      expect(maybeButton('Leave game')).toBeUndefined();
+    });
+
+    it('tells a player who did not win where they finished, even after leaving', () => {
+      load({
+        ...room,
+        status: 'Completed',
+        members: [member('Alice', { isHost: true, rank: 1 }), member('Bob', { rank: 2 }), member('Carol', { isYou: true, hasLeft: true, rank: 3 })],
+      });
+
+      expect(members()).toEqual(['Alice Host 1st', 'Bob 2nd', 'Carol You Left 3rd']);
+      expect(element().querySelector('[data-result]')?.textContent).toContain('The game is over: you finished 3rd.');
+      expect(element().querySelector('[data-left]')).toBeNull();
+    });
+
+    it('shows no places before a game is over', () => {
+      load({ ...room, status: 'Active', members: [member('Alice', { isHost: true, isYou: true }), member('Bob')] });
+
+      expect(element().querySelector('[data-rank]')).toBeNull();
+      expect(element().querySelector('[data-result]')).toBeNull();
     });
 
     it('tells players when a game ended because too many left', () => {

@@ -28,6 +28,8 @@ export interface RoomMember {
   hasLeft: boolean;
   /** It is this member's turn in the active match (DEC-027). */
   isTurn: boolean;
+  /** Final place in a completed match, from 1 for the winners (ties share a place); null otherwise (DEC-030). */
+  rank: number | null;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */

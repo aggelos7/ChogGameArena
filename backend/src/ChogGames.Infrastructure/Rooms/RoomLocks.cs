@@ -18,4 +18,10 @@ internal static class RoomLocks
             .ToListAsync(cancellationToken);
         return roomIds is [var roomId] ? await db.GameRooms.SingleAsync(r => r.Id == roomId, cancellationToken) : null;
     }
+
+    /// <summary>Locks players in id order, so two transactions locking overlapping sets cannot deadlock.</summary>
+    public static Task LockPlayersAsync(this ChogGamesDbContext db, Guid[] playerIds, CancellationToken cancellationToken) =>
+        db.Database.ExecuteSqlInterpolatedAsync(
+            $"""SELECT 1 FROM (SELECT "Id" FROM "Players" WHERE "Id" = ANY({playerIds}) ORDER BY "Id" FOR UPDATE) AS locked""",
+            cancellationToken);
 }

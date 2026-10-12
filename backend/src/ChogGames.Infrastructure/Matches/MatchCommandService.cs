@@ -61,7 +61,8 @@ public sealed record MatchCommandResult(
 /// for one match are processed one at a time: a retried action id returns its first result, a command built on an older
 /// version is refused, and of several commands built on the same version exactly one can succeed. The game's
 /// <see cref="IMatchRules"/> decide what an accepted command does; the player is always the session's. Only the current
-/// player acts, before their turn runs out (STORY-025, DEC-027).
+/// player acts, before their turn runs out (STORY-025, DEC-027). A command that finishes the match stores the standings
+/// and updates the players' stats in the same transaction, so results are recorded exactly once (STORY-028, DEC-030).
 /// </summary>
 public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatchRules> rules, TimeProvider timeProvider)
 {
@@ -128,8 +129,13 @@ public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatc
             throw new InvalidOperationException($"The {room.GameType} rules accepted {command.Type} without a JSON object state.");
         }
 
-        var action = room.ApplyCommand(player.Id, command, newState.GetRawText(), decision.EndsTurn, now);
+        var action = room.ApplyCommand(player.Id, command, newState.GetRawText(), decision.EndsTurn, now, decision.Standings);
         db.MatchActions.Add(action);
+        if (room.Status == RoomStatus.Completed)
+        {
+            await db.RecordStatsAsync(room, cancellationToken);
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new MatchCommandResult(MatchCommandOutcome.Applied, action, room.Version);
