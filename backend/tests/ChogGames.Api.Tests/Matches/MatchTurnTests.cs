@@ -494,6 +494,8 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
 
         public JsonElement? TimeOutTurn(MatchTurnContext context) => With(context.State, timeouts: Timeouts(context.State) + 1);
 
+        public JsonElement? ViewFor(MatchViewContext context) => context.State;
+
         private static int Count(JsonElement? state) => state?.GetProperty("count").GetInt32() ?? 0;
 
         private static int Timeouts(JsonElement? state) => state?.GetProperty("timeouts").GetInt32() ?? 0;

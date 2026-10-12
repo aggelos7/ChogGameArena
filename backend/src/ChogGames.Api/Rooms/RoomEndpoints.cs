@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 using ChogGames.Api.Realtime;
 using ChogGames.Core.Players;
@@ -17,7 +18,7 @@ namespace ChogGames.Api.Rooms;
 /// members may leave a waiting room, and the host leaving cancels it (STORY-063). Leaving a started match is a
 /// forfeit, and a started room shows each member's locked Chog (STORY-023, DEC-025).
 /// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022). Every committed change
-/// is announced to the room's subscribed members over SignalR (STORY-022).
+/// is pushed to the room's subscribed members over SignalR as their own versioned snapshot (STORY-022, STORY-026).
 /// </summary>
 public static class RoomEndpoints
 {
@@ -49,6 +50,10 @@ public static class RoomEndpoints
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>
     /// <param name="TurnNumber">The turn being played, from 1; 0 before the start (DEC-027).</param>
     /// <param name="TurnEndsAt">When the current turn runs out; null unless the match is active.</param>
+    /// <param name="State">
+    /// What this member may see of the game's state (DEC-028); null before the game's first command and for games
+    /// without rules.
+    /// </param>
     public sealed record RoomResponse(
         string Code,
         Guid MatchId,
@@ -59,7 +64,8 @@ public static class RoomEndpoints
         int Capacity,
         int TurnNumber,
         DateTimeOffset? TurnEndsAt,
-        RoomMemberResponse[] Members);
+        RoomMemberResponse[] Members,
+        JsonElement? State);
 
     /// <summary>Stable error codes; clients rely on these, never on the message text.</summary>
     public static class ErrorCodes
@@ -84,6 +90,7 @@ public static class RoomEndpoints
             .Bind(configuration.GetSection(RoomOptions.SectionName))
             .Validate(o => o.RequestsPerMinutePerPlayer is >= 1 and <= 1000, "Rooms:RequestsPerMinutePerPlayer must be between 1 and 1000.")
             .ValidateOnStart();
+        services.AddScoped<RoomSnapshots>();
 
         services.AddRateLimiter(options => options.AddPolicy(RateLimitPolicy, context =>
         {
@@ -112,7 +119,7 @@ public static class RoomEndpoints
     }
 
     private static async Task<Results<Created<RoomResponse>, ProblemHttpResult, NotFound>> CreateRoomAsync(
-        CreateRoomRequest? request, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, CancellationToken cancellationToken)
+        CreateRoomRequest? request, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, RoomSnapshots snapshots, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -126,11 +133,11 @@ public static class RoomEndpoints
             return Failure(result);
         }
 
-        return TypedResults.Created($"/api/rooms/{room.Code}", await ToResponseAsync(room, player, db, cancellationToken));
+        return TypedResults.Created($"/api/rooms/{room.Code}", await snapshots.ForAsync(room, player.Id, cancellationToken));
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> JoinRoomAsync(
-        string code, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, RoomNotifier notifier, CancellationToken cancellationToken)
+        string code, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, RoomSnapshots snapshots, RoomNotifier notifier, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -154,11 +161,11 @@ public static class RoomEndpoints
             await notifier.RoomChangedAsync(room.Code);
         }
 
-        return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
+        return TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> GetRoomAsync(
-        string code, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, CancellationToken cancellationToken)
+        string code, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, RoomSnapshots snapshots, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -173,7 +180,7 @@ public static class RoomEndpoints
             return Failure(new RoomResult(RoomOutcome.RoomNotFound));
         }
 
-        return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
+        return TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, ValidationProblem, NotFound>> SetReadyAsync(
@@ -182,6 +189,7 @@ public static class RoomEndpoints
         ClaimsPrincipal user,
         ChogGamesDbContext db,
         LobbyService lobby,
+        RoomSnapshots snapshots,
         RoomNotifier notifier,
         CancellationToken cancellationToken)
     {
@@ -209,11 +217,17 @@ public static class RoomEndpoints
 
         await notifier.RoomChangedAsync(room.Code);
 
-        return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
+        return TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> StartRoomAsync(
-        string code, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, RoomNotifier notifier, CancellationToken cancellationToken)
+        string code,
+        ClaimsPrincipal user,
+        ChogGamesDbContext db,
+        LobbyService lobby,
+        RoomSnapshots snapshots,
+        RoomNotifier notifier,
+        CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -240,7 +254,7 @@ public static class RoomEndpoints
 
         await notifier.RoomChangedAsync(room.Code);
 
-        return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
+        return TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
     }
 
     private static async Task<Results<NoContent, ProblemHttpResult, NotFound>> LeaveRoomAsync(
@@ -301,60 +315,6 @@ public static class RoomEndpoints
 
         return TypedResults.Problem(detail, statusCode: status, extensions: extensions);
     }
-
-    private static async Task<RoomResponse> ToResponseAsync(GameRoom room, Player caller, ChogGamesDbContext db, CancellationToken cancellationToken)
-    {
-        var memberIds = room.Members.Select(m => m.PlayerId).ToArray();
-        var players = await db.Players.AsNoTracking()
-            .Where(p => memberIds.Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id, cancellationToken);
-
-        // Player ids stay on the server; members are described only by what the lobby shows.
-        var members = room.Members
-            .OrderBy(m => m.JoinedAt)
-            .ThenBy(m => m.PlayerId != room.HostPlayerId)
-            .Select(m =>
-            {
-                var player = players[m.PlayerId];
-                return new RoomMemberResponse(
-                    player.DisplayName,
-                    player.AvatarId,
-                    m.PlayerId == room.HostPlayerId,
-                    m.PlayerId == caller.Id,
-                    m.IsReadyWith(player),
-                    m.Character is { } locked ? ToCharacter(locked) : ToCharacter(player),
-                    Ability: null,
-                    m.HasLeft,
-                    m.PlayerId == room.CurrentPlayerId);
-            })
-            .ToArray();
-
-        return new RoomResponse(
-            room.Code, room.Id, room.Version, room.GameType, room.Status, room.MinPlayers, room.Capacity, room.TurnNumber, room.TurnEndsAt, members);
-    }
-
-    /// <summary>
-    /// The selected Chog as stored; ownership is checked when the host starts, not here. A retired standard Chog
-    /// shows as the default, as at start.
-    /// </summary>
-    private static RoomCharacterResponse ToCharacter(Player player)
-    {
-        if (player.SelectedCharacterKind == CharacterKind.Nft)
-        {
-            return new RoomCharacterResponse(CharacterKind.Nft, player.SelectedCharacterId, $"Chog #{player.SelectedCharacterId}", null);
-        }
-
-        var standard = DefaultAvatar.TryFind(player.SelectedCharacterId, out var found) ? found : DefaultAvatar.Classic;
-        return new RoomCharacterResponse(CharacterKind.Standard, standard.Id, standard.Name, standard.Color);
-    }
-
-    /// <summary>The Chog locked when the match started, with its stored name.</summary>
-    private static RoomCharacterResponse ToCharacter(CharacterSnapshot snapshot) =>
-        new(
-            snapshot.Kind,
-            snapshot.CharacterId,
-            snapshot.Name,
-            snapshot.Kind == CharacterKind.Standard && DefaultAvatar.TryFind(snapshot.CharacterId, out var standard) ? standard.Color : null);
 
     private static Task<Player?> FindCurrentPlayerAsync(ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
     {

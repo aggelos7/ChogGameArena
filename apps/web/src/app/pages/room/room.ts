@@ -11,6 +11,7 @@ import {
   RoomCharacter,
   RoomError,
   RoomsApi,
+  isNewerRoom,
   normalizeRoomCode,
   roomErrorMessage,
   toRoomError,
@@ -24,8 +25,9 @@ const NFT_COLOR = 'var(--brand)';
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
  * status, the player's ready toggle, the host's start and leaving (STORY-063). Once started it shows each player's locked
- * Chog, and leaving forfeits the game (STORY-023, DEC-025). It follows the room live (STORY-022): each
- * change notice fetches the room again, and Refresh is offered only while live updates are down.
+ * Chog, and leaving forfeits the game (STORY-023, DEC-025). It follows the room live (STORY-022, STORY-026): the
+ * server pushes a versioned snapshot after every change and the page keeps the newest one it has seen, from the push or
+ * a request alike, so an older answer never wins. Refresh is offered only while live updates are down.
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
@@ -41,7 +43,7 @@ export class RoomPage implements OnInit {
   private readonly router = inject(Router);
   private readonly live = inject(RoomLiveUpdates);
   private readonly destroyRef = inject(DestroyRef);
-  /** Quiet re-fetches; a newer one replaces one still in flight, so an older answer never wins. */
+  /** Quiet re-fetches after a refused action; a newer one replaces one still in flight. */
   private readonly refreshes = new Subject<string>();
   private liveSubscription?: Subscription;
 
@@ -85,7 +87,7 @@ export class RoomPage implements OnInit {
       )
       .subscribe((current) => {
         if (current) {
-          this.room.set(current);
+          this.show(current);
         }
       });
     this.destroyRef.onDestroy(() => this.liveSubscription?.unsubscribe());
@@ -105,12 +107,11 @@ export class RoomPage implements OnInit {
   private followLive(): void {
     this.liveSubscription?.unsubscribe();
     this.liveSubscription = this.live.watch(normalizeRoomCode(this.code())).subscribe((event) => {
+      // Subscribing again after a drop brings a snapshot too, so nothing missed meanwhile needs fetching.
       if (event.type === 'status') {
         this.liveState.set(event.status);
-      }
-      // Once (re)subscribed, fetch whatever changed while not listening.
-      if (event.type === 'changed' || (event.type === 'status' && event.status === 'live')) {
-        this.refreshQuietly();
+      } else {
+        this.show(event.room);
       }
     });
   }
@@ -121,7 +122,7 @@ export class RoomPage implements OnInit {
     this.actionError.set(null);
     this.api.get(normalizeRoomCode(this.code())).subscribe({
       next: (room) => {
-        this.room.set(room);
+        this.show(room);
         this.loadState.set('ready');
         this.loadGameName(room.gameType);
       },
@@ -178,7 +179,7 @@ export class RoomPage implements OnInit {
     this.actionError.set(null);
     request.subscribe({
       next: (room) => {
-        this.room.set(room);
+        this.show(room);
         this.busy.set(false);
       },
       error: (error: unknown) => {
@@ -191,6 +192,13 @@ export class RoomPage implements OnInit {
         this.actionError.set(roomError);
       },
     });
+  }
+
+  /** Shows `room` unless a newer snapshot is already shown (DEC-028). */
+  private show(room: Room): void {
+    if (isNewerRoom(room, this.room())) {
+      this.room.set(room);
+    }
   }
 
   private refreshQuietly(): void {

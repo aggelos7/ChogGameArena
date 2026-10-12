@@ -1,5 +1,20 @@
 import { TestBed } from '@angular/core/testing';
 import { ROOM_HUB_CONNECTION_FACTORY, RoomHubConnection, RoomLiveEvent, RoomLiveUpdates } from './room-live-updates';
+import { Room } from './rooms-api';
+
+const snapshot = (code: string, version: number): Room => ({
+  code,
+  matchId: '5f0c9a8e-3d4b-4c1a-9e2f-7a6b5c4d3e2f',
+  version,
+  gameType: 'chog-life',
+  status: 'Waiting',
+  minPlayers: 2,
+  capacity: 6,
+  turnNumber: 0,
+  turnEndsAt: null,
+  members: [],
+  state: null,
+});
 
 /** A hand-written stand-in for `HubConnection`: the spec settles its promises and fires its callbacks. */
 class FakeConnection implements RoomHubConnection {
@@ -52,8 +67,9 @@ class FakeConnection implements RoomHubConnection {
     await flush();
   }
 
-  async subscribed(): Promise<void> {
-    this.pendingInvocation().resolve(undefined);
+  /** The server accepts the subscription and answers with the room's current snapshot. */
+  async subscribed(version = 1): Promise<void> {
+    this.pendingInvocation().resolve(snapshot('K7QF3M', version));
     await flush();
   }
 
@@ -70,8 +86,8 @@ class FakeConnection implements RoomHubConnection {
     return pending;
   }
 
-  roomChanged(code: string): void {
-    (this.handlers.get('RoomChanged') as (code: string) => void)(code);
+  roomUpdated(room: Room): void {
+    (this.handlers.get('RoomUpdated') as (room: Room) => void)(room);
   }
 
   dropped(): void {
@@ -113,32 +129,38 @@ describe('RoomLiveUpdates', () => {
 
   const watch = (code = 'K7QF3M') => TestBed.inject(RoomLiveUpdates).watch(code).subscribe((event) => events.push(event));
   const statuses = () => events.flatMap((event) => (event.type === 'status' ? [event.status] : []));
+  const versions = () => events.flatMap((event) => (event.type === 'snapshot' ? [event.room.version] : []));
 
-  it('subscribes to the room once connected and passes on its change notices only', async () => {
+  it('subscribes once connected, then passes on the subscription’s snapshot and this room’s pushed ones only', async () => {
     watch();
     const connection = connections[0];
     expect(statuses()).toEqual(['connecting']);
 
     await connection.started();
     expect(connection.invocations).toEqual([['SubscribeRoom', 'K7QF3M']]);
-    await connection.subscribed();
-    expect(statuses()).toEqual(['connecting', 'live']);
+    await connection.subscribed(3);
+    expect(events).toEqual([
+      { type: 'status', status: 'connecting' },
+      { type: 'status', status: 'live' },
+      { type: 'snapshot', room: snapshot('K7QF3M', 3) },
+    ]);
 
-    connection.roomChanged('K7QF3M');
-    connection.roomChanged('ZZZZZZ');
-    expect(events.filter((event) => event.type === 'changed')).toHaveLength(1);
+    connection.roomUpdated(snapshot('K7QF3M', 4));
+    connection.roomUpdated(snapshot('ZZZZZZ', 5));
+    expect(versions()).toEqual([3, 4]);
   });
 
-  it('subscribes again after reconnecting', async () => {
+  it('subscribes again after reconnecting, which brings the snapshot missed meanwhile', async () => {
     watch();
     const connection = connections[0];
     await connection.started();
-    await connection.subscribed();
+    await connection.subscribed(1);
 
     connection.dropped();
     expect(statuses()).toEqual(['connecting', 'live', 'connecting']);
     await connection.reconnect();
-    await connection.subscribed();
+    await connection.subscribed(6);
+    expect(versions()).toEqual([1, 6]);
 
     expect(connection.invocations).toEqual([
       ['SubscribeRoom', 'K7QF3M'],
@@ -172,13 +194,14 @@ describe('RoomLiveUpdates', () => {
     await connection.subscribed();
 
     subscription.unsubscribe();
-    connection.roomChanged('K7QF3M');
+    connection.roomUpdated(snapshot('K7QF3M', 2));
     connection.close();
 
     expect(connection.stopped).toBe(1);
     expect(events).toEqual([
       { type: 'status', status: 'connecting' },
       { type: 'status', status: 'live' },
+      { type: 'snapshot', room: snapshot('K7QF3M', 1) },
     ]);
   });
 });
