@@ -552,5 +552,7 @@ public sealed class MatchCommandEndpointTests(MigratedPostgresDatabase database)
         }
 
         public JsonElement? TimeOutTurn(MatchTurnContext context) => null;
+
+        public JsonElement? ViewFor(MatchViewContext context) => context.State;
     }
 }

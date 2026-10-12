@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-025).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-026).
 
 ## Stories done
 
@@ -32,7 +32,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-022 | #103 | SignalR room hub: cookie-authenticated, membership checked before subscribing, leavers removed from groups; `RoomChanged` notices drive a live web lobby (DEC-024). |
 | STORY-023 | #105 | Match state machine: Waiting → Active → Completed/Abandoned, Waiting → Cancelled; an Active match blocks other rooms; leaving a started match is a forfeit; character snapshots stored on room members (DEC-025). |
 | STORY-024 | #107 | Match command engine: `POST /api/rooms/{code}/commands` with `actionId`, `matchId`, `expectedVersion`, `type` and `payload`; a room-wide version; retries replay their first result; stale commands are refused; per-game `IMatchRules`, none registered yet (DEC-026). |
-| STORY-025 | (this PR) | Turns and AFK timer: seats in join order (host first), only the current player acts (`not_your_turn`, `turn_expired`), rules end turns, an in-process scheduler times out overdue turns exactly once with the game's safe default, and 3 missed turns in a row forfeit (DEC-027). |
+| STORY-025 | #109 | Turns and AFK timer: seats in join order (host first), only the current player acts (`not_your_turn`, `turn_expired`), rules end turns, an in-process scheduler times out overdue turns exactly once with the game's safe default, and 3 missed turns in a row forfeit (DEC-027). |
+| STORY-026 | (this PR) | Realtime sync: the hub pushes each member their own versioned room snapshot (`RoomUpdated`), and `SubscribeRoom` returns the current one for resync. Clients keep the newest version. Snapshots carry the game state through `IMatchRules.ViewFor`, filtered per player (DEC-028). |
 
 ## Key architectural decisions
 
@@ -65,7 +66,10 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - The engine owns the turn: `GameRooms.CurrentPlayerId`, `TurnNumber`, `TurnEndsAt` and `TurnTimeout` (fixed per match at start); `RoomMembers.Seat` is the turn order (host first, then join order) and `MissedTurns` the AFK count.
   - Command checks: replay, status, forfeit, `expectedVersion`, then current player (`not_your_turn`) and deadline (`turn_expired`), then the rules. `MatchRuleDecision.EndsTurn` passes the turn on; `IMatchRules.TimeOutTurn` gives the safe default (null skips).
   - `TurnTimeoutWorker` (Api, `BackgroundService`) calls `TurnTimeoutService` every `Matches:TimeoutCheckInterval`; each overdue room is re-checked under its row lock, so a turn times out exactly once. `Matches:MaxMissedTurns` (3) misses in a row forfeit.
-- **Realtime:** one SignalR hub (`/api/hubs/rooms`, WebSockets only). It only says `RoomChanged(code)`; clients refetch the REST snapshot. Subscribing checks membership in the database; leavers are removed from the group via an in-memory connection registry (single instance). Hub calls have their own per-player rate limit (DEC-024).
+- **Realtime:** one SignalR hub (`/api/hubs/rooms`, WebSockets only).
+  - After each commit, `RoomNotifier` reads the room again and pushes every subscribed player still playing their own snapshot (`RoomUpdated`, the same `RoomResponse` as `GET`) (DEC-028). `SubscribeRoom` returns the current snapshot, which is how a client resyncs after a gap.
+  - Clients keep the highest `version` they've seen. Recipients come from the in-memory connection registry, not SignalR groups (single instance). Hub calls have their own per-player rate limit (DEC-024).
+  - Snapshots are built by `RoomSnapshots` (Api). The game state is only shown through `IMatchRules.ViewFor`; a game without rules never shows it.
 - **Rate limits:** a per-player fixed window for each feature area, configured in settings such as `Rooms:RequestsPerMinutePerPlayer`.
 - **Dependencies:** BouncyCastle (for keccak-256 and secp256k1) is the only approved crypto library. Wallets and NFTs use no SDKs. `@microsoft/signalr` (web) and `Microsoft.AspNetCore.SignalR.Client` (backend tests) are approved for realtime (DEC-024).
 
@@ -78,6 +82,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - External services (the chain, IPFS, the catalogue) are hand-written fakes inside the test classes; there are no mocking libraries.
   - Concurrency is tested with real parallel requests against Postgres. Those tests are run about 8 times in a row before a PR.
   - Each migration's check constraints get raw-SQL tests that try invalid rows. `RoomStatusOverride` forces a status together with the turn columns it needs.
+  - Sync tests (`RoomSyncTests`) use two live hub clients and a fake game with per-player secrets to show convergence, resync and private views.
   - Turn tests (`MatchTurnTests`) use a `ManualTimeProvider`, remove `TurnTimeoutWorker` and call `TurnTimeoutService` directly; one test keeps the worker to show it runs by itself.
   - CI checks that the EF model has no changes missing from a migration.
   - 3 live-chain tests are skipped unless explicitly enabled.
@@ -106,13 +111,14 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **No foreign key on `GameRooms.CurrentPlayerId`:** the domain keeps it a playing member; a composite FK to `RoomMembers` would create an insert cycle in EF.
 - **Matches started before STORY-023** have no character snapshots; the room shows their current Chog, and they can still be left. Migration `AddMatchLifecycle` reclassifies a started-then-cancelled room as `Abandoned`, so rolling it back and forward is lossless.
 - **Started rooms in the lobby UI:** the web shows "The game has started" and a Leave game button; there's no game screen yet.
-- **Lobby updates:** each `RoomChanged` notice costs every viewer one `GET`, which counts against the per-player room limit. Versioned snapshots come with STORY-026.
+- **Snapshot pushes read the room once per change:** with several quick changes each push reads the latest state, so clients may see a version skipped or the same version twice; that's harmless, since snapshots are complete.
+- **A waiting-room leaver's other tabs** aren't told they left; they show the lobby until reloaded (any action answers `room_not_found`).
 - **Live connections keep their identity:** a hub connection keeps the player it was opened with, even after sign-out or a wallet switch, until it reconnects. It only ever gets notices for rooms that player is in.
 - **Single instance realtime:** the connection registry is in memory; scale-out needs a backplane and shared tracking.
 - **Lobby display:** NFT Chogs show as `Chog #<id>` without an image.
 - **Start holds a lock during chain calls:** start runs up to six live ownership checks while holding the room's row lock. That's acceptable at this scale, but worth revisiting if the chain is slow.
 - **Duplicated code:** `FindCurrentPlayerAsync` is repeated in each endpoint class. (The room-lock query is now shared in `RoomLocks`.)
-- **Match state isn't sent to clients yet:** commands return versions only; filtered, versioned snapshots are STORY-026 (ENG-013 privacy).
+- **Commands return versions only:** the new state arrives as the pushed snapshot (or a `GET`).
 - **Action history grows per match:** `MatchActions` keeps every applied action; there's no clean-up yet (results and retention are STORY-028).
 - **Formatting:** Prettier isn't enforced; about 54 files differ from its formatting.
 - **npm:** npm 10.9 crashes on `npm install` of new packages. Use `npx npm@11 install …` (`npm ci` is fine).
@@ -127,8 +133,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-026 — Realtime state synchronization:** versioned snapshots/events and resync on a gap.
-2. **Then:** STORY-027 to 029, then E05 abilities (STORY-030 to 034).
+1. **STORY-027 — Disconnect and reconnect:** restore identity, membership, character and the current state; no extra turn for a disconnected player.
+2. **Then:** STORY-028 and 029, then E05 abilities (STORY-030 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

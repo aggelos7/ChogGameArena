@@ -8,7 +8,8 @@ namespace ChogGames.Core.Matches;
 /// rules of the match's game what the command does (STORY-024, DEC-026). Rules are deterministic over their inputs and
 /// must not keep state of their own; the match state they return is stored with the room. The engine owns the turn
 /// (STORY-025, DEC-027): only the current player's commands reach the rules, the rules say which accepted command ends
-/// the turn, and they give the safe default for a turn that runs out.
+/// the turn, and they give the safe default for a turn that runs out. Players only see the state through the rules'
+/// per-player view (STORY-026, DEC-028).
 /// </summary>
 public interface IMatchRules
 {
@@ -23,7 +24,18 @@ public interface IMatchRules
     /// The engine then ends the turn either way.
     /// </summary>
     JsonElement? TimeOutTurn(MatchTurnContext context);
+
+    /// <summary>
+    /// What one player may see of the game state in their snapshot (STORY-026, ENG-013, DEC-028): hidden hands, upcoming
+    /// cards and other players' private choices must be left out. Returns null to show the player nothing of it.
+    /// </summary>
+    JsonElement? ViewFor(MatchViewContext context);
 }
+
+/// <param name="Match">The match, read only, in any status; it may have ended.</param>
+/// <param name="PlayerId">The player the view is for: a member, possibly one who left the match.</param>
+/// <param name="State">The game's state; views are only asked for once there is one.</param>
+public sealed record MatchViewContext(GameRoom Match, Guid PlayerId, JsonElement State);
 
 /// <param name="Match">The active match, read only; <see cref="GameRoom.CurrentPlayerId"/> is the player whose turn ran out.</param>
 /// <param name="State">The game's state, or null before its first accepted command.</param>

@@ -8,7 +8,7 @@ import { Room, RoomMember } from '../../rooms/rooms-api';
 import { CATALOGUE } from '../../testing';
 import { RoomPage } from './room';
 
-/** Stands in for the hub connection: the spec pushes status changes and change notices. */
+/** Stands in for the hub connection: the spec pushes status changes and snapshots. */
 class FakeLiveUpdates {
   readonly events = new Subject<RoomLiveEvent>();
   readonly watched: string[] = [];
@@ -30,21 +30,28 @@ describe('Room page', () => {
       character: { kind: 'Standard', id: 'classic', name: 'Classic', color: '#5b2bd6' },
       ability: null,
       hasLeft: false,
+      isTurn: false,
       ...overrides,
     };
   }
 
   const room: Room = {
     code: 'K7QF3M',
+    matchId: '5f0c9a8e-3d4b-4c1a-9e2f-7a6b5c4d3e2f',
+    version: 1,
     gameType: 'chog-life',
     status: 'Waiting',
     minPlayers: 2,
     capacity: 6,
+    turnNumber: 0,
+    turnEndsAt: null,
     members: [
       member('Alice', { isHost: true }),
       member('Bob', { isYou: true, character: { kind: 'Standard', id: 'mint', name: 'Mint', color: '#1a7f5a' } }),
     ],
+    state: null,
   };
+  const withCarol = (version: number): Room => ({ ...room, version, members: [...room.members, member('Carol')] });
 
   /** Alice's view: she is the host. */
   const hostView = (overrides: Partial<Room> = {}, ready: [boolean, boolean] = [false, false]): Room => ({
@@ -122,10 +129,9 @@ describe('Room page', () => {
     expect(element().querySelector('.copy-status')?.textContent?.trim()).toBe('Link copied.');
   });
 
-  /** The server says the room changed; the page fetches it again. */
+  /** The server pushes the player's snapshot after a change. */
   function changed(body: Room) {
-    live.events.next({ type: 'changed' });
-    http.expectOne('/api/rooms/K7QF3M').flush(body);
+    live.events.next({ type: 'snapshot', room: body });
     fixture.detectChanges();
   }
 
@@ -137,17 +143,16 @@ describe('Room page', () => {
     expect(liveStatus()?.getAttribute('data-live')).toBe('connecting');
     expect(maybeButton('Refresh')).toBeUndefined();
 
-    changed({ ...room, members: [...room.members, member('Carol')] });
+    changed(withCarol(2));
 
     expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
   });
 
-  it('fetches what it missed each time it goes live', () => {
+  it('shows the snapshot it gets each time it goes live, without fetching', () => {
     load();
 
     live.events.next({ type: 'status', status: 'live' });
-    http.expectOne('/api/rooms/K7QF3M').flush({ ...room, members: [...room.members, member('Carol')] });
-    fixture.detectChanges();
+    changed(withCarol(4));
 
     expect(liveStatus()?.textContent?.trim()).toBe('Players appear and get ready here as it happens.');
     expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
@@ -157,28 +162,36 @@ describe('Room page', () => {
     expect(liveStatus()?.textContent?.trim()).toBe('Connecting for live updates…');
   });
 
-  it('shows only the newest room when changes arrive quickly', () => {
+  it('keeps the newest version when snapshots arrive out of order', () => {
     load();
 
-    live.events.next({ type: 'changed' });
-    live.events.next({ type: 'changed' });
-    const [older, newer] = http.match('/api/rooms/K7QF3M');
-    expect(older.cancelled).toBe(true);
-    newer.flush({ ...room, members: [...room.members, member('Carol')] });
-    fixture.detectChanges();
-
+    changed(withCarol(3));
+    changed({ ...room, version: 2 });
     expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
+
+    // A missed version doesn't matter: every snapshot is complete.
+    changed({ ...room, version: 7 });
+    expect(members()).toEqual(['Alice Host', 'Bob You']);
   });
 
-  it('keeps the room shown when a live re-fetch fails', () => {
+  it('ignores an answer older than a snapshot already pushed', () => {
     load();
 
-    live.events.next({ type: 'changed' });
-    http.expectOne('/api/rooms/K7QF3M').flush('down', { status: 503, statusText: 'Service Unavailable' });
+    button('I’m ready').click();
+    changed({ ...withCarol(3), members: [room.members[0], { ...room.members[1], isReady: true }, member('Carol')] });
+    http.expectOne('/api/rooms/K7QF3M/ready').flush({ ...room, version: 2, members: [room.members[0], { ...room.members[1], isReady: true }] });
     fixture.detectChanges();
-    changed({ ...room, members: [...room.members, member('Carol')] });
 
     expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
+    expect(column('[data-readiness]')).toEqual(['Not ready', 'Ready', 'Not ready']);
+  });
+
+  it('ignores a snapshot of another match', () => {
+    load();
+
+    changed({ ...withCarol(9), matchId: '00000000-0000-4000-8000-000000000000' });
+
+    expect(members()).toEqual(['Alice Host', 'Bob You']);
   });
 
   it('offers Refresh while live updates are off, which reloads and reconnects', () => {
@@ -189,7 +202,7 @@ describe('Room page', () => {
     expect(liveStatus()?.textContent?.trim()).toBe('Live updates are off: refresh to see who joined and who is ready.');
 
     button('Refresh').click();
-    http.expectOne('/api/rooms/K7QF3M').flush({ ...room, members: [...room.members, member('Carol')] });
+    http.expectOne('/api/rooms/K7QF3M').flush(withCarol(2));
     fixture.detectChanges();
 
     expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);

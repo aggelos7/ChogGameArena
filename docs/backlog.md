@@ -397,7 +397,7 @@
 
 #### STORY-026 — Realtime state synchronization
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Publish versioned snapshots/events and request fresh snapshot on gap.

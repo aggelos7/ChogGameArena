@@ -26,19 +26,37 @@ export interface RoomMember {
   ability: string | null;
   /** Left the started match: a forfeit (DEC-025). */
   hasLeft: boolean;
+  /** It is this member's turn in the active match (DEC-027). */
+  isTurn: boolean;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */
 export type RoomStatus = 'Waiting' | 'Active' | 'Completed' | 'Cancelled' | 'Abandoned';
 
-/** Mirrors `RoomResponse` from the `/api/rooms` endpoints. */
+/**
+ * Mirrors `RoomResponse`: one player's snapshot of the room, from the `/api/rooms` endpoints or pushed live (DEC-028).
+ * `version` is bumped by every change, so the snapshot with the highest version is the current one.
+ */
 export interface Room {
   code: string;
+  matchId: string;
+  version: number;
   gameType: string;
   status: RoomStatus;
   minPlayers: number;
   capacity: number;
+  /** The turn being played, from 1; 0 before the start. */
+  turnNumber: number;
+  /** When the current turn runs out (ISO 8601); null unless the match is active. */
+  turnEndsAt: string | null;
   members: RoomMember[];
+  /** What this player may see of the game's own state; null until the game has any. */
+  state: unknown;
+}
+
+/** Whether `next` is at least as recent as `current`, so it may replace it; snapshots of other rooms never are. */
+export function isNewerRoom(next: Room, current: Room | null): boolean {
+  return !current || (next.matchId === current.matchId && next.version >= current.version);
 }
 
 /** Stable `code` values of room errors (DEC-021). */
