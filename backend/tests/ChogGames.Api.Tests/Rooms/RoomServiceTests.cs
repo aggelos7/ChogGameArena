@@ -477,7 +477,13 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         DateTimeOffset? endedAt = ended ? clock.GetUtcNow() : null;
 
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE "GameRooms" SET "Status" = {status}, "StartedAt" = {startedAt}, "EndedAt" = {endedAt} WHERE "Id" = {room.Id}
+            UPDATE "GameRooms" SET "Status" = {status}, "StartedAt" = {startedAt}, "EndedAt" = {endedAt},
+                -- Turn columns that fit the status and start (DEC-027), so only the lifecycle times are under test.
+                "TurnTimeout" = CASE WHEN {started} THEN interval '20 seconds' END,
+                "TurnNumber" = CASE WHEN {started} THEN 1 ELSE 0 END,
+                "CurrentPlayerId" = CASE WHEN {status} = 'Active' THEN "HostPlayerId" END,
+                "TurnEndsAt" = CASE WHEN {status} = 'Active' THEN now() END
+            WHERE "Id" = {room.Id}
             """));
 
         Assert.Equal(("23514", constraint), (error.SqlState, error.ConstraintName));
@@ -497,7 +503,13 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         DateTimeOffset? endedAt = ended ? clock.GetUtcNow() : null;
 
         Assert.Equal(1, await db.Database.ExecuteSqlInterpolatedAsync($"""
-            UPDATE "GameRooms" SET "Status" = {status}, "StartedAt" = {startedAt}, "EndedAt" = {endedAt} WHERE "Id" = {room.Id}
+            UPDATE "GameRooms" SET "Status" = {status}, "StartedAt" = {startedAt}, "EndedAt" = {endedAt},
+                -- Turn columns that fit the status and start (DEC-027), so only the lifecycle times are under test.
+                "TurnTimeout" = CASE WHEN {started} THEN interval '20 seconds' END,
+                "TurnNumber" = CASE WHEN {started} THEN 1 ELSE 0 END,
+                "CurrentPlayerId" = CASE WHEN {status} = 'Active' THEN "HostPlayerId" END,
+                "TurnEndsAt" = CASE WHEN {status} = 'Active' THEN now() END
+            WHERE "Id" = {room.Id}
             """));
     }
 

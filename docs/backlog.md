@@ -384,7 +384,7 @@
 
 #### STORY-025 — Turn and AFK timer
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Server controls current player, configurable turn timeout and deterministic safe fallback.

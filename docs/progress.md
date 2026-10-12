@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-024).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-025).
 
 ## Stories done
 
@@ -31,7 +31,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-063 | #99 | Leave a waiting room; the host leaving cancels it for everyone (DEC-023). Added during STORY-021. |
 | STORY-022 | #103 | SignalR room hub: cookie-authenticated, membership checked before subscribing, leavers removed from groups; `RoomChanged` notices drive a live web lobby (DEC-024). |
 | STORY-023 | #105 | Match state machine: Waiting → Active → Completed/Abandoned, Waiting → Cancelled; an Active match blocks other rooms; leaving a started match is a forfeit; character snapshots stored on room members (DEC-025). |
-| STORY-024 | (this PR) | Match command engine: `POST /api/rooms/{code}/commands` with `actionId`, `matchId`, `expectedVersion`, `type` and `payload`; a room-wide version; retries replay their first result; stale commands are refused; per-game `IMatchRules`, none registered yet (DEC-026). |
+| STORY-024 | #107 | Match command engine: `POST /api/rooms/{code}/commands` with `actionId`, `matchId`, `expectedVersion`, `type` and `payload`; a room-wide version; retries replay their first result; stale commands are refused; per-game `IMatchRules`, none registered yet (DEC-026). |
+| STORY-025 | (this PR) | Turns and AFK timer: seats in join order (host first), only the current player acts (`not_your_turn`, `turn_expired`), rules end turns, an in-process scheduler times out overdue turns exactly once with the game's safe default, and 3 missed turns in a row forfeit (DEC-027). |
 
 ## Key architectural decisions
 
@@ -60,6 +61,10 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Match commands go over REST, not the hub. Each runs under the room's row lock: replay check, then status, forfeit and `expectedVersion`, then the game's `IMatchRules`.
   - `GameRooms.Version` is bumped by every room change and is also an EF concurrency token. Game state is an opaque JSON object in `GameRooms.State`; applied actions are in `MatchActions` (PK room + action id).
   - Refusals aren't recorded. No game registers rules yet, so every command is `unknown_command`. Tests use a fake counter game.
+- **Turns (DEC-027):**
+  - The engine owns the turn: `GameRooms.CurrentPlayerId`, `TurnNumber`, `TurnEndsAt` and `TurnTimeout` (fixed per match at start); `RoomMembers.Seat` is the turn order (host first, then join order) and `MissedTurns` the AFK count.
+  - Command checks: replay, status, forfeit, `expectedVersion`, then current player (`not_your_turn`) and deadline (`turn_expired`), then the rules. `MatchRuleDecision.EndsTurn` passes the turn on; `IMatchRules.TimeOutTurn` gives the safe default (null skips).
+  - `TurnTimeoutWorker` (Api, `BackgroundService`) calls `TurnTimeoutService` every `Matches:TimeoutCheckInterval`; each overdue room is re-checked under its row lock, so a turn times out exactly once. `Matches:MaxMissedTurns` (3) misses in a row forfeit.
 - **Realtime:** one SignalR hub (`/api/hubs/rooms`, WebSockets only). It only says `RoomChanged(code)`; clients refetch the REST snapshot. Subscribing checks membership in the database; leavers are removed from the group via an in-memory connection registry (single instance). Hub calls have their own per-player rate limit (DEC-024).
 - **Rate limits:** a per-player fixed window for each feature area, configured in settings such as `Rooms:RequestsPerMinutePerPlayer`.
 - **Dependencies:** BouncyCastle (for keccak-256 and secp256k1) is the only approved crypto library. Wallets and NFTs use no SDKs. `@microsoft/signalr` (web) and `Microsoft.AspNetCore.SignalR.Client` (backend tests) are approved for realtime (DEC-024).
@@ -72,7 +77,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Hub tests (`RoomHubTests`) connect over TestServer WebSockets with the session cookie copied from a client created with `HandleCookies = false`.
   - External services (the chain, IPFS, the catalogue) are hand-written fakes inside the test classes; there are no mocking libraries.
   - Concurrency is tested with real parallel requests against Postgres. Those tests are run about 8 times in a row before a PR.
-  - Each migration's check constraints get raw-SQL tests that try invalid rows.
+  - Each migration's check constraints get raw-SQL tests that try invalid rows. `RoomStatusOverride` forces a status together with the turn columns it needs.
+  - Turn tests (`MatchTurnTests`) use a `ManualTimeProvider`, remove `TurnTimeoutWorker` and call `TurnTimeoutService` directly; one test keeps the worker to show it runs by itself.
   - CI checks that the EF model has no changes missing from a migration.
   - 3 live-chain tests are skipped unless explicitly enabled.
 - **Web:** Vitest with `HttpTestingController`; specs drive the page through its rendered DOM.
@@ -94,7 +100,10 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 ## Known issues and tech debt
 
 - **Completing a match:** `GameRoom.Complete` exists but nothing calls it yet; game rules (Chog Life/Race) and the 20-minute cap (ENG-011) will. Results and stats are STORY-028.
-- **Stuck matches:** an `Active` match whose players all go silent stays Active and blocks them from other rooms until they leave it. AFK handling (STORY-025) and the time cap should end such matches.
+- **Out-of-turn actions:** only the current player can act. Reactions by other players (Chog Race, DEC-003) will need the rules to allow them.
+- **Turn scheduler is single instance:** like the hub registry, it runs in-process; scale-out needs one runner (e.g. an advisory lock).
+- **Dev log noise:** in Development, EF logs the overdue-turn query every second.
+- **No foreign key on `GameRooms.CurrentPlayerId`:** the domain keeps it a playing member; a composite FK to `RoomMembers` would create an insert cycle in EF.
 - **Matches started before STORY-023** have no character snapshots; the room shows their current Chog, and they can still be left. Migration `AddMatchLifecycle` reclassifies a started-then-cancelled room as `Abandoned`, so rolling it back and forward is lossless.
 - **Started rooms in the lobby UI:** the web shows "The game has started" and a Leave game button; there's no game screen yet.
 - **Lobby updates:** each `RoomChanged` notice costs every viewer one `GET`, which counts against the per-player room limit. Versioned snapshots come with STORY-026.
@@ -118,8 +127,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-025 — Turn and AFK timer:** the server controls the current player, a configurable turn timeout and a deterministic fallback.
-2. **Then:** STORY-026 to 029, then E05 abilities (STORY-030 to 034).
+1. **STORY-026 — Realtime state synchronization:** versioned snapshots/events and resync on a gap.
+2. **Then:** STORY-027 to 029, then E05 abilities (STORY-030 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

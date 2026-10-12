@@ -188,6 +188,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("CurrentPlayerId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("EndedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -213,6 +216,15 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<DateTimeOffset?>("TurnEndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TurnNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeSpan?>("TurnTimeout")
+                        .HasColumnType("interval");
+
                     b.Property<long>("Version")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint");
@@ -228,11 +240,16 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("\"Status\" = 'Waiting'");
 
+                    b.HasIndex("TurnEndsAt")
+                        .HasFilter("\"TurnEndsAt\" IS NOT NULL");
+
                     b.ToTable("GameRooms", null, t =>
                         {
                             t.HasCheckConstraint("CK_GameRooms_Capacity", "\"Capacity\" BETWEEN 2 AND 6");
 
                             t.HasCheckConstraint("CK_GameRooms_Code_Format", "\"Code\" ~ '^[2-9A-HJKMNP-Z]{6}$'");
+
+                            t.HasCheckConstraint("CK_GameRooms_CurrentTurn", "(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> 'Active') AND (\"TurnEndsAt\" IS NULL) = (\"CurrentPlayerId\" IS NULL)");
 
                             t.HasCheckConstraint("CK_GameRooms_EndedAt", "(\"EndedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Active'))");
 
@@ -243,6 +260,10 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_GameRooms_State", "\"State\" IS NULL OR (jsonb_typeof(\"State\") = 'object' AND \"StartedAt\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_GameRooms_Status", "\"Status\" IN ('Waiting', 'Active', 'Completed', 'Cancelled', 'Abandoned')");
+
+                            t.HasCheckConstraint("CK_GameRooms_TurnNumber", "\"TurnNumber\" >= 0 AND (\"TurnNumber\" = 0) = (\"StartedAt\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_GameRooms_TurnTimeout", "(\"TurnTimeout\" IS NULL) = (\"StartedAt\" IS NULL) AND (\"TurnTimeout\" IS NULL OR \"TurnTimeout\" > interval '0')");
 
                             t.HasCheckConstraint("CK_GameRooms_Version", "\"Version\" >= 0");
                         });
@@ -265,6 +286,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("LeftAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("MissedTurns")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ReadyCharacterId")
                         .HasMaxLength(78)
                         .HasColumnType("character varying(78)");
@@ -273,15 +297,26 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<int?>("Seat")
+                        .HasColumnType("integer");
+
                     b.HasKey("RoomId", "PlayerId");
 
                     b.HasIndex("PlayerId");
+
+                    b.HasIndex("RoomId", "Seat")
+                        .IsUnique()
+                        .HasFilter("\"Seat\" IS NOT NULL");
 
                     b.ToTable("RoomMembers", null, t =>
                         {
                             t.HasCheckConstraint("CK_RoomMembers_Character", "\"Character\" IS NULL OR jsonb_typeof(\"Character\") = 'object'");
 
+                            t.HasCheckConstraint("CK_RoomMembers_MissedTurns", "\"MissedTurns\" >= 0");
+
                             t.HasCheckConstraint("CK_RoomMembers_Ready", "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))");
+
+                            t.HasCheckConstraint("CK_RoomMembers_Seat", "\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND 6");
                         });
                 });
 
