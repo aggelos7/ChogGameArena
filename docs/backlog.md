@@ -345,7 +345,7 @@
 
 #### STORY-022 — SignalR auth and groups
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Authenticate hub connections and authorize room membership before subscription.

@@ -2,9 +2,22 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { Subject } from 'rxjs';
+import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { Room, RoomMember } from '../../rooms/rooms-api';
 import { CATALOGUE } from '../../testing';
 import { RoomPage } from './room';
+
+/** Stands in for the hub connection: the spec pushes status changes and change notices. */
+class FakeLiveUpdates {
+  readonly events = new Subject<RoomLiveEvent>();
+  readonly watched: string[] = [];
+
+  watch(code: string) {
+    this.watched.push(code);
+    return this.events;
+  }
+}
 
 describe('Room page', () => {
   function member(displayName: string, overrides: Partial<RoomMember> = {}): RoomMember {
@@ -44,11 +57,18 @@ describe('Room page', () => {
 
   let fixture: ComponentFixture<RoomPage>;
   let http: HttpTestingController;
+  let live: FakeLiveUpdates;
 
   beforeEach(() => {
+    live = new FakeLiveUpdates();
     TestBed.configureTestingModule({
       imports: [RoomPage],
-      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: RoomLiveUpdates, useValue: live },
+      ],
     });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(RoomPage);
@@ -101,17 +121,87 @@ describe('Room page', () => {
     expect(element().querySelector('.copy-status')?.textContent?.trim()).toBe('Link copied.');
   });
 
-  it('refreshes to show players who joined', () => {
+  /** The server says the room changed; the page fetches it again. */
+  function changed(body: Room) {
+    live.events.next({ type: 'changed' });
+    http.expectOne('/api/rooms/K7QF3M').flush(body);
+    fixture.detectChanges();
+  }
+
+  const liveStatus = () => element().querySelector('[data-live]');
+
+  it('follows the room live and shows players who joined without a refresh', () => {
+    load();
+    expect(live.watched).toEqual(['K7QF3M']);
+    expect(liveStatus()?.getAttribute('data-live')).toBe('connecting');
+    expect(maybeButton('Refresh')).toBeUndefined();
+
+    changed({ ...room, members: [...room.members, member('Carol')] });
+
+    expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
+  });
+
+  it('fetches what it missed each time it goes live', () => {
     load();
 
-    button('Refresh').click();
-    http.expectOne('/api/rooms/K7QF3M').flush({
-      ...room,
-      members: [...room.members, member('Carol')],
-    });
+    live.events.next({ type: 'status', status: 'live' });
+    http.expectOne('/api/rooms/K7QF3M').flush({ ...room, members: [...room.members, member('Carol')] });
+    fixture.detectChanges();
+
+    expect(liveStatus()?.textContent?.trim()).toBe('Players appear and get ready here as it happens.');
+    expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
+
+    live.events.next({ type: 'status', status: 'connecting' });
+    fixture.detectChanges();
+    expect(liveStatus()?.textContent?.trim()).toBe('Connecting for live updates…');
+  });
+
+  it('shows only the newest room when changes arrive quickly', () => {
+    load();
+
+    live.events.next({ type: 'changed' });
+    live.events.next({ type: 'changed' });
+    const [older, newer] = http.match('/api/rooms/K7QF3M');
+    expect(older.cancelled).toBe(true);
+    newer.flush({ ...room, members: [...room.members, member('Carol')] });
     fixture.detectChanges();
 
     expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
+  });
+
+  it('keeps the room shown when a live re-fetch fails', () => {
+    load();
+
+    live.events.next({ type: 'changed' });
+    http.expectOne('/api/rooms/K7QF3M').flush('down', { status: 503, statusText: 'Service Unavailable' });
+    fixture.detectChanges();
+    changed({ ...room, members: [...room.members, member('Carol')] });
+
+    expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
+  });
+
+  it('offers Refresh while live updates are off, which reloads and reconnects', () => {
+    load();
+
+    live.events.next({ type: 'status', status: 'offline' });
+    fixture.detectChanges();
+    expect(liveStatus()?.textContent?.trim()).toBe('Live updates are off: refresh to see who joined and who is ready.');
+
+    button('Refresh').click();
+    http.expectOne('/api/rooms/K7QF3M').flush({ ...room, members: [...room.members, member('Carol')] });
+    fixture.detectChanges();
+
+    expect(members()).toEqual(['Alice Host', 'Bob You', 'Carol']);
+    expect(live.watched).toEqual(['K7QF3M', 'K7QF3M']);
+  });
+
+  it('stops following the room when the page closes', () => {
+    load();
+    expect(live.events.observed).toBe(true);
+
+    fixture.destroy();
+
+    expect(live.events.observed).toBe(false);
   });
 
   it('tells a non-member the room is not theirs to see', () => {
@@ -162,17 +252,13 @@ describe('Room page', () => {
     expect(maybeButton('Start game')).toBeUndefined();
     expect(element().textContent).toContain('The host starts the game when everyone is ready.');
 
-    button('Refresh').click();
-    http.expectOne('/api/rooms/K7QF3M').flush(hostView({}, [true, false]));
-    fixture.detectChanges();
+    changed(hostView({}, [true, false]));
     expect(button('Start game').disabled).toBe(true);
     expect(element().querySelector('[data-start-hint]')?.textContent?.trim()).toBe(
       'Starts with 2–6 players, all ready, including you.',
     );
 
-    button('Refresh').click();
-    http.expectOne('/api/rooms/K7QF3M').flush(hostView({}, [true, true]));
-    fixture.detectChanges();
+    changed(hostView({}, [true, true]));
     expect(button('Start game').disabled).toBe(false);
   });
 

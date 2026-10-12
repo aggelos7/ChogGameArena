@@ -4,6 +4,7 @@ using ChogGames.Api.Characters;
 using ChogGames.Api.Health;
 using ChogGames.Api.Identity;
 using ChogGames.Api.Profile;
+using ChogGames.Api.Realtime;
 using ChogGames.Api.Rooms;
 using ChogGames.Api.Wallet;
 using ChogGames.Infrastructure.Configuration;
@@ -17,6 +18,7 @@ builder.Services.AddWalletChain(builder.Configuration);
 builder.Services.AddWalletSignIn();
 builder.Services.AddCharacters();
 builder.Services.AddRooms(builder.Configuration);
+builder.Services.AddRealtime();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
@@ -35,6 +37,7 @@ app.MapWalletEndpoints();
 app.MapWalletSignInEndpoints();
 app.MapCharacterEndpoints();
 app.MapRoomEndpoints();
+app.MapRealtimeEndpoints();
 
 app.Run();
 

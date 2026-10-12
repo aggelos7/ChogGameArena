@@ -73,4 +73,11 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Changing Chog:** ready counts only for the Chog selected when marking ready, so choosing another Chog makes the player not ready. Joins and leaves don't change anyone else's ready status.
   - **Errors:** `not_host` (403), `not_enough_players`, `players_not_ready`, `character_unavailable` (409), `ownership_unavailable` (503), plus the room codes of DEC-021.
 - DEC-023 (2026-10-12, product owner): Leaving a waiting room is STORY-063. A member who leaves frees their seat and their one open room. A host who leaves cancels the room for everyone; hosting is not passed on. Leaving an active match is decided with STORY-023/025/027.
+- DEC-024 (2026-10-12, STORY-022 — confirmed by product owner): Live room updates.
+  - **Hub:** one SignalR hub at `/api/hubs/rooms`, WebSockets only, authenticated by the session cookie. A connection subscribes to a room only after the server checks membership; unknown codes and rooms the caller isn't in both fail with `room_not_found`. Players who leave are taken out of the room's group, so messages reach members only.
+  - **Payload:** the server sends only `RoomChanged(code)`; clients fetch `GET /api/rooms/{code}`, which stays the one source of room state. Versioned snapshots and resync come with STORY-026.
+  - **Commands:** room changes stay REST endpoints; the hub offers no game commands until STORY-024.
+  - **Web:** the lobby follows the room live; Refresh is offered only while live updates are down.
+  - **Dependencies:** `@microsoft/signalr` (web, pinned exactly; its Node-only transitive packages are not bundled) and `Microsoft.AspNetCore.SignalR.Client` (backend tests only) are approved.
+  - **Scale:** subscriptions are tracked in memory, so one API instance; several need a backplane and shared tracking (ADR-010).
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.

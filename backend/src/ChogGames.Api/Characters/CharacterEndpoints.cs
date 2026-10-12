@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
+using ChogGames.Api.Realtime;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
+using ChogGames.Core.Rooms;
 using ChogGames.Core.Wallets;
 using ChogGames.Infrastructure.Nfts;
 using ChogGames.Infrastructure.Persistence;
@@ -105,7 +107,12 @@ public static class CharacterEndpoints
     }
 
     private static async Task<Results<Ok<SelectedCharacterResponse>, ValidationProblem, NotFound, ProblemHttpResult>> SelectCharacterAsync(
-        SelectCharacterRequest? request, ClaimsPrincipal user, ChogGamesDbContext db, INftProvider nfts, CancellationToken cancellationToken)
+        SelectCharacterRequest? request,
+        ClaimsPrincipal user,
+        ChogGamesDbContext db,
+        INftProvider nfts,
+        RoomNotifier notifier,
+        CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -161,6 +168,17 @@ public static class CharacterEndpoints
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        // The lobby shows the new Chog, and a ready member is no longer ready with it (DEC-022).
+        var openRoomCode = await db.GameRooms.AsNoTracking()
+            .Where(r => r.Status == RoomStatus.Waiting && r.Members.Any(m => m.PlayerId == player.Id))
+            .Select(r => r.Code)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (openRoomCode is not null)
+        {
+            await notifier.RoomChangedAsync(openRoomCode);
+        }
+
         return TypedResults.Ok(new SelectedCharacterResponse(player.SelectedCharacterKind, player.SelectedCharacterId));
     }
 

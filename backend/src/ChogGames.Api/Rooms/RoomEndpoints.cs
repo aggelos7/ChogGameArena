@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
+using ChogGames.Api.Realtime;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Persistence;
@@ -14,7 +15,8 @@ namespace ChogGames.Api.Rooms;
 /// Private rooms (STORY-020, ENG-001): create a room for an enabled game, join one by its code (typed or from an invite
 /// link) and read a room you are in. In the lobby (STORY-021, ENG-002) members mark ready and the host starts;
 /// members may leave a waiting room, and the host leaving cancels it (STORY-063).
-/// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022).
+/// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022). Every committed change
+/// is announced to the room's subscribed members over SignalR (STORY-022).
 /// </summary>
 public static class RoomEndpoints
 {
@@ -103,7 +105,7 @@ public static class RoomEndpoints
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> JoinRoomAsync(
-        string code, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, CancellationToken cancellationToken)
+        string code, ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, RoomNotifier notifier, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -120,6 +122,11 @@ public static class RoomEndpoints
         if (result.Room is not { } room)
         {
             return Failure(result);
+        }
+
+        if (result.Outcome == RoomOutcome.Joined)
+        {
+            await notifier.RoomChangedAsync(room.Code);
         }
 
         return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
@@ -145,7 +152,13 @@ public static class RoomEndpoints
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, ValidationProblem, NotFound>> SetReadyAsync(
-        string code, SetReadyRequest? request, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, CancellationToken cancellationToken)
+        string code,
+        SetReadyRequest? request,
+        ClaimsPrincipal user,
+        ChogGamesDbContext db,
+        LobbyService lobby,
+        RoomNotifier notifier,
+        CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -169,11 +182,13 @@ public static class RoomEndpoints
             return Failure(result);
         }
 
+        await notifier.RoomChangedAsync(room.Code);
+
         return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> StartRoomAsync(
-        string code, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, CancellationToken cancellationToken)
+        string code, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, RoomNotifier notifier, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -187,16 +202,24 @@ public static class RoomEndpoints
         }
 
         var result = await lobby.StartAsync(player, roomCode, cancellationToken);
+        if (result.Outcome == RoomOutcome.CharacterUnavailable)
+        {
+            // Members whose NFT left their wallet were set back to not ready.
+            await notifier.RoomChangedAsync(roomCode.Value);
+        }
+
         if (result.Room is not { } room)
         {
             return Failure(result);
         }
 
+        await notifier.RoomChangedAsync(room.Code);
+
         return TypedResults.Ok(await ToResponseAsync(room, player, db, cancellationToken));
     }
 
     private static async Task<Results<NoContent, ProblemHttpResult, NotFound>> LeaveRoomAsync(
-        string code, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, CancellationToken cancellationToken)
+        string code, ClaimsPrincipal user, ChogGamesDbContext db, LobbyService lobby, RoomNotifier notifier, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         if (player is null)
@@ -210,7 +233,14 @@ public static class RoomEndpoints
         }
 
         var result = await lobby.LeaveAsync(player, roomCode, cancellationToken);
-        return result.Succeeded ? TypedResults.NoContent() : Failure(result);
+        if (result.Room is not { } room)
+        {
+            return Failure(result);
+        }
+
+        // A host who leaves stays listed in the cancelled room; a member who leaves is gone from it.
+        await notifier.RoomChangedAsync(room.Code, room.IsMember(player.Id) ? null : player.Id);
+        return TypedResults.NoContent();
     }
 
     private static ProblemHttpResult Failure(RoomResult result)
@@ -298,6 +328,9 @@ public sealed class RoomOptions
 {
     public const string SectionName = "Rooms";
 
-    /// <summary>Room requests (create, join, read, ready, start, leave) per player per minute.</summary>
+    /// <summary>
+    /// Room requests (create, join, read, ready, start, leave, opening a live connection) per player per minute; calls
+    /// over a live connection have their own budget of the same size.
+    /// </summary>
     public int RequestsPerMinutePerPlayer { get; set; } = 60;
 }
