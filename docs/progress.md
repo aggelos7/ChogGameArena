@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-028).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-13 (STORY-029).
 
 ## Stories done
 
@@ -35,7 +35,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-025 | #109 | Turns and AFK timer: seats in join order (host first), only the current player acts (`not_your_turn`, `turn_expired`), rules end turns, an in-process scheduler times out overdue turns exactly once with the game's safe default, and 3 missed turns in a row forfeit (DEC-027). |
 | STORY-026 | #111 | Realtime sync: the hub pushes each member their own versioned room snapshot (`RoomUpdated`), and `SubscribeRoom` returns the current one for resync. Clients keep the newest version. Snapshots carry the game state through `IMatchRules.ViewFor`, filtered per player (DEC-028). |
 | STORY-027 | #113 | Reconnect: `GET /api/rooms/current` finds the player's open room and a shell banner leads back to it; the web client reconnects forever with backoff, at once when back online or the tab is shown, and resyncs by subscribing. Being away never pauses the turn timer or earns a turn (DEC-029). |
-| STORY-028 | (this PR) | Results and restarts: rules finish a match with standings, ranks stored once on the members with the move to Completed, stats updated in the same transaction (completed matches only, leavers count as played); on startup active matches resume with a full new turn and a bumped version (DEC-030). |
+| STORY-028 | #115 | Results and restarts: rules finish a match with standings, ranks stored once on the members with the move to Completed, stats updated in the same transaction (completed matches only, leavers count as played); on startup active matches resume with a full new turn and a bumped version (DEC-030). |
+| STORY-029 | (this PR) | Randomness and security: `IRandomSource` (Core) reaches the rules in their command and timeout contexts, `SecureRandomSource` in production; seats are drawn in a secure random order at start; tests show forged rolls and player ids are ignored, retries can't reroll, and unauthorized room/turn/ability commands change nothing and draw nothing (DEC-031). |
 
 ## Key architectural decisions
 
@@ -65,13 +66,14 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - `GameRooms.Version` is bumped by every room change and is also an EF concurrency token. Game state is an opaque JSON object in `GameRooms.State`; applied actions are in `MatchActions` (PK room + action id).
   - Refusals aren't recorded. No game registers rules yet, so every command is `unknown_command`. Tests use a fake counter game.
 - **Turns (DEC-027):**
-  - The engine owns the turn: `GameRooms.CurrentPlayerId`, `TurnNumber`, `TurnEndsAt` and `TurnTimeout` (fixed per match at start); `RoomMembers.Seat` is the turn order (host first, then join order) and `MissedTurns` the AFK count.
+  - The engine owns the turn: `GameRooms.CurrentPlayerId`, `TurnNumber`, `TurnEndsAt` and `TurnTimeout` (fixed per match at start); `RoomMembers.Seat` is the turn order (secure random since DEC-031) and `MissedTurns` the AFK count.
   - Command checks: replay, status, forfeit, `expectedVersion`, then current player (`not_your_turn`) and deadline (`turn_expired`), then the rules. `MatchRuleDecision.EndsTurn` passes the turn on; `IMatchRules.TimeOutTurn` gives the safe default (null skips).
   - `TurnTimeoutWorker` (Api, `BackgroundService`) calls `TurnTimeoutService` every `Matches:TimeoutCheckInterval`; each overdue room is re-checked under its row lock, so a turn times out exactly once. `Matches:MaxMissedTurns` (3) misses in a row forfeit.
 - **Results (DEC-030):**
   - `MatchRuleDecision.Finish(state, standings)` ends the match: a rank for every player still playing (competition ranks, ties share). `GameRoom` checks them, moves to Completed and stores `RoomMember.Rank`; leavers rank after, the latest to leave highest. There is no results table.
   - `MatchResults.RecordStatsAsync` adds `GamesPlayed` for every member and `Wins` for rank 1, with atomic `ExecuteUpdate` after locking the players in id order, in the command's transaction. Abandoned matches change nothing.
   - Restart: `MatchRecoveryStartup` (an `IHostedService` registered before `TurnTimeoutWorker`) runs `MatchRecoveryService` before requests are served; each active match gets `TurnEndsAt = now + TurnTimeout` and a version bump, under its row lock.
+- **Randomness (DEC-031):** all chance comes from `IRandomSource` (Core): `SecureRandomSource` (Infrastructure, `RandomNumberGenerator`) is a singleton in production, and rules get it as `MatchCommandContext.Random` / `MatchTurnContext.Random`. Payloads carry choices only; outcomes in them are ignored. `RandomSourceExtensions.Shuffle` is Fisher–Yates.
 - **Realtime:** one SignalR hub (`/api/hubs/rooms`, WebSockets only).
   - After each commit, `RoomNotifier` reads the room again and pushes every subscribed player still playing their own snapshot (`RoomUpdated`, the same `RoomResponse` as `GET`) (DEC-028). `SubscribeRoom` returns the current snapshot, which is how a client resyncs after a gap.
   - Clients keep the highest `version` they've seen. Recipients come from the in-memory connection registry, not SignalR groups (single instance). Hub calls have their own per-player rate limit (DEC-024).
@@ -92,6 +94,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Result tests (`MatchResultTests`) model a restart by disposing the `ApiFactory` and starting another on the same database; clients carry only the session cookie across.
   - Reconnect tests (`ReconnectTests`) model a browser refresh as a new client with only the session cookie, and drive turn timeouts by calling `TurnTimeoutService` directly.
   - Sync tests (`RoomSyncTests`) use two live hub clients and a fake game with per-player secrets to show convergence, resync and private views.
+  - Chance is scripted: `ScriptedRandomSource` (in Core.Tests and Api.Tests) returns queued values, then the highest allowed, which keeps a shuffle's order. `ApiFactory` registers it by default, so seats stay in join order (host first) unless a test scripts otherwise.
+  - Security tests (`MatchSecurityTests`) use a fake dice game: forged rolls and player ids are ignored, retries don't reroll, and every unauthorized command (outsider, other match, not started, not your turn, forfeited, expired, stale, closed; for `ROLL` and `USE_ABILITY`) changes nothing, records nothing, draws nothing and never reaches the rules.
   - Turn tests (`MatchTurnTests`) use a `ManualTimeProvider`, remove `TurnTimeoutWorker` and call `TurnTimeoutService` directly; one test keeps the worker to show it runs by itself.
   - CI checks that the EF model has no changes missing from a migration.
   - 3 live-chain tests are skipped unless explicitly enabled.
@@ -146,8 +150,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-029 — Randomness and security tests.**
-2. **Then:** E05 abilities (STORY-030 to 034).
+1. **STORY-030 — Define ability catalog and execution contract** (E05 abilities, STORY-030 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

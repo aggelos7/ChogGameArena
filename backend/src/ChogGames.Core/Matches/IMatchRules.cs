@@ -10,7 +10,9 @@ namespace ChogGames.Core.Matches;
 /// (STORY-025, DEC-027): only the current player's commands reach the rules, the rules say which accepted command ends
 /// the turn, and they give the safe default for a turn that runs out. Players only see the state through the rules'
 /// per-player view (STORY-026, DEC-028). An accepted command may finish the match with the players' standings
-/// (STORY-028, DEC-030).
+/// (STORY-028, DEC-030). Chance comes only from the context's <see cref="IRandomSource"/> (STORY-029, ENG-008, DEC-031):
+/// rules draw every die, card, event and target from it and never take an outcome from the payload, which carries only
+/// the player's choices.
 /// </summary>
 public interface IMatchRules
 {
@@ -40,12 +42,16 @@ public sealed record MatchViewContext(GameRoom Match, Guid PlayerId, JsonElement
 
 /// <param name="Match">The active match, read only; <see cref="GameRoom.CurrentPlayerId"/> is the player whose turn ran out.</param>
 /// <param name="State">The game's state, or null before its first accepted command.</param>
-public sealed record MatchTurnContext(GameRoom Match, JsonElement? State);
+/// <param name="Random">The server's source of chance, for a safe default that needs a draw.</param>
+public sealed record MatchTurnContext(GameRoom Match, JsonElement? State, IRandomSource Random);
 
 /// <param name="Match">The active match, read only; its members are the players.</param>
 /// <param name="PlayerId">The session's player, whose turn it is.</param>
+/// <param name="Payload">The player's choices only; anything in it that claims an outcome, such as a roll, is ignored.</param>
 /// <param name="State">The game's state, or null before its first accepted command.</param>
-public sealed record MatchCommandContext(GameRoom Match, Guid PlayerId, string Type, JsonElement Payload, JsonElement? State);
+/// <param name="Random">The server's source of chance: the only place rolls, draws and random targets come from.</param>
+public sealed record MatchCommandContext(
+    GameRoom Match, Guid PlayerId, string Type, JsonElement Payload, JsonElement? State, IRandomSource Random);
 
 public enum MatchRuleOutcome
 {
