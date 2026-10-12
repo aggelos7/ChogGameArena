@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-023).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-12 (STORY-024).
 
 ## Stories done
 
@@ -30,7 +30,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-021 | #97 | Lobby: ready with the chosen Chog, host start with a live NFT check, room becomes Active (DEC-022). |
 | STORY-063 | #99 | Leave a waiting room; the host leaving cancels it for everyone (DEC-023). Added during STORY-021. |
 | STORY-022 | #103 | SignalR room hub: cookie-authenticated, membership checked before subscribing, leavers removed from groups; `RoomChanged` notices drive a live web lobby (DEC-024). |
-| STORY-023 | (this PR) | Match state machine: Waiting → Active → Completed/Abandoned, Waiting → Cancelled; an Active match blocks other rooms; leaving a started match is a forfeit; character snapshots stored on room members (DEC-025). |
+| STORY-023 | #105 | Match state machine: Waiting → Active → Completed/Abandoned, Waiting → Cancelled; an Active match blocks other rooms; leaving a started match is a forfeit; character snapshots stored on room members (DEC-025). |
+| STORY-024 | (this PR) | Match command engine: `POST /api/rooms/{code}/commands` with `actionId`, `matchId`, `expectedVersion`, `type` and `payload`; a room-wide version; retries replay their first result; stale commands are refused; per-game `IMatchRules`, none registered yet (DEC-026). |
 
 ## Key architectural decisions
 
@@ -55,6 +56,10 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Errors:**
   - Room APIs return problem details with a stable `code` such as `room_full` or `not_host`; clients rely on the code, never the text.
   - Unknown codes and rooms the caller isn't in both return `404 room_not_found`, so codes can't be probed.
+- **Commands (DEC-026):**
+  - Match commands go over REST, not the hub. Each runs under the room's row lock: replay check, then status, forfeit and `expectedVersion`, then the game's `IMatchRules`.
+  - `GameRooms.Version` is bumped by every room change and is also an EF concurrency token. Game state is an opaque JSON object in `GameRooms.State`; applied actions are in `MatchActions` (PK room + action id).
+  - Refusals aren't recorded. No game registers rules yet, so every command is `unknown_command`. Tests use a fake counter game.
 - **Realtime:** one SignalR hub (`/api/hubs/rooms`, WebSockets only). It only says `RoomChanged(code)`; clients refetch the REST snapshot. Subscribing checks membership in the database; leavers are removed from the group via an in-memory connection registry (single instance). Hub calls have their own per-player rate limit (DEC-024).
 - **Rate limits:** a per-player fixed window for each feature area, configured in settings such as `Rooms:RequestsPerMinutePerPlayer`.
 - **Dependencies:** BouncyCastle (for keccak-256 and secp256k1) is the only approved crypto library. Wallets and NFTs use no SDKs. `@microsoft/signalr` (web) and `Microsoft.AspNetCore.SignalR.Client` (backend tests) are approved for realtime (DEC-024).
@@ -97,9 +102,9 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Single instance realtime:** the connection registry is in memory; scale-out needs a backplane and shared tracking.
 - **Lobby display:** NFT Chogs show as `Chog #<id>` without an image.
 - **Start holds a lock during chain calls:** start runs up to six live ownership checks while holding the room's row lock. That's acceptable at this scale, but worth revisiting if the chain is slow.
-- **Duplicated code:**
-  - `FindCurrentPlayerAsync` is repeated in each endpoint class.
-  - The room-lock query is repeated in `RoomService` and `LobbyService`.
+- **Duplicated code:** `FindCurrentPlayerAsync` is repeated in each endpoint class. (The room-lock query is now shared in `RoomLocks`.)
+- **Match state isn't sent to clients yet:** commands return versions only; filtered, versioned snapshots are STORY-026 (ENG-013 privacy).
+- **Action history grows per match:** `MatchActions` keeps every applied action; there's no clean-up yet (results and retention are STORY-028).
 - **Formatting:** Prettier isn't enforced; about 54 files differ from its formatting.
 - **npm:** npm 10.9 crashes on `npm install` of new packages. Use `npx npm@11 install …` (`npm ci` is fine).
 - **Mock NFT ownership** isn't exclusive: every wallet that isn't a fixture sees the same tokens.
@@ -113,8 +118,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-024 — Command envelope and idempotency:** `actionId`, `matchId`, `expectedVersion` and payload; reject duplicates and stale commands.
-2. **Then:** STORY-025 (turn and AFK timer), STORY-026 to 029, then E05 abilities (STORY-030 to 034).
+1. **STORY-025 — Turn and AFK timer:** the server controls the current player, a configurable turn timeout and a deterministic fallback.
+2. **Then:** STORY-026 to 029, then E05 abilities (STORY-030 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

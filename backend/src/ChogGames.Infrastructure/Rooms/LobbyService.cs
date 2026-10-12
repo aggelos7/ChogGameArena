@@ -22,7 +22,7 @@ public sealed class LobbyService(
     public async Task<RoomResult> SetReadyAsync(Player player, RoomCode code, bool ready, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var room = await LockRoomAsync(code, cancellationToken);
+        var room = await db.LockRoomAsync(code, cancellationToken);
         if (room is null || !room.IsMember(player.Id))
         {
             return new RoomResult(RoomOutcome.RoomNotFound);
@@ -57,7 +57,7 @@ public sealed class LobbyService(
     public async Task<RoomResult> LeaveAsync(Player player, RoomCode code, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var room = await LockRoomAsync(code, cancellationToken);
+        var room = await db.LockRoomAsync(code, cancellationToken);
         if (room is null || !room.IsMember(player.Id))
         {
             return new RoomResult(RoomOutcome.RoomNotFound);
@@ -82,7 +82,7 @@ public sealed class LobbyService(
     public async Task<RoomResult> StartAsync(Player caller, RoomCode code, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var room = await LockRoomAsync(code, cancellationToken);
+        var room = await db.LockRoomAsync(code, cancellationToken);
         if (room is null || !room.IsMember(caller.Id))
         {
             return new RoomResult(RoomOutcome.RoomNotFound);
@@ -156,14 +156,6 @@ public sealed class LobbyService(
         RoomStatus.Active => new RoomResult(RoomOutcome.RoomStarted),
         _ => new RoomResult(RoomOutcome.RoomClosed),
     };
-
-    private async Task<GameRoom?> LockRoomAsync(RoomCode code, CancellationToken cancellationToken)
-    {
-        var roomIds = await db.Database
-            .SqlQuery<Guid>($"""SELECT "Id" AS "Value" FROM "GameRooms" WHERE "Code" = {code.Value} FOR UPDATE""")
-            .ToListAsync(cancellationToken);
-        return roomIds is [var roomId] ? await db.GameRooms.SingleAsync(r => r.Id == roomId, cancellationToken) : null;
-    }
 
     /// <summary>Locks players in id order, so two transactions locking overlapping sets cannot deadlock.</summary>
     private Task LockPlayersAsync(Guid[] playerIds, CancellationToken cancellationToken) =>

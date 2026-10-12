@@ -1,4 +1,5 @@
 using ChogGames.Core.Games;
+using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
@@ -27,6 +28,8 @@ public sealed class ChogGamesDbContext(DbContextOptions<ChogGamesDbContext> opti
     public DbSet<GameDefinition> GameDefinitions => Set<GameDefinition>();
 
     public DbSet<GameRoom> GameRooms => Set<GameRoom>();
+
+    public DbSet<MatchAction> MatchActions => Set<MatchAction>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

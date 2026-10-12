@@ -1,4 +1,6 @@
+using System.Text.Json;
 using ChogGames.Core.Games;
+using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 
@@ -534,5 +536,131 @@ public class GameRoomTests
 
         Assert.Throws<InvalidOperationException>(() => room.Complete(Now));
         Assert.Equal((RoomStatus.Waiting, (DateTimeOffset?)null), (room.Status, room.EndedAt));
+    }
+
+    private static readonly JsonElement NoPayload = JsonSerializer.SerializeToElement(new { });
+
+    private static MatchCommand Command(GameRoom room, long? expectedVersion = null, Guid? matchId = null) =>
+        new(Guid.NewGuid(), matchId ?? room.Id, expectedVersion ?? room.Version, "ROLL", NoPayload);
+
+    [Fact]
+    public void Every_room_change_bumps_the_version_once()
+    {
+        var host = Choosing("classic");
+        var bob = Choosing("mint");
+        var carol = Choosing("gold");
+        var room = NewRoom(host);
+        Assert.Equal(0, room.Version);
+
+        room.Join(bob, Now);
+        room.Join(carol, Now);
+        Assert.Equal(2, room.Version);
+
+        room.MarkReady(bob);
+        room.MarkReady(host);
+        room.MarkNotReady(bob.Id);
+        room.MarkReady(bob);
+        Assert.Equal(6, room.Version);
+
+        room.Leave(carol.Id, Now);
+        Assert.Equal(7, room.Version);
+
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Now);
+        Assert.Equal(8, room.Version);
+
+        room.Complete(Now);
+        Assert.Equal(9, room.Version);
+    }
+
+    [Fact]
+    public void Repeating_a_ready_status_changes_nothing()
+    {
+        var host = Choosing("classic");
+        var room = NewRoom(host);
+        room.MarkReady(host);
+        var version = room.Version;
+
+        room.MarkReady(host);
+        room.MarkNotReady(host.Id);
+        room.MarkNotReady(host.Id);
+
+        Assert.Equal(version + 1, room.Version);
+    }
+
+    [Fact]
+    public void Leaving_a_started_match_bumps_the_version_so_older_commands_are_stale()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+        var command = Command(room);
+
+        room.Leave(carol.Id, Now);
+
+        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, command));
+        Assert.Null(room.CheckCommand(alice.Id, Command(room)));
+    }
+
+    [Fact]
+    public void An_accepted_command_stores_the_state_bumps_the_version_and_records_the_action()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        var version = room.Version;
+        var command = Command(room) with { Payload = JsonSerializer.SerializeToElement(new { steps = 3 }) };
+
+        var action = room.ApplyCommand(bob.Id, command, """{"count":1}""", Now);
+
+        Assert.Equal(("""{"count":1}""", version + 1), (room.State, room.Version));
+        Assert.Equal(
+            (room.Id, command.ActionId, bob.Id, "ROLL", """{"steps":3}""", version + 1, Now),
+            (action.RoomId, action.ActionId, action.PlayerId, action.Type, action.Payload, action.Version, action.CreatedAt));
+    }
+
+    [Fact]
+    public void Commands_need_an_active_match_the_player_still_plays_and_the_current_version()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var waiting = RoomOf(alice, bob);
+        Assert.Equal(MatchCommandProblem.NotStarted, waiting.CheckCommand(alice.Id, Command(waiting)));
+
+        var room = Started(alice, bob, carol);
+        Assert.Equal(MatchCommandProblem.WrongMatch, room.CheckCommand(alice.Id, Command(room, matchId: Guid.NewGuid())));
+        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, Command(room, expectedVersion: room.Version - 1)));
+        Assert.Equal(MatchCommandProblem.StaleVersion, room.CheckCommand(alice.Id, Command(room, expectedVersion: room.Version + 1)));
+
+        room.Leave(carol.Id, Now);
+        Assert.Equal(MatchCommandProblem.NotPlaying, room.CheckCommand(carol.Id, Command(room)));
+
+        room.Complete(Now);
+        Assert.Equal(MatchCommandProblem.Closed, room.CheckCommand(alice.Id, Command(room)));
+    }
+
+    [Fact]
+    public void A_command_that_fails_its_checks_is_refused_unchanged()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        var version = room.Version;
+
+        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(alice.Id, Command(room, expectedVersion: 0), "{}", Now));
+        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(Guid.NewGuid(), Command(room), "{}", Now));
+
+        Assert.Equal((version, (string?)null), (room.Version, room.State));
+    }
+
+    [Theory]
+    [InlineData("ROLL", true)]
+    [InlineData("END_TURN", true)]
+    [InlineData("PLAY_CARD2", true)]
+    [InlineData("roll", false)]
+    [InlineData("_ROLL", false)]
+    [InlineData("2ROLL", false)]
+    [InlineData("ROLL-FAST", false)]
+    [InlineData("", false)]
+    [InlineData("ABCDEFGHIJKLMNOPQRSTUVWXYZ123456", true)]
+    [InlineData("ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567", false)]
+    public void Command_types_are_short_upper_case_names(string type, bool valid)
+    {
+        Assert.Equal(valid, MatchCommand.IsValidType(type));
     }
 }

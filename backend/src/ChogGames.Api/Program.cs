@@ -3,6 +3,7 @@ using ChogGames.Api.Catalog;
 using ChogGames.Api.Characters;
 using ChogGames.Api.Health;
 using ChogGames.Api.Identity;
+using ChogGames.Api.Matches;
 using ChogGames.Api.Profile;
 using ChogGames.Api.Realtime;
 using ChogGames.Api.Rooms;
@@ -37,6 +38,7 @@ app.MapWalletEndpoints();
 app.MapWalletSignInEndpoints();
 app.MapCharacterEndpoints();
 app.MapRoomEndpoints();
+app.MapMatchCommandEndpoints();
 app.MapRealtimeEndpoints();
 
 app.Run();

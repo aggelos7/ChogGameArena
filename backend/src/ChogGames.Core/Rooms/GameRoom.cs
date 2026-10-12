@@ -1,4 +1,5 @@
 using ChogGames.Core.Games;
+using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 
 namespace ChogGames.Core.Rooms;
@@ -8,7 +9,8 @@ namespace ChogGames.Core.Rooms;
 /// capacity and the minimum to start come from the game definition. While waiting it is the lobby (STORY-021, ENG-002):
 /// members mark ready with their chosen Chog, and the host starts once enough members are ready. Once started the room
 /// is the match (STORY-023, ENG-010, DEC-025): its members are the match players, each with their character snapshot,
-/// and every status change goes through <see cref="RoomLifecycle"/>.
+/// and every status change goes through <see cref="RoomLifecycle"/>. Every change bumps <see cref="Version"/>, and players act
+/// on the match through versioned, idempotent commands (STORY-024, DEC-026).
 /// </summary>
 public sealed class GameRoom
 {
@@ -37,6 +39,15 @@ public sealed class GameRoom
 
     /// <summary>When the room reached a final status (Completed, Cancelled or Abandoned); null while open.</summary>
     public DateTimeOffset? EndedAt { get; private set; }
+
+    /// <summary>
+    /// Bumped by every committed change: join, ready, leave, start, completion and each accepted command (DEC-026).
+    /// A command must name the current version, so one built on older state is refused.
+    /// </summary>
+    public long Version { get; private set; }
+
+    /// <summary>The game's own match state as a JSON object, owned by its rules; null until their first accepted command.</summary>
+    public string? State { get; private set; }
 
     public IReadOnlyList<RoomMember> Members => _members;
 
@@ -95,6 +106,7 @@ public sealed class GameRoom
         }
 
         _members.Add(new RoomMember(Id, player.Id, now));
+        Version++;
     }
 
     /// <summary>
@@ -103,10 +115,19 @@ public sealed class GameRoom
     /// </summary>
     public void MarkReady(Player player)
     {
-        MemberForChange(player.Id).MarkReady(player.SelectedCharacterKind, player.SelectedCharacterId);
+        if (MemberForChange(player.Id).MarkReady(player.SelectedCharacterKind, player.SelectedCharacterId))
+        {
+            Version++;
+        }
     }
 
-    public void MarkNotReady(Guid playerId) => MemberForChange(playerId).MarkNotReady();
+    public void MarkNotReady(Guid playerId)
+    {
+        if (MemberForChange(playerId).MarkNotReady())
+        {
+            Version++;
+        }
+    }
 
     /// <summary>
     /// <paramref name="playerId"/> leaves. In a waiting room (STORY-063, DEC-023) a member is removed, freeing their
@@ -115,6 +136,12 @@ public sealed class GameRoom
     /// stays listed as left, and when fewer than two players remain the match is abandoned.
     /// </summary>
     public void Leave(Guid playerId, DateTimeOffset now)
+    {
+        LeaveRoom(playerId, now);
+        Version++;
+    }
+
+    private void LeaveRoom(Guid playerId, DateTimeOffset now)
     {
         if (Status == RoomStatus.Active)
         {
@@ -190,10 +217,61 @@ public sealed class GameRoom
         {
             member.LockCharacter(characters[member.PlayerId]);
         }
+
+        Version++;
     }
 
     /// <summary>The game finished the match (ENG-010). Called by game rules, which decide the results (later stories).</summary>
-    public void Complete(DateTimeOffset now) => MoveTo(RoomStatus.Completed, now);
+    public void Complete(DateTimeOffset now)
+    {
+        MoveTo(RoomStatus.Completed, now);
+        Version++;
+    }
+
+    /// <summary>
+    /// Why <paramref name="playerId"/> can't act on this match with <paramref name="command"/> now, or null if they can
+    /// (STORY-024, DEC-026). The caller has checked that the player is a member.
+    /// </summary>
+    public MatchCommandProblem? CheckCommand(Guid playerId, MatchCommand command)
+    {
+        if (command.MatchId != Id)
+        {
+            return MatchCommandProblem.WrongMatch;
+        }
+
+        if (Status == RoomStatus.Waiting)
+        {
+            return MatchCommandProblem.NotStarted;
+        }
+
+        if (Status != RoomStatus.Active)
+        {
+            return MatchCommandProblem.Closed;
+        }
+
+        if (!IsPlaying(playerId))
+        {
+            return MatchCommandProblem.NotPlaying;
+        }
+
+        return command.ExpectedVersion == Version ? null : MatchCommandProblem.StaleVersion;
+    }
+
+    /// <summary>
+    /// Applies a command the game's rules accepted: stores their new <paramref name="state"/>, bumps the version and
+    /// returns the record that makes a retry of the same action return this result (DEC-026).
+    /// </summary>
+    public MatchAction ApplyCommand(Guid playerId, MatchCommand command, string state, DateTimeOffset now)
+    {
+        if (CheckCommand(playerId, command) is { } problem)
+        {
+            throw new InvalidOperationException($"The command cannot be applied: {problem}.");
+        }
+
+        State = state;
+        Version++;
+        return new MatchAction(Id, command.ActionId, playerId, command.Type, command.Payload.GetRawText(), Version, now);
+    }
 
     /// <summary>The only place the status changes; anything <see cref="RoomLifecycle"/> does not allow is refused unchanged.</summary>
     private void MoveTo(RoomStatus next, DateTimeOffset now)
@@ -220,6 +298,24 @@ public sealed class GameRoom
         return _members.SingleOrDefault(m => m.PlayerId == playerId)
             ?? throw new InvalidOperationException("The player is not a member of this room.");
     }
+}
+
+public enum MatchCommandProblem
+{
+    /// <summary>The command names another match.</summary>
+    WrongMatch,
+
+    /// <summary>The room is still waiting.</summary>
+    NotStarted,
+
+    /// <summary>The match is over or the room was cancelled.</summary>
+    Closed,
+
+    /// <summary>The player left (forfeited) this match.</summary>
+    NotPlaying,
+
+    /// <summary>The command's expected version is not the current one.</summary>
+    StaleVersion,
 }
 
 public enum RoomStartProblem
@@ -269,16 +365,30 @@ public sealed class RoomMember
         JoinedAt = joinedAt;
     }
 
-    internal void MarkReady(CharacterKind kind, string characterId)
+    /// <summary>Returns whether anything changed.</summary>
+    internal bool MarkReady(CharacterKind kind, string characterId)
     {
+        if (ReadyCharacterKind == kind && string.Equals(ReadyCharacterId, characterId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         ReadyCharacterKind = kind;
         ReadyCharacterId = characterId;
+        return true;
     }
 
-    internal void MarkNotReady()
+    /// <summary>Returns whether anything changed.</summary>
+    internal bool MarkNotReady()
     {
+        if (ReadyCharacterKind is null)
+        {
+            return false;
+        }
+
         ReadyCharacterKind = null;
         ReadyCharacterId = null;
+        return true;
     }
 
     internal void LockCharacter(CharacterSnapshot character) => Character = character;
