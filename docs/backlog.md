@@ -455,7 +455,7 @@
 
 #### STORY-030 — Define ability catalog and execution contract
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E05
 - **Implementation:** Introduce game-specific ability definitions with eligibility, timing, target and parameter validation.
