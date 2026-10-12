@@ -1,3 +1,5 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Route, Router, provideRouter } from '@angular/router';
@@ -44,6 +46,9 @@ describe('App shell', () => {
       imports: [App],
       providers: [
         provideRouter(routes, ...withNavigationErrorState()),
+        // The open-room banner asks the server once there is a session; these specs leave it unanswered.
+        provideHttpClient(),
+        provideHttpClientTesting(),
         { provide: PlayerSession, useValue: session },
         { provide: PAGE_LOAD, useValue: pageLoad },
       ],

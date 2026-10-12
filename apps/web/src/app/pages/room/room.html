@@ -88,7 +88,7 @@
           @switch (liveState()) {
             @case ('live') { Players appear and get ready here as it happens. }
             @case ('connecting') { Connecting for live updates… }
-            @case ('offline') { Live updates are off: refresh to see who joined and who is ready. }
+            @case ('offline') { Live updates are off; still trying to reconnect. Refresh to see the latest now. }
           }
         </p>
         @if (liveState() === 'offline') {

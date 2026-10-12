@@ -16,7 +16,8 @@ namespace ChogGames.Api.Rooms;
 /// Private rooms (STORY-020, ENG-001): create a room for an enabled game, join one by its code (typed or from an invite
 /// link) and read a room you are in. In the lobby (STORY-021, ENG-002) members mark ready and the host starts;
 /// members may leave a waiting room, and the host leaving cancels it (STORY-063). Leaving a started match is a
-/// forfeit, and a started room shows each member's locked Chog (STORY-023, DEC-025).
+/// forfeit, and a started room shows each member's locked Chog (STORY-023, DEC-025). <c>/current</c> finds the
+/// player's open room, so they can return to it after a refresh or a lost connection (STORY-027, DEC-029).
 /// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022). Every committed change
 /// is pushed to the room's subscribed members over SignalR as their own versioned snapshot (STORY-022, STORY-026).
 /// </summary>
@@ -109,6 +110,8 @@ public static class RoomEndpoints
         var rooms = endpoints.MapGroup("/api/rooms").RequireAuthorization().RequireRateLimiting(RateLimitPolicy);
 
         rooms.MapPost("", CreateRoomAsync).WithName("CreateRoom");
+        // A literal segment, so it is matched before "/{code}"; "current" is never a valid room code anyway.
+        rooms.MapGet("/current", GetCurrentRoomAsync).WithName("GetCurrentRoom");
         rooms.MapPost("/{code}/join", JoinRoomAsync).WithName("JoinRoom");
         rooms.MapGet("/{code}", GetRoomAsync).WithName("GetRoom");
         rooms.MapPut("/{code}/ready", SetReadyAsync).WithName("SetRoomReady");
@@ -162,6 +165,23 @@ public static class RoomEndpoints
         }
 
         return TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
+    }
+
+    /// <summary>
+    /// The player's open room (a waiting room they are in or a started match they still play), or 204 when there is
+    /// none (STORY-027, DEC-029). Clients use it to bring the player back after a refresh or on another device.
+    /// </summary>
+    private static async Task<Results<Ok<RoomResponse>, NoContent, NotFound>> GetCurrentRoomAsync(
+        ClaimsPrincipal user, ChogGamesDbContext db, RoomService rooms, RoomSnapshots snapshots, CancellationToken cancellationToken)
+    {
+        var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
+        if (player is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        var room = await rooms.FindOpenForPlayerAsync(player, cancellationToken);
+        return room is null ? TypedResults.NoContent() : TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
     }
 
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> GetRoomAsync(
