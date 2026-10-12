@@ -63,8 +63,10 @@ public sealed record MatchCommandResult(
 /// <see cref="IMatchRules"/> decide what an accepted command does; the player is always the session's. Only the current
 /// player acts, before their turn runs out (STORY-025, DEC-027). A command that finishes the match stores the standings
 /// and updates the players' stats in the same transaction, so results are recorded exactly once (STORY-028, DEC-030).
+/// The rules draw every outcome from the server's <see cref="IRandomSource"/>, never from the payload (STORY-029, DEC-031).
 /// </summary>
-public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatchRules> rules, TimeProvider timeProvider)
+public sealed class MatchCommandService(
+    ChogGamesDbContext db, IEnumerable<IMatchRules> rules, IRandomSource random, TimeProvider timeProvider)
 {
     private readonly Dictionary<string, IMatchRules> _rulesByGame = rules.ToDictionary(r => r.GameType, StringComparer.Ordinal);
 
@@ -115,7 +117,7 @@ public sealed class MatchCommandService(ChogGamesDbContext db, IEnumerable<IMatc
         }
 
         using var state = room.State is null ? null : JsonDocument.Parse(room.State);
-        var decision = gameRules.Apply(new MatchCommandContext(room, player.Id, command.Type, command.Payload, state?.RootElement));
+        var decision = gameRules.Apply(new MatchCommandContext(room, player.Id, command.Type, command.Payload, state?.RootElement, random));
         switch (decision.Outcome)
         {
             case MatchRuleOutcome.UnknownCommand:

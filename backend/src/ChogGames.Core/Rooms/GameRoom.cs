@@ -222,8 +222,9 @@ public sealed class GameRoom
 
     /// <summary>
     /// Starts the match: the room becomes Active and each member's character is locked with the snapshot taken for
-    /// them (DEC-019, DEC-025). Members are seated in turn order, the host first and then in the order they joined, and
-    /// the first turn begins with <paramref name="turnTimeout"/> to play it (DEC-027). The caller has checked
+    /// them (DEC-019, DEC-025). Members are seated in a turn order drawn from <paramref name="random"/>, so the host gets
+    /// no first move by default (STORY-029, DEC-031), and the first turn begins with <paramref name="turnTimeout"/> to
+    /// play it (DEC-027). The caller has checked
     /// <see cref="CheckStart"/> and verified every member's Chog (STORY-018); <paramref name="characters"/> holds a
     /// snapshot for every member.
     /// </summary>
@@ -232,6 +233,7 @@ public sealed class GameRoom
         IReadOnlyCollection<Player> players,
         IReadOnlyDictionary<Guid, CharacterSnapshot> characters,
         TimeSpan turnTimeout,
+        IRandomSource random,
         DateTimeOffset now)
     {
         if (turnTimeout <= TimeSpan.Zero)
@@ -256,10 +258,12 @@ public sealed class GameRoom
             member.LockCharacter(characters[member.PlayerId]);
         }
 
-        var seat = 0;
-        foreach (var member in _members.OrderBy(m => m.PlayerId != HostPlayerId).ThenBy(m => m.JoinedAt).ThenBy(m => m.PlayerId))
+        // Shuffled from a fixed order (host, then join order), so a scripted source gives the same seats every time.
+        var order = _members.OrderBy(m => m.PlayerId != HostPlayerId).ThenBy(m => m.JoinedAt).ThenBy(m => m.PlayerId).ToList();
+        random.Shuffle(order);
+        for (var seat = 0; seat < order.Count; seat++)
         {
-            member.TakeSeat(++seat);
+            order[seat].TakeSeat(seat + 1);
         }
 
         TurnTimeout = turnTimeout;
