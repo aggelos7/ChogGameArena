@@ -410,7 +410,7 @@
 
 #### STORY-027 — Disconnect and reconnect
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Restore identity, membership, selected character and current authoritative state.

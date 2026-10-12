@@ -27,7 +27,8 @@ const NFT_COLOR = 'var(--brand)';
  * status, the player's ready toggle, the host's start and leaving (STORY-063). Once started it shows each player's locked
  * Chog, and leaving forfeits the game (STORY-023, DEC-025). It follows the room live (STORY-022, STORY-026): the
  * server pushes a versioned snapshot after every change and the page keeps the newest one it has seen, from the push or
- * a request alike, so an older answer never wins. Refresh is offered only while live updates are down.
+ * a request alike, so an older answer never wins. A lost connection keeps retrying (STORY-027); Refresh is offered
+ * while live updates are down.
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({

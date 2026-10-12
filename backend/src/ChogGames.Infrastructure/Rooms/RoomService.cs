@@ -188,16 +188,24 @@ public sealed class RoomService(
         return room is not null && room.IsMember(player.Id) ? room : null;
     }
 
+    /// <summary>
+    /// The player's open room, if any: the one to return to after a refresh, a dropped connection or on another device
+    /// (STORY-027, ENG-006, DEC-029). A player has at most one (DEC-021, DEC-025).
+    /// </summary>
+    public Task<GameRoom?> FindOpenForPlayerAsync(Player player, CancellationToken cancellationToken) =>
+        OpenRooms(player).FirstOrDefaultAsync(cancellationToken);
+
     private Task LockPlayerAsync(Player player, CancellationToken cancellationToken) =>
         db.Database.ExecuteSqlInterpolatedAsync($"""SELECT 1 FROM "Players" WHERE "Id" = {player.Id} FOR UPDATE""", cancellationToken);
 
-    /// <summary>Code of a waiting room the player is in (as host or member) or a started match they still play, if any (DEC-025).</summary>
     private Task<string?> OpenRoomCodeAsync(Player player, CancellationToken cancellationToken) =>
+        OpenRooms(player).Select(r => r.Code).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>Waiting rooms the player is in (as host or member) and started matches they still play (DEC-025).</summary>
+    private IQueryable<GameRoom> OpenRooms(Player player) =>
         db.GameRooms.AsNoTracking()
             .Where(r => (r.Status == RoomStatus.Waiting || r.Status == RoomStatus.Active)
-                && r.Members.Any(m => m.PlayerId == player.Id && m.LeftAt == null))
-            .Select(r => r.Code)
-            .FirstOrDefaultAsync(cancellationToken);
+                && r.Members.Any(m => m.PlayerId == player.Id && m.LeftAt == null));
 
     private void Detach(GameRoom room)
     {

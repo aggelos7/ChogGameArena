@@ -135,6 +135,14 @@ export class RoomsApi {
     return this.http.post<Room>(`/api/rooms/${encodeURIComponent(code)}/join`, null);
   }
 
+  /**
+   * The player's open room (a waiting room they're in or a game they still play), or null when there is none
+   * (`204`): where to return after a refresh, a lost connection or on another device (STORY-027, DEC-029).
+   */
+  current(): Observable<Room | null> {
+    return this.http.get<Room | null>('/api/rooms/current');
+  }
+
   get(code: string): Observable<Room> {
     return this.http.get<Room>(`/api/rooms/${encodeURIComponent(code)}`);
   }

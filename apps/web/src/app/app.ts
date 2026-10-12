@@ -3,11 +3,12 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter, skip } from 'rxjs';
 import { PlayerSession } from './identity/player-session';
+import { CurrentRoomBanner } from './rooms/current-room-banner';
 import { ErrorState } from './shared/ui/state-views';
 import { NavigationStatus } from './shell/navigation-status';
 
 @Component({
-  imports: [RouterLink, RouterLinkActive, RouterOutlet, ErrorState],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet, ErrorState, CurrentRoomBanner],
   selector: 'app-root',
   templateUrl: './app.html',
   styleUrl: './app.scss',
