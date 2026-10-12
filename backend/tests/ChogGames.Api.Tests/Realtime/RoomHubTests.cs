@@ -66,16 +66,19 @@ public sealed class RoomHubTests(MigratedPostgresDatabase database) : IClassFixt
         return new Guest(client, cookie);
     }
 
-    /// <summary>Collects the <c>RoomChanged</c> notices one live connection receives.</summary>
+    /// <summary>Collects the <c>RoomUpdated</c> snapshots one live connection receives.</summary>
     private sealed class Listener(HubConnection connection) : IAsyncDisposable
     {
-        private readonly Channel<string> _changes = Channel.CreateUnbounded<string>();
+        private readonly Channel<JsonElement> _changes = Channel.CreateUnbounded<JsonElement>();
 
         public HubConnection Connection => connection;
 
-        public void Listen() => connection.On<string>(nameof(IRoomClient.RoomChanged), code => _changes.Writer.TryWrite(code));
+        public void Listen() => connection.On<JsonElement>(nameof(IRoomClient.RoomUpdated), room => _changes.Writer.TryWrite(room));
 
-        public async Task<string> NextChangeAsync()
+        /// <summary>The code of the room in the next snapshot.</summary>
+        public async Task<string> NextChangeAsync() => (await NextSnapshotAsync()).GetProperty("code").GetString()!;
+
+        public async Task<JsonElement> NextSnapshotAsync()
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             return await _changes.Reader.ReadAsync(timeout.Token);
@@ -85,10 +88,11 @@ public sealed class RoomHubTests(MigratedPostgresDatabase database) : IClassFixt
         public async Task AssertNothingReceivedAsync()
         {
             await Task.Delay(TimeSpan.FromMilliseconds(300));
-            Assert.False(_changes.Reader.TryRead(out var code), $"Unexpected notice for room {code}.");
+            Assert.False(_changes.Reader.TryRead(out var room), $"Unexpected snapshot: {room}.");
         }
 
-        public Task SubscribeAsync(string code) => connection.InvokeAsync(nameof(RoomHub.SubscribeRoom), code);
+        /// <summary>Returns the snapshot subscribing answers with.</summary>
+        public Task<JsonElement> SubscribeAsync(string code) => connection.InvokeAsync<JsonElement>(nameof(RoomHub.SubscribeRoom), code);
 
         public ValueTask DisposeAsync() => connection.DisposeAsync();
     }
@@ -255,11 +259,9 @@ public sealed class RoomHubTests(MigratedPostgresDatabase database) : IClassFixt
         var bobLaptop = await ConnectAsync(bob);
         await bobLaptop.SubscribeAsync(code);
 
-        // Bob's connections hear of his own leave, then are taken out of the room's group.
+        // Bob is no longer a member, so his connections get nothing more of the room, not even his own leave (DEC-028).
         await LeaveAsync(bob, code);
         Assert.Equal(code, await aliceLive.NextChangeAsync());
-        Assert.Equal(code, await bobPhone.NextChangeAsync());
-        Assert.Equal(code, await bobLaptop.NextChangeAsync());
 
         await ReadyAsync(alice, code);
         Assert.Equal(code, await aliceLive.NextChangeAsync());

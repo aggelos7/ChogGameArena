@@ -8,10 +8,15 @@ import { GameLobby } from './game-lobby';
 describe('Game lobby page', () => {
   const room: Room = {
     code: 'K7QF3M',
+    matchId: '5f0c9a8e-3d4b-4c1a-9e2f-7a6b5c4d3e2f',
+    version: 0,
     gameType: 'chog-life',
     status: 'Waiting',
     minPlayers: 2,
     capacity: 6,
+    turnNumber: 0,
+    turnEndsAt: null,
+    state: null,
     members: [
       {
         displayName: 'Alice',
@@ -22,6 +27,7 @@ describe('Game lobby page', () => {
         character: { kind: 'Standard', id: 'classic', name: 'Classic', color: '#5b2bd6' },
         ability: null,
         hasLeft: false,
+        isTurn: false,
       },
     ],
   };

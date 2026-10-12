@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using ChogGames.Api.Rooms;
 using Microsoft.AspNetCore.Http.Connections;
@@ -11,7 +12,10 @@ public static class RealtimeEndpoints
 {
     public static IServiceCollection AddRealtime(this IServiceCollection services)
     {
-        services.AddSignalR().AddHubOptions<RoomHub>(options => options.AddFilter<HubRateLimitFilter>());
+        services.AddSignalR()
+            .AddHubOptions<RoomHub>(options => options.AddFilter<HubRateLimitFilter>())
+            // Snapshots read the same over the hub as over REST (DEC-028).
+            .AddJsonProtocol(options => options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
         services.AddSingleton<HubRateLimitFilter>();
         services.AddSingleton<RoomConnectionRegistry>();
         services.AddSingleton<RoomNotifier>();
