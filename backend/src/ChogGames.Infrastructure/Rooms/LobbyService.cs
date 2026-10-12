@@ -1,3 +1,4 @@
+using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Characters;
@@ -14,12 +15,14 @@ namespace ChogGames.Infrastructure.Rooms;
 /// host starts the match. The room's row is locked first and then the members' rows, the same order as joining, so a
 /// start cannot race a join, a leave, a ready change or a Chog change. Every member's Chog is checked live at start
 /// (STORY-018, DEC-022) and its snapshot stored with the member (STORY-023, DEC-025); leaving a started match is a forfeit.
-/// The first turn begins at start, with the configured turn timeout (STORY-025, DEC-027).
+/// The first turn begins at start, with the configured turn timeout (STORY-025, DEC-027), in a secure random seat order
+/// (STORY-029, DEC-031).
 /// </summary>
 public sealed class LobbyService(
     ChogGamesDbContext db,
     CharacterEligibilityService eligibility,
     IOptions<MatchOptions> matchOptions,
+    IRandomSource random,
     TimeProvider timeProvider,
     ILogger<LobbyService> logger)
 {
@@ -148,7 +151,7 @@ public sealed class LobbyService(
             return new RoomResult(RoomOutcome.OwnershipUnavailable);
         }
 
-        room.Start(caller.Id, players, characters, matchOptions.Value.TurnTimeout, timeProvider.GetUtcNow());
+        room.Start(caller.Id, players, characters, matchOptions.Value.TurnTimeout, random, timeProvider.GetUtcNow());
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.Started, room);

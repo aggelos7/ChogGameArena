@@ -178,7 +178,7 @@ public class GameRoomTests
 
         room.MarkReady(host);
         room.MarkReady(bob);
-        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now);
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now);
 
         Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(bob.Id));
         Assert.Throws<InvalidOperationException>(() => room.MarkReady(bob));
@@ -194,7 +194,7 @@ public class GameRoomTests
         room.MarkReady(bob);
 
         Assert.Null(room.CheckStart(host.Id, [host, bob]));
-        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now.AddMinutes(2));
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now.AddMinutes(2));
 
         Assert.Equal((RoomStatus.Active, Now.AddMinutes(2)), (room.Status, room.StartedAt));
         Assert.Equal(RoomStartProblem.NotWaiting, room.CheckStart(host.Id, [host, bob]));
@@ -225,7 +225,7 @@ public class GameRoomTests
         room.MarkReady(bob);
 
         Assert.Equal(RoomStartProblem.NotHost, room.CheckStart(bob.Id, [host, bob]));
-        Assert.Throws<InvalidOperationException>(() => room.Start(bob.Id, [host, bob], Snapshots(host, bob), Turn, Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(bob.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now));
         Assert.Equal(RoomStatus.Waiting, room.Status);
     }
 
@@ -237,7 +237,7 @@ public class GameRoomTests
         room.MarkReady(host);
 
         Assert.Equal(RoomStartProblem.NotEnoughPlayers, room.CheckStart(host.Id, [host]));
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Turn, Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Turn, ScriptedRandomSource.KeepOrder, Now));
     }
 
     [Fact]
@@ -352,7 +352,7 @@ public class GameRoomTests
             room.MarkReady(player);
         }
 
-        room.Start(players[0].Id, players, Snapshots(players), Turn, StartedAt);
+        room.Start(players[0].Id, players, Snapshots(players), Turn, ScriptedRandomSource.KeepOrder, StartedAt);
         return room;
     }
 
@@ -404,7 +404,7 @@ public class GameRoomTests
             [bob.Id] = CharacterSnapshot.Standard(mint, Now),
         };
 
-        room.Start(host.Id, [host, bob], characters, Turn, Now.AddMinutes(1));
+        room.Start(host.Id, [host, bob], characters, Turn, ScriptedRandomSource.KeepOrder, Now.AddMinutes(1));
 
         Assert.Equal((RoomStatus.Active, Now.AddMinutes(1), (DateTimeOffset?)null), (room.Status, room.StartedAt, room.EndedAt));
         Assert.Equal(characters[host.Id], room.Members.Single(m => m.PlayerId == host.Id).Character);
@@ -420,7 +420,7 @@ public class GameRoomTests
         room.MarkReady(host);
         room.MarkReady(bob);
 
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host), Turn, Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host), Turn, ScriptedRandomSource.KeepOrder, Now));
 
         Assert.Equal((RoomStatus.Waiting, (DateTimeOffset?)null), (room.Status, room.StartedAt));
         Assert.All(room.Members, m => Assert.Null(m.Character));
@@ -436,7 +436,7 @@ public class GameRoomTests
 
         Assert.Equal((RoomStatus.Cancelled, (DateTimeOffset?)null, Now.AddMinutes(3)), (room.Status, room.StartedAt, room.EndedAt));
         Assert.Throws<InvalidOperationException>(() => room.Complete(InSeatOrder(room), Now));
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Turn, Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Turn, ScriptedRandomSource.KeepOrder, Now));
         Assert.Equal(RoomStatus.Cancelled, room.Status);
     }
 
@@ -517,7 +517,7 @@ public class GameRoomTests
 
         Assert.Throws<InvalidOperationException>(() => room.Join(Guest(), Now));
         Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(bob.Id));
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now));
         Assert.Equal((RoomStatus.Active, 2), (room.Status, room.Members.Count));
     }
 
@@ -572,7 +572,7 @@ public class GameRoomTests
         room.Leave(carol.Id, Now);
         Assert.Equal(7, room.Version);
 
-        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, Now);
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now);
         Assert.Equal(8, room.Version);
 
         room.Complete(InSeatOrder(room), Now);
@@ -662,7 +662,7 @@ public class GameRoomTests
         room.ApplyCommand(player.Id, Command(room), "{}", endsTurn, at);
 
     [Fact]
-    public void Start_seats_the_host_first_then_by_joining_and_begins_the_first_turn()
+    public void Start_seats_players_in_an_order_drawn_from_the_random_source_and_begins_the_first_turn()
     {
         var (host, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
         var room = NewRoom(host);
@@ -673,11 +673,31 @@ public class GameRoomTests
             room.MarkReady(player);
         }
 
-        room.Start(host.Id, [host, bob, carol], Snapshots(host, bob, carol), Turn, StartedAt);
+        // Shuffling [host, carol, bob]: seat 3 swaps with seat 1, then seat 2 stays: bob, carol, host.
+        var random = new ScriptedRandomSource(0, 1);
+        room.Start(host.Id, [host, bob, carol], Snapshots(host, bob, carol), Turn, random, StartedAt);
+
+        Assert.Equal([(0, 3), (0, 2)], random.Draws);
+        Assert.Equal([bob.Id, carol.Id, host.Id], room.Members.OrderBy(m => m.Seat).Select(m => m.PlayerId));
+        Assert.Equal([1, 2, 3], room.Members.Select(m => m.Seat!.Value).Order());
+        Assert.Equal((Turn, 1, bob.Id, StartedAt + Turn), (room.TurnTimeout, room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
+    }
+
+    [Fact]
+    public void Start_shuffles_from_the_host_then_join_order_whatever_the_member_ids()
+    {
+        var (host, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = NewRoom(host);
+        room.Join(carol, Now);
+        room.Join(bob, Now.AddSeconds(1));
+        foreach (var player in new[] { host, bob, carol })
+        {
+            room.MarkReady(player);
+        }
+
+        room.Start(host.Id, [host, bob, carol], Snapshots(host, bob, carol), Turn, ScriptedRandomSource.KeepOrder, StartedAt);
 
         Assert.Equal([host.Id, carol.Id, bob.Id], room.Members.OrderBy(m => m.Seat).Select(m => m.PlayerId));
-        Assert.Equal([1, 2, 3], room.Members.Select(m => m.Seat!.Value).Order());
-        Assert.Equal((Turn, 1, host.Id, StartedAt + Turn), (room.TurnTimeout, room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
     }
 
     [Fact]
@@ -698,7 +718,7 @@ public class GameRoomTests
         room.MarkReady(host);
         room.MarkReady(bob);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), TimeSpan.Zero, Now));
+        Assert.Throws<ArgumentOutOfRangeException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), TimeSpan.Zero, ScriptedRandomSource.KeepOrder, Now));
         Assert.Equal(RoomStatus.Waiting, room.Status);
     }
 

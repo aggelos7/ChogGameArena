@@ -24,6 +24,7 @@ public sealed class TurnTimeoutService(
     ChogGamesDbContext db,
     IEnumerable<IMatchRules> rules,
     IOptions<MatchOptions> options,
+    IRandomSource random,
     TimeProvider timeProvider,
     ILogger<TurnTimeoutService> logger)
 {
@@ -88,7 +89,7 @@ public sealed class TurnTimeoutService(
         if (_rulesByGame.TryGetValue(room.GameType, out var gameRules))
         {
             using var current = room.State is null ? null : JsonDocument.Parse(room.State);
-            if (gameRules.TimeOutTurn(new MatchTurnContext(room, current?.RootElement)) is { } safeDefault)
+            if (gameRules.TimeOutTurn(new MatchTurnContext(room, current?.RootElement, random)) is { } safeDefault)
             {
                 if (safeDefault.ValueKind != JsonValueKind.Object)
                 {

@@ -1,5 +1,6 @@
 using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Health;
+using ChogGames.Core.Matches;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
@@ -76,6 +77,7 @@ public static class ConfigurationServiceCollectionExtensions
             .Validate(o => o.TimeoutCheckInterval >= TimeSpan.FromMilliseconds(100) && o.TimeoutCheckInterval <= TimeSpan.FromMinutes(1),
                 "Matches:TimeoutCheckInterval must be between 100 milliseconds and 1 minute.")
             .ValidateOnStart();
+        services.AddSingleton<IRandomSource, SecureRandomSource>();
         services.AddScoped<MatchCommandService>();
         services.AddScoped<TurnTimeoutService>();
         services.AddScoped<MatchRecoveryService>();

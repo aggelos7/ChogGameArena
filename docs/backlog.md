@@ -436,7 +436,7 @@
 
 #### STORY-029 — Randomness and security tests
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E04
 - **Implementation:** Generate dice/cards/events only on server using secure RNG and reject forged payloads.

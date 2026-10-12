@@ -1,3 +1,4 @@
+using ChogGames.Core.Matches;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -6,7 +7,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ChogGames.Api.Tests;
 
-/// <summary>Hosts the API in-memory with an explicit database connection string and optional extra settings.</summary>
+/// <summary>
+/// Hosts the API in-memory with an explicit database connection string and optional extra settings. Chance is scripted
+/// (STORY-029): matches seat players in join order, host first, unless <paramref name="configureServices"/> registers
+/// another <see cref="IRandomSource"/>.
+/// </summary>
 public sealed class ApiFactory(
     string connectionString,
     IReadOnlyDictionary<string, string?>? settings = null,
@@ -41,6 +46,7 @@ public sealed class ApiFactory(
             }
         });
 
+        builder.ConfigureTestServices(services => services.AddSingleton<IRandomSource>(ScriptedRandomSource.KeepOrder));
         if (configureServices is not null)
         {
             builder.ConfigureTestServices(configureServices);
