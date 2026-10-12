@@ -3,6 +3,7 @@ using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
+using ChogGames.Infrastructure.Matches;
 using ChogGames.Infrastructure.Nfts;
 using ChogGames.Infrastructure.Nfts.Cache;
 using ChogGames.Infrastructure.Nfts.Metadata;
@@ -65,6 +66,9 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddSingleton<IRoomCodeGenerator, SecureRoomCodeGenerator>();
         services.AddScoped<RoomService>();
         services.AddScoped<LobbyService>();
+
+        // Games add their IMatchRules as their rules are built (DEC-026); until then every command type is unknown.
+        services.AddScoped<MatchCommandService>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()

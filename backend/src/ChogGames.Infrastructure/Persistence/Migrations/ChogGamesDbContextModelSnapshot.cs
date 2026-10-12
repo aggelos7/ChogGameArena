@@ -59,6 +59,46 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ChogGames.Core.Matches.MatchAction", b =>
+                {
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("RoomId", "ActionId");
+
+                    b.HasIndex("PlayerId");
+
+                    b.ToTable("MatchActions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_MatchActions_Payload", "jsonb_typeof(\"Payload\") = 'object'");
+
+                            t.HasCheckConstraint("CK_MatchActions_Type_Format", "\"Type\" ~ '^[A-Z][A-Z0-9_]{0,31}$'");
+
+                            t.HasCheckConstraint("CK_MatchActions_Version", "\"Version\" >= 1");
+                        });
+                });
+
             modelBuilder.Entity("ChogGames.Core.Players.Player", b =>
                 {
                     b.Property<Guid>("Id")
@@ -165,10 +205,17 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("State")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 
@@ -193,7 +240,11 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_GameRooms_StartedAt", "(\"StartedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Cancelled'))");
 
+                            t.HasCheckConstraint("CK_GameRooms_State", "\"State\" IS NULL OR (jsonb_typeof(\"State\") = 'object' AND \"StartedAt\" IS NOT NULL)");
+
                             t.HasCheckConstraint("CK_GameRooms_Status", "\"Status\" IN ('Waiting', 'Active', 'Completed', 'Cancelled', 'Abandoned')");
+
+                            t.HasCheckConstraint("CK_GameRooms_Version", "\"Version\" >= 0");
                         });
                 });
 
@@ -430,6 +481,21 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.HasIndex("PlayerId");
 
                     b.ToTable("WalletChallenges", (string)null);
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Matches.MatchAction", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ChogGames.Core.Rooms.GameRoom", null)
+                        .WithMany()
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ChogGames.Core.Rooms.GameRoom", b =>
