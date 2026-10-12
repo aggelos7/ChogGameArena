@@ -53,6 +53,17 @@ public sealed record CharacterSnapshot
     public static CharacterSnapshot Nft(WalletAddress owner, OwnedNft nft, DateTimeOffset now) =>
         new(CharacterKind.Nft, nft.TokenId.ToString(), nft.Name, nft.ImageUrl, [.. nft.Traits], owner.Value, now);
 
+    /// <summary>Rebuilds a snapshot exactly as it was stored with its match (STORY-023, DEC-025); never a new check.</summary>
+    public static CharacterSnapshot Restore(
+        CharacterKind kind,
+        string characterId,
+        string name,
+        Uri? imageUrl,
+        IEnumerable<NftTrait> traits,
+        string? walletAddress,
+        DateTimeOffset verifiedAt) =>
+        new(kind, characterId, name, imageUrl, [.. traits], walletAddress, verifiedAt);
+
     public bool Equals(CharacterSnapshot? other) =>
         other is not null
         && (Kind, CharacterId, Name, ImageUrl, WalletAddress, VerifiedAt) == (other.Kind, other.CharacterId, other.Name, other.ImageUrl, other.WalletAddress, other.VerifiedAt)

@@ -58,7 +58,7 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
     private async Task SetStatus(GameRoom room, RoomStatus status)
     {
         await using var db = database.CreateDbContext();
-        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"GameRooms\" SET \"Status\" = {status.ToString()} WHERE \"Id\" = {room.Id}");
+        await RoomStatusOverride.SetAsync(db, room.Code, status, clock.GetUtcNow());
     }
 
     private async Task<List<GameRoom>> RoomsHostedBy(Player host)
@@ -137,20 +137,61 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
         Assert.Equal(Assert.Single(await RoomsHostedBy(host)).Code, second.OpenRoomCode);
     }
 
-    [PostgresFact]
-    public async Task Host_whose_room_is_no_longer_waiting_can_open_another()
+    [PostgresTheory]
+    [InlineData(RoomStatus.Completed)]
+    [InlineData(RoomStatus.Cancelled)]
+    [InlineData(RoomStatus.Abandoned)]
+    public async Task Host_whose_room_has_ended_can_open_another(RoomStatus status)
     {
         var host = await SavedGuest();
         var first = (await Create(host)).Room!;
-        await using (var db = database.CreateDbContext())
-        {
-            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"GameRooms\" SET \"Status\" = 'Active' WHERE \"Id\" = {first.Id}");
-        }
+        await SetStatus(first, status);
 
         var second = await Create(host);
 
         Assert.Equal(RoomOutcome.Created, second.Outcome);
         Assert.Equal(2, (await RoomsHostedBy(host)).Count);
+    }
+
+    [PostgresFact]
+    public async Task A_started_match_blocks_creating_and_joining_other_rooms()
+    {
+        var (room, host) = await RoomWithHost();
+        var bob = await SavedGuest();
+        await Join(bob, room.Code);
+        await SetStatus(room, RoomStatus.Active);
+        var (other, _) = await RoomWithHost();
+
+        var created = await Create(host);
+        var joined = await Join(bob, other.Code);
+
+        Assert.Equal((RoomOutcome.AlreadyInRoom, room.Code), (created.Outcome, created.OpenRoomCode));
+        Assert.Equal((RoomOutcome.AlreadyInRoom, room.Code), (joined.Outcome, joined.OpenRoomCode));
+        Assert.Single(await RoomsHostedBy(host));
+        Assert.Single((await Stored(other)).Members);
+    }
+
+    [PostgresFact]
+    public async Task A_player_who_left_a_started_match_is_free_but_cannot_rejoin_it()
+    {
+        var (room, host) = await RoomWithHost();
+        var bob = await SavedGuest();
+        await Join(bob, room.Code);
+        await SetStatus(room, RoomStatus.Active);
+        await using (var db = database.CreateDbContext())
+        {
+            const string character = """
+                {"kind":"Standard","id":"classic","name":"Classic","imageUrl":null,"traits":[],"walletAddress":null,"verifiedAt":"2026-10-11T12:00:00+00:00"}
+                """;
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE "RoomMembers" SET "Character" = {character}::jsonb, "LeftAt" = {clock.GetUtcNow()}
+                WHERE "RoomId" = {room.Id} AND "PlayerId" = {bob.Id}
+                """);
+        }
+
+        Assert.Equal(RoomOutcome.RoomStarted, (await Join(bob, room.Code)).Outcome);
+        Assert.Equal(RoomOutcome.Created, (await Create(bob)).Outcome);
+        Assert.Equal(RoomOutcome.AlreadyInRoom, (await Create(host)).Outcome);
     }
 
     [PostgresFact]
@@ -237,6 +278,7 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
     [InlineData(RoomStatus.Active, RoomOutcome.RoomStarted)]
     [InlineData(RoomStatus.Completed, RoomOutcome.RoomClosed)]
     [InlineData(RoomStatus.Cancelled, RoomOutcome.RoomClosed)]
+    [InlineData(RoomStatus.Abandoned, RoomOutcome.RoomClosed)]
     public async Task Room_that_is_no_longer_waiting_cannot_be_joined(RoomStatus status, RoomOutcome expected)
     {
         var (room, _) = await RoomWithHost();
@@ -414,6 +456,66 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
             """));
 
         Assert.Equal("23514", error.SqlState);
+    }
+
+    [PostgresTheory]
+    [InlineData("Waiting", true, false, "CK_GameRooms_StartedAt")] // waiting rooms have not started
+    [InlineData("Cancelled", true, true, "CK_GameRooms_StartedAt")] // only a waiting room is cancelled
+    [InlineData("Active", false, false, "CK_GameRooms_StartedAt")] // a match has a start time
+    [InlineData("Completed", false, true, "CK_GameRooms_StartedAt")]
+    [InlineData("Abandoned", false, true, "CK_GameRooms_StartedAt")]
+    [InlineData("Waiting", false, true, "CK_GameRooms_EndedAt")] // open rooms have not ended
+    [InlineData("Active", true, true, "CK_GameRooms_EndedAt")]
+    [InlineData("Cancelled", false, false, "CK_GameRooms_EndedAt")] // final rooms have an end time
+    [InlineData("Completed", true, false, "CK_GameRooms_EndedAt")]
+    [InlineData("Abandoned", true, false, "CK_GameRooms_EndedAt")]
+    public async Task Database_rejects_lifecycle_times_that_do_not_match_the_status(string status, bool started, bool ended, string constraint)
+    {
+        var (room, _) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+        DateTimeOffset? startedAt = started ? clock.GetUtcNow() : null;
+        DateTimeOffset? endedAt = ended ? clock.GetUtcNow() : null;
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "GameRooms" SET "Status" = {status}, "StartedAt" = {startedAt}, "EndedAt" = {endedAt} WHERE "Id" = {room.Id}
+            """));
+
+        Assert.Equal(("23514", constraint), (error.SqlState, error.ConstraintName));
+    }
+
+    [PostgresTheory]
+    [InlineData("Waiting", false, false)]
+    [InlineData("Active", true, false)]
+    [InlineData("Completed", true, true)]
+    [InlineData("Cancelled", false, true)]
+    [InlineData("Abandoned", true, true)]
+    public async Task Database_accepts_each_status_with_its_lifecycle_times(string status, bool started, bool ended)
+    {
+        var (room, _) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+        DateTimeOffset? startedAt = started ? clock.GetUtcNow() : null;
+        DateTimeOffset? endedAt = ended ? clock.GetUtcNow() : null;
+
+        Assert.Equal(1, await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "GameRooms" SET "Status" = {status}, "StartedAt" = {startedAt}, "EndedAt" = {endedAt} WHERE "Id" = {room.Id}
+            """));
+    }
+
+    [PostgresTheory]
+    [InlineData("[]")] // check: the snapshot is a JSON object
+    [InlineData("\"mint\"")]
+    [InlineData("null")]
+    public async Task Database_rejects_a_snapshot_that_is_not_an_object(string character)
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "Character" = {character}::jsonb
+            WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+
+        Assert.Equal(("23514", "CK_RoomMembers_Character"), (error.SqlState, error.ConstraintName));
     }
 
     [PostgresTheory]

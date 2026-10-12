@@ -148,6 +148,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("GameType")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -184,11 +187,13 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_GameRooms_Code_Format", "\"Code\" ~ '^[2-9A-HJKMNP-Z]{6}$'");
 
+                            t.HasCheckConstraint("CK_GameRooms_EndedAt", "(\"EndedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Active'))");
+
                             t.HasCheckConstraint("CK_GameRooms_MinPlayers", "\"MinPlayers\" >= 2 AND \"MinPlayers\" <= \"Capacity\"");
 
-                            t.HasCheckConstraint("CK_GameRooms_StartedAt", "\"StartedAt\" IS NULL OR \"Status\" <> 'Waiting'");
+                            t.HasCheckConstraint("CK_GameRooms_StartedAt", "(\"StartedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Cancelled'))");
 
-                            t.HasCheckConstraint("CK_GameRooms_Status", "\"Status\" IN ('Waiting', 'Active', 'Completed', 'Cancelled')");
+                            t.HasCheckConstraint("CK_GameRooms_Status", "\"Status\" IN ('Waiting', 'Active', 'Completed', 'Cancelled', 'Abandoned')");
                         });
                 });
 
@@ -200,7 +205,13 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("PlayerId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Character")
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LeftAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ReadyCharacterId")
@@ -217,6 +228,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                     b.ToTable("RoomMembers", null, t =>
                         {
+                            t.HasCheckConstraint("CK_RoomMembers_Character", "\"Character\" IS NULL OR jsonb_typeof(\"Character\") = 'object'");
+
                             t.HasCheckConstraint("CK_RoomMembers_Ready", "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))");
                         });
                 });

@@ -23,7 +23,7 @@ public enum RoomOutcome
     /// <summary>The game is listed but not enabled (coming soon or under maintenance).</summary>
     GameUnavailable,
 
-    /// <summary>The player is already in another waiting room, as host or member (DEC-020, DEC-021).</summary>
+    /// <summary>The player is already in another waiting room, as host or member, or still playing a started match (DEC-020, DEC-021, DEC-025).</summary>
     AlreadyInRoom,
 
     RoomNotFound,
@@ -33,7 +33,7 @@ public enum RoomOutcome
     /// <summary>The room's match has started.</summary>
     RoomStarted,
 
-    /// <summary>The room's match is over or the room was cancelled.</summary>
+    /// <summary>The room's match is over (completed or abandoned) or the room was cancelled.</summary>
     RoomClosed,
 
     /// <summary>The member's ready status was set (or already had that value).</summary>
@@ -56,11 +56,17 @@ public enum RoomOutcome
     /// <summary>NFT ownership can't be read right now, so the room can't start (DEC-019); nothing changed.</summary>
     OwnershipUnavailable,
 
-    /// <summary>The member left the room; when the host left, the room was cancelled (DEC-023).</summary>
+    /// <summary>
+    /// The member left the room; when the host left a waiting room, it was cancelled (DEC-023). Leaving a started
+    /// match is a forfeit, and the match is abandoned when fewer than two players remain (DEC-025).
+    /// </summary>
     Left,
+
+    /// <summary>The member had already left this started match; nothing changed.</summary>
+    AlreadyLeft,
 }
 
-/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c>, <c>AlreadyMember</c>, <c>ReadyChanged</c>, <c>Started</c> or <c>Left</c>.</param>
+/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c>, <c>AlreadyMember</c>, <c>ReadyChanged</c>, <c>Started</c>, <c>Left</c> or <c>AlreadyLeft</c>.</param>
 /// <param name="OpenRoomCode">For <c>AlreadyInRoom</c>: the code of the room the player is already in.</param>
 public sealed record RoomResult(RoomOutcome Outcome, GameRoom? Room = null, string? OpenRoomCode = null)
 {
@@ -147,7 +153,9 @@ public sealed class RoomService(
         }
 
         var room = await db.GameRooms.SingleAsync(r => r.Id == roomId, cancellationToken);
-        if (room.IsMember(player.Id))
+
+        // A player who left a started match can't come back (DEC-025); they fall through to the status refusal.
+        if (room.IsPlaying(player.Id))
         {
             return new RoomResult(RoomOutcome.AlreadyMember, room);
         }
@@ -156,7 +164,7 @@ public sealed class RoomService(
         {
             case RoomStatus.Active:
                 return new RoomResult(RoomOutcome.RoomStarted);
-            case RoomStatus.Completed or RoomStatus.Cancelled:
+            case not RoomStatus.Waiting:
                 return new RoomResult(RoomOutcome.RoomClosed);
         }
 
@@ -187,10 +195,11 @@ public sealed class RoomService(
     private Task LockPlayerAsync(Player player, CancellationToken cancellationToken) =>
         db.Database.ExecuteSqlInterpolatedAsync($"""SELECT 1 FROM "Players" WHERE "Id" = {player.Id} FOR UPDATE""", cancellationToken);
 
-    /// <summary>Code of a waiting room the player is in (as host or member), if any.</summary>
+    /// <summary>Code of a waiting room the player is in (as host or member) or a started match they still play, if any (DEC-025).</summary>
     private Task<string?> OpenRoomCodeAsync(Player player, CancellationToken cancellationToken) =>
         db.GameRooms.AsNoTracking()
-            .Where(r => r.Status == RoomStatus.Waiting && r.Members.Any(m => m.PlayerId == player.Id))
+            .Where(r => (r.Status == RoomStatus.Waiting || r.Status == RoomStatus.Active)
+                && r.Members.Any(m => m.PlayerId == player.Id && m.LeftAt == null))
             .Select(r => r.Code)
             .FirstOrDefaultAsync(cancellationToken);
 

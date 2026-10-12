@@ -169,7 +169,7 @@ public class GameRoomTests
 
         room.MarkReady(host);
         room.MarkReady(bob);
-        room.Start(host.Id, [host, bob], Now);
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Now);
 
         Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(bob.Id));
         Assert.Throws<InvalidOperationException>(() => room.MarkReady(bob));
@@ -185,7 +185,7 @@ public class GameRoomTests
         room.MarkReady(bob);
 
         Assert.Null(room.CheckStart(host.Id, [host, bob]));
-        room.Start(host.Id, [host, bob], Now.AddMinutes(2));
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Now.AddMinutes(2));
 
         Assert.Equal((RoomStatus.Active, Now.AddMinutes(2)), (room.Status, room.StartedAt));
         Assert.Equal(RoomStartProblem.NotWaiting, room.CheckStart(host.Id, [host, bob]));
@@ -216,7 +216,7 @@ public class GameRoomTests
         room.MarkReady(bob);
 
         Assert.Equal(RoomStartProblem.NotHost, room.CheckStart(bob.Id, [host, bob]));
-        Assert.Throws<InvalidOperationException>(() => room.Start(bob.Id, [host, bob], Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(bob.Id, [host, bob], Snapshots(host, bob), Now));
         Assert.Equal(RoomStatus.Waiting, room.Status);
     }
 
@@ -228,7 +228,7 @@ public class GameRoomTests
         room.MarkReady(host);
 
         Assert.Equal(RoomStartProblem.NotEnoughPlayers, room.CheckStart(host.Id, [host]));
-        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Now));
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public class GameRoomTests
         room.MarkReady(host);
         room.MarkReady(carol);
 
-        room.Leave(bob.Id);
+        room.Leave(bob.Id, Now);
 
         Assert.Equal(RoomStatus.Waiting, room.Status);
         Assert.False(room.IsMember(bob.Id));
@@ -300,7 +300,7 @@ public class GameRoomTests
         room.Join(bob, Now);
         Assert.True(room.IsFull);
 
-        room.Leave(bob.Id);
+        room.Leave(bob.Id, Now);
         room.Join(Guest(), Now);
 
         Assert.Equal(2, room.Members.Count);
@@ -313,29 +313,226 @@ public class GameRoomTests
         var bob = Guest();
         var room = RoomOf(host, bob);
 
-        room.Leave(host.Id);
+        room.Leave(host.Id, Now);
 
         Assert.Equal(RoomStatus.Cancelled, room.Status);
         Assert.Equal([host.Id, bob.Id], room.Members.Select(m => m.PlayerId));
         Assert.Throws<InvalidOperationException>(() => room.Join(Guest(), Now));
-        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id));
+        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id, Now));
     }
 
     [Fact]
-    public void Only_members_of_a_waiting_room_can_leave()
+    public void Only_members_can_leave()
+    {
+        var host = Guest();
+        var room = RoomOf(host, Guest());
+
+        Assert.Throws<InvalidOperationException>(() => room.Leave(Guid.NewGuid(), Now));
+        Assert.Equal((RoomStatus.Waiting, 2), (room.Status, room.Members.Count));
+    }
+
+    private static IReadOnlyDictionary<Guid, CharacterSnapshot> Snapshots(params Player[] players) =>
+        players.ToDictionary(p => p.Id, p => CharacterSnapshot.Standard(DefaultAvatar.Classic, Now));
+
+    /// <summary>A started match of <paramref name="players"/>, the first hosting.</summary>
+    private static GameRoom Started(params Player[] players)
+    {
+        var room = RoomOf(players[0], players[1..]);
+        foreach (var player in players)
+        {
+            room.MarkReady(player);
+        }
+
+        room.Start(players[0].Id, players, Snapshots(players), Now.AddMinutes(1));
+        return room;
+    }
+
+    public static TheoryData<RoomStatus, RoomStatus> AllowedTransitions => new()
+    {
+        { RoomStatus.Waiting, RoomStatus.Active },
+        { RoomStatus.Waiting, RoomStatus.Cancelled },
+        { RoomStatus.Active, RoomStatus.Completed },
+        { RoomStatus.Active, RoomStatus.Abandoned },
+    };
+
+    [Fact]
+    public void Lifecycle_allows_exactly_the_documented_transitions()
+    {
+        var allowed = AllowedTransitions.Select(row => ((RoomStatus)row[0], (RoomStatus)row[1])).ToHashSet();
+        foreach (var from in Enum.GetValues<RoomStatus>())
+        {
+            foreach (var to in Enum.GetValues<RoomStatus>())
+            {
+                Assert.Equal(allowed.Contains((from, to)), RoomLifecycle.CanMove(from, to));
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(RoomStatus.Waiting, false)]
+    [InlineData(RoomStatus.Active, false)]
+    [InlineData(RoomStatus.Completed, true)]
+    [InlineData(RoomStatus.Cancelled, true)]
+    [InlineData(RoomStatus.Abandoned, true)]
+    public void Completed_cancelled_and_abandoned_are_final(RoomStatus status, bool final)
+    {
+        Assert.Equal(final, RoomLifecycle.IsFinal(status));
+        Assert.Equal(final, Enum.GetValues<RoomStatus>().All(to => !RoomLifecycle.CanMove(status, to)));
+    }
+
+    [Fact]
+    public void Starting_locks_each_members_character_snapshot()
+    {
+        var host = Guest();
+        var bob = Choosing("mint");
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+        Assert.True(DefaultAvatar.TryFind("mint", out var mint));
+        var characters = new Dictionary<Guid, CharacterSnapshot>
+        {
+            [host.Id] = CharacterSnapshot.Standard(DefaultAvatar.Classic, Now),
+            [bob.Id] = CharacterSnapshot.Standard(mint, Now),
+        };
+
+        room.Start(host.Id, [host, bob], characters, Now.AddMinutes(1));
+
+        Assert.Equal((RoomStatus.Active, Now.AddMinutes(1), (DateTimeOffset?)null), (room.Status, room.StartedAt, room.EndedAt));
+        Assert.Equal(characters[host.Id], room.Members.Single(m => m.PlayerId == host.Id).Character);
+        Assert.Equal("mint", room.Members.Single(m => m.PlayerId == bob.Id).Character!.CharacterId);
+    }
+
+    [Fact]
+    public void A_start_without_every_snapshot_is_refused_unchanged()
     {
         var host = Guest();
         var bob = Guest();
         var room = RoomOf(host, bob);
-
-        Assert.Throws<InvalidOperationException>(() => room.Leave(Guid.NewGuid()));
-
         room.MarkReady(host);
         room.MarkReady(bob);
-        room.Start(host.Id, [host, bob], Now);
 
-        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id));
-        Assert.Throws<InvalidOperationException>(() => room.Leave(host.Id));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host), Now));
+
+        Assert.Equal((RoomStatus.Waiting, (DateTimeOffset?)null), (room.Status, room.StartedAt));
+        Assert.All(room.Members, m => Assert.Null(m.Character));
+    }
+
+    [Fact]
+    public void Cancelling_ends_the_room()
+    {
+        var host = Guest();
+        var room = RoomOf(host, Guest());
+
+        room.Leave(host.Id, Now.AddMinutes(3));
+
+        Assert.Equal((RoomStatus.Cancelled, (DateTimeOffset?)null, Now.AddMinutes(3)), (room.Status, room.StartedAt, room.EndedAt));
+        Assert.Throws<InvalidOperationException>(() => room.Complete(Now));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host], Snapshots(host), Now));
+        Assert.Equal(RoomStatus.Cancelled, room.Status);
+    }
+
+    [Fact]
+    public void Leaving_a_started_match_is_a_forfeit_and_the_match_goes_on()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var carol = Guest();
+        var room = Started(host, bob, carol);
+
+        room.Leave(bob.Id, Now.AddMinutes(5));
+
+        Assert.Equal((RoomStatus.Active, (DateTimeOffset?)null), (room.Status, room.EndedAt));
+        Assert.Equal(3, room.Members.Count);
+        var left = room.Members.Single(m => m.PlayerId == bob.Id);
+        Assert.Equal((true, Now.AddMinutes(5)), (left.HasLeft, left.LeftAt));
+        Assert.NotNull(left.Character);
+        Assert.True(room.IsMember(bob.Id));
+        Assert.True(room.HasLeft(bob.Id));
+        Assert.False(room.IsPlaying(bob.Id));
+        Assert.True(room.IsPlaying(carol.Id));
+    }
+
+    [Fact]
+    public void The_host_leaving_a_started_match_does_not_end_it()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var carol = Guest();
+        var room = Started(host, bob, carol);
+
+        room.Leave(host.Id, Now.AddMinutes(5));
+
+        Assert.Equal(RoomStatus.Active, room.Status);
+        Assert.True(room.HasLeft(host.Id));
+    }
+
+    [Fact]
+    public void A_match_with_fewer_than_two_players_left_is_abandoned()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var carol = Guest();
+        var room = Started(host, bob, carol);
+
+        room.Leave(carol.Id, Now.AddMinutes(4));
+        room.Leave(host.Id, Now.AddMinutes(6));
+
+        Assert.Equal((RoomStatus.Abandoned, Now.AddMinutes(1), Now.AddMinutes(6)), (room.Status, room.StartedAt, room.EndedAt));
+        Assert.True(room.IsPlaying(bob.Id));
+        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id, Now));
+        Assert.Throws<InvalidOperationException>(() => room.Complete(Now));
+        Assert.Equal(RoomStatus.Abandoned, room.Status);
+    }
+
+    [Fact]
+    public void A_player_cannot_leave_a_match_twice_or_one_they_are_not_in()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var carol = Guest();
+        var room = Started(host, bob, carol);
+        room.Leave(bob.Id, Now.AddMinutes(2));
+
+        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id, Now.AddMinutes(3)));
+        Assert.Throws<InvalidOperationException>(() => room.Leave(Guid.NewGuid(), Now));
+        Assert.Equal(Now.AddMinutes(2), room.Members.Single(m => m.PlayerId == bob.Id).LeftAt);
+        Assert.Equal(RoomStatus.Active, room.Status);
+    }
+
+    [Fact]
+    public void A_started_match_is_closed_to_joins_ready_changes_and_starts()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = Started(host, bob);
+
+        Assert.Throws<InvalidOperationException>(() => room.Join(Guest(), Now));
+        Assert.Throws<InvalidOperationException>(() => room.MarkNotReady(bob.Id));
+        Assert.Throws<InvalidOperationException>(() => room.Start(host.Id, [host, bob], Snapshots(host, bob), Now));
         Assert.Equal((RoomStatus.Active, 2), (room.Status, room.Members.Count));
+    }
+
+    [Fact]
+    public void A_finished_match_is_completed_and_final()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = Started(host, bob);
+
+        room.Complete(Now.AddMinutes(15));
+
+        Assert.Equal((RoomStatus.Completed, Now.AddMinutes(15)), (room.Status, room.EndedAt));
+        Assert.Throws<InvalidOperationException>(() => room.Complete(Now));
+        Assert.Throws<InvalidOperationException>(() => room.Leave(bob.Id, Now));
+        Assert.False(room.HasLeft(bob.Id));
+    }
+
+    [Fact]
+    public void Only_a_started_match_can_be_completed()
+    {
+        var room = RoomOf(Guest(), Guest());
+
+        Assert.Throws<InvalidOperationException>(() => room.Complete(Now));
+        Assert.Equal((RoomStatus.Waiting, (DateTimeOffset?)null), (room.Status, room.EndedAt));
     }
 }

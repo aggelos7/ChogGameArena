@@ -35,8 +35,16 @@
         </span>
       </section>
 
-      @if (current.status === 'Active') {
+      @if (current.status === 'Active' && you()?.hasLeft) {
+        <p class="started" role="status" data-left>
+          You left this game. <a routerLink="/games">Find another game</a>
+        </p>
+      } @else if (current.status === 'Active') {
         <p class="started" role="status" data-started>The game has started.</p>
+      } @else if (current.status === 'Abandoned') {
+        <p class="started" role="status" data-closed>
+          This game ended early: too many players left. <a routerLink="/games">Find another game</a>
+        </p>
       } @else if (current.status !== 'Waiting') {
         <p class="started" role="status" data-closed>
           This room is closed. <a routerLink="/games">Find another game</a>
@@ -58,6 +66,9 @@
                   @if (member.isYou) {
                     <span class="tag you">You</span>
                   }
+                  @if (member.hasLeft) {
+                    <span class="tag left">Left</span>
+                  }
                 </p>
                 <p class="details">
                   <span data-chog>{{ member.character.name }}</span>
@@ -65,9 +76,11 @@
                   <span data-ability>{{ member.ability ?? 'Ability not chosen yet' }}</span>
                 </p>
               </div>
-              <span class="readiness" [class.ready]="member.isReady" data-readiness>
-                {{ member.isReady ? 'Ready' : 'Not ready' }}
-              </span>
+              @if (current.status === 'Waiting') {
+                <span class="readiness" [class.ready]="member.isReady" data-readiness>
+                  {{ member.isReady ? 'Ready' : 'Not ready' }}
+                </span>
+              }
             </li>
           }
         </ul>
@@ -121,6 +134,28 @@
             <p class="action-error" role="alert" data-error="action">{{ message(failure) }}</p>
           }
         </section>
+      }
+
+      @if (current.status === 'Active' && you(); as me) {
+        @if (!me.hasLeft) {
+          <section class="match" aria-labelledby="match-heading">
+            <h2 id="match-heading">Game</h2>
+            <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
+            <div class="leave" data-leave>
+              @if (confirmingLeave()) {
+                <p class="warning" role="alert">Leaving forfeits this game, and you can’t come back to it.</p>
+                <button type="button" class="danger" [disabled]="busy()" (click)="leave()">Leave and forfeit</button>
+                <button type="button" [disabled]="busy()" (click)="confirmingLeave.set(false)">Stay</button>
+              } @else {
+                <button type="button" [disabled]="busy()" (click)="leave()">Leave game</button>
+              }
+            </div>
+
+            @if (actionError(); as failure) {
+              <p class="action-error" role="alert" data-error="action">{{ message(failure) }}</p>
+            }
+          </section>
+        }
       }
     }
   }

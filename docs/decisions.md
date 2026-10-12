@@ -62,7 +62,7 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Room codes:** 6 characters from 31 letters and digits without look-alikes (no 0, O, 1, I or L), about 887 million codes, drawn with cryptographically secure randomness. Uniqueness is a database index; a collision draws another code.
   - **Hosting:** a player may host one `Waiting` room at a time (filtered unique index). Rate limits come with the room API (STORY-020).
 - DEC-021 (2026-10-11, STORY-020 — confirmed by product owner): Joining rooms.
-  - **One open room per player:** a player who is in a `Waiting` room, as host or member, can't create or join another; the refusal names that room. Whether an `Active` match also blocks this is decided with the match lifecycle (STORY-023).
+  - **One open room per player:** a player who is in a `Waiting` room, as host or member, can't create or join another; the refusal names that room. An `Active` match the player is still in blocks this too (DEC-025).
   - **Rejoining:** joining a room you're already in succeeds and changes nothing, so invite links and double taps are safe.
   - **Errors:** problem details with a stable `code`: `unknown_game` (400), `room_not_found` (404, also for malformed codes and for rooms the caller isn't in), `game_unavailable`, `already_in_room`, `room_full`, `room_started`, `room_closed` (409).
   - **Web:** a minimal create/join screen and room page; members appear on refresh until live updates (STORY-022).
@@ -72,7 +72,7 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Host ready:** everyone, the host included, must mark ready.
   - **Changing Chog:** ready counts only for the Chog selected when marking ready, so choosing another Chog makes the player not ready. Joins and leaves don't change anyone else's ready status.
   - **Errors:** `not_host` (403), `not_enough_players`, `players_not_ready`, `character_unavailable` (409), `ownership_unavailable` (503), plus the room codes of DEC-021.
-- DEC-023 (2026-10-12, product owner): Leaving a waiting room is STORY-063. A member who leaves frees their seat and their one open room. A host who leaves cancels the room for everyone; hosting is not passed on. Leaving an active match is decided with STORY-023/025/027.
+- DEC-023 (2026-10-12, product owner): Leaving a waiting room is STORY-063. A member who leaves frees their seat and their one open room. A host who leaves cancels the room for everyone; hosting is not passed on. Leaving an active match is a forfeit (DEC-025).
 - DEC-024 (2026-10-12, STORY-022 — confirmed by product owner): Live room updates.
   - **Hub:** one SignalR hub at `/api/hubs/rooms`, WebSockets only, authenticated by the session cookie. A connection subscribes to a room only after the server checks membership; unknown codes and rooms the caller isn't in both fail with `room_not_found`. Players who leave are taken out of the room's group, so messages reach members only.
   - **Payload:** the server sends only `RoomChanged(code)`; clients fetch `GET /api/rooms/{code}`, which stays the one source of room state. Versioned snapshots and resync come with STORY-026.
@@ -80,4 +80,9 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Web:** the lobby follows the room live; Refresh is offered only while live updates are down.
   - **Dependencies:** `@microsoft/signalr` (web, pinned exactly; its Node-only transitive packages are not bundled) and `Microsoft.AspNetCore.SignalR.Client` (backend tests only) are approved.
   - **Scale:** subscriptions are tracked in memory, so one API instance; several need a backplane and shared tracking (ADR-010).
+- DEC-025 (2026-10-12, STORY-023 — confirmed by product owner): Match lifecycle.
+  - **States:** `Waiting`, `Active`, `Completed`, `Cancelled`, `Abandoned`. The allowed transitions are Waiting → Active (the host starts), Waiting → Cancelled (the host leaves), Active → Completed (the game finishes, set by game rules in later stories) and Active → Abandoned (fewer than two players remain). Completed, Cancelled and Abandoned are final. Any other transition is refused, and nothing changes. `Cancelled` always means a room that never started; `Abandoned` means a match that started and ended early.
+  - **One open room:** a player who is in a `Waiting` room, or who is playing in an `Active` match, can't create or join another room (`already_in_room`, extending DEC-021).
+  - **Leaving a started match is a forfeit:** the player keeps their seat record and character snapshot, is marked as left, and is free to play elsewhere. They can still read the room but don't get its live updates and can't rejoin. The match continues while two or more players remain; otherwise it becomes `Abandoned`. Once the match starts, the host has no special role, and the host leaving doesn't end the match.
+  - **Character snapshot:** the snapshot taken at start (DEC-019) is stored on each room member, which is the match player record. It's saved in the same transaction as the start, and the room shows each member's locked Chog from then on.
 - DEC-011: Adopt Nx for Angular workspace and frontend task orchestration; keep .NET 8 solution native, optionally wrapped by Nx run-commands. No Nx Cloud for MVP. No production topology changes.
