@@ -199,7 +199,7 @@ describe('Room page', () => {
 
     live.events.next({ type: 'status', status: 'offline' });
     fixture.detectChanges();
-    expect(liveStatus()?.textContent?.trim()).toBe('Live updates are off: refresh to see who joined and who is ready.');
+    expect(liveStatus()?.textContent?.trim()).toBe('Live updates are off; still trying to reconnect. Refresh to see the latest now.');
 
     button('Refresh').click();
     http.expectOne('/api/rooms/K7QF3M').flush(withCarol(2));
