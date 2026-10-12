@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-13 (STORY-029).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-13 (STORY-030).
 
 ## Stories done
 
@@ -36,7 +36,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-026 | #111 | Realtime sync: the hub pushes each member their own versioned room snapshot (`RoomUpdated`), and `SubscribeRoom` returns the current one for resync. Clients keep the newest version. Snapshots carry the game state through `IMatchRules.ViewFor`, filtered per player (DEC-028). |
 | STORY-027 | #113 | Reconnect: `GET /api/rooms/current` finds the player's open room and a shell banner leads back to it; the web client reconnects forever with backoff, at once when back online or the tab is shown, and resyncs by subscribing. Being away never pauses the turn timer or earns a turn (DEC-029). |
 | STORY-028 | #115 | Results and restarts: rules finish a match with standings, ranks stored once on the members with the move to Completed, stats updated in the same transaction (completed matches only, leavers count as played); on startup active matches resume with a full new turn and a bumped version (DEC-030). |
-| STORY-029 | (this PR) | Randomness and security: `IRandomSource` (Core) reaches the rules in their command and timeout contexts, `SecureRandomSource` in production; seats are drawn in a secure random order at start; tests show forged rolls and player ids are ignored, retries can't reroll, and unauthorized room/turn/ability commands change nothing and draw nothing (DEC-031). |
+| STORY-029 | #117 | Randomness and security: `IRandomSource` (Core) reaches the rules in their command and timeout contexts, `SecureRandomSource` in production; seats are drawn in a secure random order at start; tests show forged rolls and player ids are ignored, retries can't reroll, and unauthorized room/turn/ability commands change nothing and draw nothing (DEC-031). |
+| STORY-030 | (this PR) | Ability contract (Core): `AbilityDefinition`s in a per-game, versioned `AbilityCatalog` validated when built (one handler each, parameters in the handler's ranges); `AbilityEngine` uses an ability by id, checking player, payload, ability, seat target, activation window and the game's conditions before the effect. Handlers see ids and seats only, never characters or traits (DEC-032). |
 
 ## Key architectural decisions
 
@@ -47,6 +48,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Stored ownership only backs gallery listing during an outage of up to 10 minutes.
   - An ownership outage blocks starting with an NFT; there's no silent fallback to a standard Chog (DEC-019).
 - **Abilities:** MVP uses `SharedAbilityPool` only. The lobby's ability field stays `null` until STORY-033.
+  - Contract (DEC-032): `ChogGames.Core.Abilities`. Each game builds an `AbilityCatalog` (game type, version, definitions, one `IAbilityHandler` per ability, an `IAbilityTiming` for its activation windows); `AbilityCatalog.Create` throws on anything inconsistent. `AbilityEngine.Use` takes `{"abilityId", "target"}` (target = seat) and refuses with `not_playing`, `invalid_ability_payload`, `unknown_ability`, `invalid_target`, `ability_not_now` or the handler's own code, before any effect or draw.
+  - Not wired into `MatchCommandService` yet; no game registers a catalog. Selection, the selected-ability check, usage counting and routing `USE_ABILITY` are STORY-033/034.
 - **Rooms:**
   - Supported games are seeded `GameDefinitions` rows; whether a game is enabled comes from `Games:Items` configuration.
   - A player can be in one open room at a time: a `Waiting` room (as host or member) or an `Active` match they haven't left.
@@ -95,6 +98,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Reconnect tests (`ReconnectTests`) model a browser refresh as a new client with only the session cookie, and drive turn timeouts by calling `TurnTimeoutService` directly.
   - Sync tests (`RoomSyncTests`) use two live hub clients and a fake game with per-player secrets to show convergence, resync and private views.
   - Chance is scripted: `ScriptedRandomSource` (in Core.Tests and Api.Tests) returns queued values, then the highest allowed, which keeps a shuffle's order. `ApiFactory` registers it by default, so seats stay in join order (host first) unless a test scripts otherwise.
+  - Ability tests (`Core.Tests/Abilities`) use `FakeAbilityGame` (a boost and a seat-targeted steal); a reflection test shows nothing in the handler-facing contract can reach characters, NFT traits or rooms.
   - Security tests (`MatchSecurityTests`) use a fake dice game: forged rolls and player ids are ignored, retries don't reroll, and every unauthorized command (outsider, other match, not started, not your turn, forfeited, expired, stale, closed; for `ROLL` and `USE_ABILITY`) changes nothing, records nothing, draws nothing and never reaches the rules.
   - Turn tests (`MatchTurnTests`) use a `ManualTimeProvider`, remove `TurnTimeoutWorker` and call `TurnTimeoutService` directly; one test keeps the worker to show it runs by itself.
   - CI checks that the EF model has no changes missing from a migration.
@@ -150,7 +154,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-030 — Define ability catalog and execution contract** (E05 abilities, STORY-030 to 034).
+1. **STORY-031 — Shared ability pool strategy** (E05 abilities, STORY-031 to 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.
