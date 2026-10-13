@@ -8,9 +8,10 @@ using ChogGames.Games.ChogLife.Rules;
 namespace ChogGames.Games.ChogLife.Tests;
 
 /// <summary>
-/// STORY-036 to STORY-038 (DEC-038 to DEC-040): a Chog Life match starts with every pawn on the start tile with the
+/// STORY-036 to STORY-039 (DEC-038 to DEC-041): a Chog Life match starts with every pawn on the start tile with the
 /// starting MON under the current rules version, and every player sees that version's board and the pawns, with their
-/// MON, of the players still playing. A roll moves the pawn and resolves the tile it stops on.
+/// MON, of the players still playing. A roll moves the pawn and resolves the tile it stops on; a roll that stops on a
+/// fork keeps the turn until the player chooses a lane, and a turn that runs out first takes the default lane.
 /// </summary>
 public class ChogLifeMatchRulesTests
 {
@@ -240,16 +241,244 @@ public class ChogLifeMatchRulesTests
         Assert.Equal(2, LastMove(decision).GetProperty("roll").GetInt32());
     }
 
+    private static MatchRuleDecision Choose(GameRoom room, Player player, string? state, object? payload)
+    {
+        using var document = state is null ? null : JsonDocument.Parse(state);
+        return Rules.Apply(new MatchCommandContext(
+            room,
+            player.Id,
+            ChogLifeMatchRules.ChooseLane,
+            JsonSerializer.SerializeToElement(payload),
+            document?.RootElement.Clone(),
+            new Dice()));
+    }
+
+    private static string Lane(object lane) => JsonSerializer.Serialize(new { lane });
+
+    private static string? TimeOut(GameRoom room, string state)
+    {
+        using var document = JsonDocument.Parse(state);
+        return Rules.TimeOutTurn(new MatchTurnContext(room, document.RootElement, new Dice()))?.GetRawText();
+    }
+
+    /// <summary>Seat 1 rolls 6 from tile 6 onto the first fork (tile 9) and is choosing a lane.</summary>
+    private static (GameRoom Room, Player[] Players, string State) AtFork(int count = 2)
+    {
+        var (room, players) = Started(count);
+        var toBranch = Roll(room, players[0], StateWith((1, 6), (2, 0)), new Dice(6));
+        return (room, players, toBranch.State!.Value.GetRawText());
+    }
+
     [Fact]
-    public void A_move_stops_on_a_branch_and_the_next_one_takes_the_safe_lane()
+    public void A_move_that_stops_on_a_branch_keeps_the_turn_for_the_lane_choice()
     {
         var (room, players) = Started(2);
 
         var toBranch = Roll(room, players[0], StateWith((1, 6), (2, 0)), new Dice(6));
-        Assert.Equal("""{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9]}""", LastMove(toBranch).GetRawText());
 
-        var offBranch = Roll(room, players[0], toBranch.State!.Value.GetRawText(), new Dice(2));
-        Assert.Equal("""{"seat":1,"roll":2,"from":9,"to":11,"path":[10,11]}""", LastMove(offBranch).GetRawText());
+        Assert.Equal((MatchRuleOutcome.Accepted, false), (toBranch.Outcome, toBranch.EndsTurn));
+        Assert.Equal("""{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9]}""", LastMove(toBranch).GetRawText());
+        Assert.Equal(1, toBranch.State!.Value.GetProperty("choosing").GetInt32());
+        Assert.Equal([(1, 9), (2, 0)], Pawns(toBranch.State.Value));
+    }
+
+    [Theory]
+    [InlineData("Safe", 2, new[] { 10, 11 }, 0)]
+    [InlineData("Degen", 2, new[] { 14, 15 }, 60)]
+    public void The_chosen_lane_ends_the_turn_and_the_next_roll_leaves_by_it(string lane, int roll, int[] path, int change)
+    {
+        var (room, players, state) = AtFork();
+
+        var chosen = Choose(room, players[0], state, new { lane });
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (chosen.Outcome, chosen.EndsTurn));
+        Assert.False(chosen.State!.Value.TryGetProperty("choosing", out _));
+        Assert.Equal(lane, chosen.State.Value.GetProperty("pawns")[0].GetProperty("lane").GetString());
+        Assert.Equal(
+            $$"""{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9],"lane":"{{lane}}"}""",
+            LastMove(chosen).GetRawText());
+
+        var dice = new Dice(roll);
+        var off = Roll(room, players[0], chosen.State.Value.GetRawText(), dice);
+
+        Assert.Equal([(1, 7)], dice.Draws);
+        Assert.Equal(path, LastMove(off).GetProperty("path").EnumerateArray().Select(t => t.GetInt32()));
+        Assert.Equal(100 + change, Mon(off.State!.Value)[0]);
+        Assert.False(off.State.Value.GetProperty("pawns")[0].TryGetProperty("lane", out _));
+    }
+
+    [Theory]
+    [InlineData("Main")]
+    [InlineData("safe")]
+    [InlineData("DEGEN")]
+    [InlineData("")]
+    [InlineData(1)]
+    [InlineData(null)]
+    public void Only_the_offered_lanes_are_accepted(object? lane)
+    {
+        var (room, players, state) = AtFork();
+
+        var decision = Choose(room, players[0], state, new { lane });
+
+        Assert.Equal((MatchRuleOutcome.Rejected, "invalid_lane"), (decision.Outcome, decision.Reason));
+    }
+
+    [Fact]
+    public void A_choice_without_a_lane_is_refused()
+    {
+        var (room, players, state) = AtFork();
+
+        foreach (var payload in new object[] { new { }, new { route = "Degen" }, new[] { "Degen" }, "Degen" })
+        {
+            Assert.Equal("invalid_lane", Choose(room, players[0], state, payload).Reason);
+        }
+    }
+
+    [Fact]
+    public void A_roll_while_choosing_is_refused_without_a_draw()
+    {
+        var (room, players, state) = AtFork();
+        var dice = new Dice();
+
+        var decision = Roll(room, players[0], state, dice);
+
+        Assert.Equal((MatchRuleOutcome.Rejected, "choose_lane_first"), (decision.Outcome, decision.Reason));
+        Assert.Empty(dice.Draws);
+    }
+
+    [Fact]
+    public void A_choice_with_none_pending_is_refused()
+    {
+        var (room, players, state) = AtFork();
+        var chosen = Choose(room, players[0], state, new { lane = "Degen" }).State!.Value.GetRawText();
+
+        Assert.Equal("no_choice_pending", Choose(room, players[0], room.State, new { lane = "Safe" }).Reason);
+        Assert.Equal("no_choice_pending", Choose(room, players[0], chosen, new { lane = "Safe" }).Reason);
+        Assert.Equal("no_choice_pending", Choose(room, players[1], state, new { lane = "Safe" }).Reason);
+        Assert.Equal("no_choice_pending", Choose(room, players[0], StateWith((1, 9), (2, 0)), new { lane = "Degen" }).Reason);
+    }
+
+    [Fact]
+    public void A_choice_marked_on_a_pawn_off_a_fork_is_refused()
+    {
+        var (room, players) = Started(2);
+        var forged = """{"rulesVersion":1,"pawns":[{"seat":1,"tile":4,"mon":100},{"seat":2,"tile":0,"mon":100}],"choosing":1}""";
+
+        Assert.Equal("no_choice_pending", Choose(room, players[0], forged, new { lane = "Degen" }).Reason);
+    }
+
+    [Theory]
+    [InlineData("Main")]
+    [InlineData("Sideways")]
+    public void A_pawn_with_a_lane_it_cant_take_is_unplayable(string lane)
+    {
+        var (room, players) = Started(2);
+        var state = $$"""{"rulesVersion":1,"pawns":[{"seat":1,"tile":9,"mon":100,"lane":"{{lane}}"},{"seat":2,"tile":0,"mon":100}]}""";
+        var dice = new Dice();
+
+        Assert.Equal("game_state_unavailable", Roll(room, players[0], state, dice).Reason);
+        Assert.Empty(dice.Draws);
+    }
+
+    [Fact]
+    public void A_pawn_on_a_branch_with_no_lane_leaves_by_the_default_one()
+    {
+        // A match from before STORY-039 leaves its pawns on a branch with no lane and no choice pending.
+        var (room, players) = Started(2);
+
+        var decision = Roll(room, players[0], StateWith((1, 9), (2, 0)), new Dice(2));
+
+        Assert.Equal("""{"seat":1,"roll":2,"from":9,"to":11,"path":[10,11]}""", LastMove(decision).GetRawText());
+        Assert.True(decision.EndsTurn);
+    }
+
+    [Fact]
+    public void A_turn_that_runs_out_while_choosing_takes_the_default_safe_lane()
+    {
+        var (room, players, state) = AtFork();
+
+        var timedOut = TimeOut(room, state);
+
+        Assert.NotNull(timedOut);
+        using var document = JsonDocument.Parse(timedOut);
+        Assert.False(document.RootElement.TryGetProperty("choosing", out _));
+        Assert.Equal("Safe", document.RootElement.GetProperty("pawns")[0].GetProperty("lane").GetString());
+        Assert.Equal(
+            """{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9],"lane":"Safe","byDefault":true}""",
+            document.RootElement.GetProperty("lastMove").GetRawText());
+
+        var off = Roll(room, players[0], timedOut, new Dice(1));
+        Assert.Equal([10], LastMove(off).GetProperty("path").EnumerateArray().Select(t => t.GetInt32()));
+    }
+
+    [Fact]
+    public void A_degen_default_lane_is_taken_when_configured()
+    {
+        var degenFirst = LifeRules.Create(
+            2,
+            LifeRulesV1.Rules.Tiles,
+            startingMon: 100,
+            finishBonus: 100,
+            timeCap: TimeSpan.FromMinutes(20),
+            dieFaces: 6,
+            events: LifeRulesV1.Rules.Events.Values,
+            defaultLane: LifeLane.Degen);
+        var rules = new ChogLifeMatchRules([degenFirst]);
+        var (room, _) = Started(2, rules);
+        using var state = JsonDocument.Parse(
+            """{"rulesVersion":2,"pawns":[{"seat":1,"tile":9,"mon":100},{"seat":2,"tile":0,"mon":100}],"choosing":1}""");
+
+        var timedOut = rules.TimeOutTurn(new MatchTurnContext(room, state.RootElement, new Dice()))!.Value;
+
+        Assert.Equal("Degen", timedOut.GetProperty("pawns")[0].GetProperty("lane").GetString());
+        Assert.Equal("Degen", rules.ViewFor(new MatchViewContext(room, room.CurrentPlayerId!.Value, timedOut))!.Value
+            .GetProperty("defaultLane").GetString());
+    }
+
+    [Fact]
+    public void A_turn_that_runs_out_with_no_choice_pending_is_skipped()
+    {
+        var (room, players, state) = AtFork();
+        var chosen = Choose(room, players[0], state, new { lane = "Degen" }).State!.Value.GetRawText();
+
+        Assert.Null(TimeOut(room, chosen));
+        Assert.Null(TimeOut(room, StateWith((1, 9), (2, 0))));
+        Assert.Null(TimeOut(room, """{"rulesVersion":7,"pawns":[{"seat":1,"tile":9}],"choosing":1}"""));
+        Assert.Null(TimeOut(room, """{"rulesVersion":1,"pawns":[{"seat":1,"tile":4},{"seat":2,"tile":0}],"choosing":1}"""));
+    }
+
+    [Fact]
+    public void A_choice_left_by_a_player_who_is_not_on_turn_is_never_resolved_for_them()
+    {
+        // Seat 2 is marked choosing but it's seat 1's turn (seat 2 left mid-choice and the turn moved on): the timeout
+        // doesn't choose for seat 2, and seat 1's roll goes ahead and clears the stale mark.
+        var (room, players) = Started(3);
+        var stale = """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"mon":100},{"seat":2,"tile":9,"mon":100},{"seat":3,"tile":0,"mon":100}],"choosing":2}""";
+
+        Assert.Null(TimeOut(room, stale));
+        var decision = Roll(room, players[0], stale, new Dice(1));
+
+        Assert.Equal(MatchRuleOutcome.Accepted, decision.Outcome);
+        Assert.False(decision.State!.Value.TryGetProperty("choosing", out _));
+    }
+
+    [Fact]
+    public void Every_player_sees_who_is_choosing_and_the_default_lane()
+    {
+        var (room, players, state) = AtFork(3);
+        using var document = JsonDocument.Parse(state);
+
+        var views = players
+            .Select(p => Rules.ViewFor(new MatchViewContext(room, p.Id, document.RootElement))!.Value)
+            .ToArray();
+
+        Assert.Single(views.Select(v => v.GetRawText()).Distinct());
+        Assert.Equal(1, views[0].GetProperty("choosing").GetInt32());
+        Assert.Equal("Safe", views[0].GetProperty("defaultLane").GetString());
+
+        room.Leave(players[0].Id, Now.AddMinutes(2));
+        var afterLeaving = Rules.ViewFor(new MatchViewContext(room, players[1].Id, document.RootElement))!.Value;
+        Assert.False(afterLeaving.TryGetProperty("choosing", out _));
     }
 
     [Fact]

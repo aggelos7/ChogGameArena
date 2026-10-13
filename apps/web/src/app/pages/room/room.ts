@@ -20,7 +20,7 @@ import {
 } from '../../rooms/rooms-api';
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { LifeBoardView } from '../../games/chog-life/life-board';
-import { LIFE_ROLL, toLifeBoard } from '../../games/chog-life/life-board-model';
+import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
@@ -190,13 +190,22 @@ export class RoomPage implements OnInit {
    * updates are down. A refused roll (another player's turn, a turn that ran out, a stale view) shows the room as it is.
    */
   protected roll(): void {
+    this.command(LIFE_ROLL);
+  }
+
+  /** Chooses the route to leave a fork by, after a roll stopped there (STORY-039, DEC-041); refusals as for a roll. */
+  protected chooseLane(lane: LifeRoute): void {
+    this.command(LIFE_CHOOSE_LANE, { lane });
+  }
+
+  private command(type: string, payload: object = {}): void {
     const room = this.room();
     if (!room || this.busy()) {
       return;
     }
     this.busy.set(true);
     this.actionError.set(null);
-    this.api.sendCommand(room, LIFE_ROLL).subscribe({
+    this.api.sendCommand(room, type, payload).subscribe({
       next: () => {
         this.busy.set(false);
         this.refreshQuietly();

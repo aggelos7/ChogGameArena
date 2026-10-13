@@ -6,9 +6,9 @@ namespace ChogGames.Games.ChogLife.Rules;
 
 /// <summary>
 /// Chog Life rules version 1 (STORY-035, DEC-037): 36 tiles on a main track with two Safe/Degen forks, 100 MON to
-/// start, +100 MON for the first player to finish, a 20-minute cap, one six-sided die and the event outcomes of
-/// STORY-038 (DEC-040). These are proposed defaults to be balanced in STORY-044 (requirements §15); any change means
-/// version 2.
+/// start, +100 MON for the first player to finish, a 20-minute cap, one six-sided die, the event outcomes of
+/// STORY-038 (DEC-040) and the safe lane for a player who doesn't choose at a fork (STORY-039, DEC-041).
+/// These are proposed defaults to be balanced in STORY-044 (requirements §15); any change means version 2.
 /// </summary>
 public static class LifeRulesV1
 {
@@ -22,7 +22,8 @@ public static class LifeRulesV1
         finishBonus: 100,
         timeCap: TimeSpan.FromMinutes(20),
         dieFaces: 6,
-        events: Events());
+        events: Events(),
+        defaultLane: LifeLane.Safe);
 
     /// <summary>
     /// Airdrops always pay, a market moves 10% of liquid MON either way, a rug takes 40% and a liquidation 25%, at least

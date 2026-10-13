@@ -5,7 +5,8 @@ namespace ChogGames.Games.ChogLife.Rules;
 
 /// <summary>
 /// A version of the Chog Life rules: the board, the starting MON, the first-finish bonus, the match's time cap, the
-/// die (STORY-035, LIFE-001, LIFE-002, LIFE-007, ENG-011, DEC-037) and what each event does (STORY-038, DEC-040). Like an ability catalog (DEC-032) it is versioned
+/// die (STORY-035, LIFE-001, LIFE-002, LIFE-007, ENG-011, DEC-037), what each event does (STORY-038, DEC-040) and the
+/// lane a player who doesn't choose at a fork takes (STORY-039, DEC-041). Like an ability catalog (DEC-032) it is versioned
 /// code in the game module, checked when it is built, so a malformed board stops the API at startup instead of
 /// failing during a match. MON are fictional whole-number game points (DEC-010); nothing here touches a wallet or
 /// the chain.
@@ -37,7 +38,8 @@ public sealed class LifeRules
         int finishBonus,
         TimeSpan timeCap,
         int dieFaces,
-        IReadOnlyDictionary<LifeEventKind, LifeEvent> events)
+        IReadOnlyDictionary<LifeEventKind, LifeEvent> events,
+        LifeLane defaultLane)
     {
         Version = version;
         Tiles = tiles;
@@ -46,6 +48,7 @@ public sealed class LifeRules
         TimeCap = timeCap;
         DieFaces = dieFaces;
         Events = events;
+        DefaultLane = defaultLane;
     }
 
     /// <summary>The game these rules are for.</summary>
@@ -77,12 +80,18 @@ public sealed class LifeRules
     public IReadOnlyDictionary<LifeEventKind, LifeEvent> Events { get; }
 
     /// <summary>
+    /// The lane taken at a fork when the player's turn runs out before they choose, or when a pawn from before STORY-039
+    /// stands on a branch with no lane (LIFE-005, DEC-041): <see cref="LifeLane.Safe"/> or <see cref="LifeLane.Degen"/>.
+    /// </summary>
+    public LifeLane DefaultLane { get; }
+
+    /// <summary>
     /// Rules with these values, or <see cref="ArgumentException"/> naming the first problem: the board must have
     /// <see cref="MinTiles"/> to <see cref="MaxTiles"/> tiles indexed in order, from one start to one finish, every
     /// link pointing forward to an existing tile, every tile reachable, each fork's safe and degen lanes joining the
     /// main track again at the same tile, and every amount and event kind on the tiles that use one. Each event kind is
     /// defined once, every kind on the board is defined, and each event's outcomes have chances of 1–100% adding up to
-    /// 100% and move some MON within range.
+    /// 100% and move some MON within range. The default lane is Safe or Degen.
     /// </summary>
     public static LifeRules Create(
         int version,
@@ -91,7 +100,8 @@ public sealed class LifeRules
         int finishBonus,
         TimeSpan timeCap,
         int dieFaces,
-        IEnumerable<LifeEvent> events)
+        IEnumerable<LifeEvent> events,
+        LifeLane defaultLane = LifeLane.Safe)
     {
         if (version < 1)
         {
@@ -118,21 +128,27 @@ public sealed class LifeRules
             throw new ArgumentOutOfRangeException(nameof(dieFaces), dieFaces, $"A die has {MinDieFaces} to {MaxDieFaces} faces.");
         }
 
+        if (defaultLane is not (LifeLane.Safe or LifeLane.Degen))
+        {
+            throw new ArgumentOutOfRangeException(nameof(defaultLane), defaultLane, "The default lane is Safe or Degen.");
+        }
+
         ArgumentNullException.ThrowIfNull(tiles);
         var board = tiles.ToArray();
         CheckBoard(board);
         ArgumentNullException.ThrowIfNull(events);
         var byKind = CheckEvents(board, events.ToArray());
-        return new LifeRules(version, board, startingMon, finishBonus, timeCap, dieFaces, byKind);
+        return new LifeRules(version, board, startingMon, finishBonus, timeCap, dieFaces, byKind, defaultLane);
     }
 
     /// <summary>
     /// The tiles a pawn on <paramref name="from"/> passes for a roll of <paramref name="steps"/>, the last being where it
     /// stops (STORY-037, DEC-039). It stops early on a Branch, whatever steps are left, and on the Finish, which a roll
-    /// may overshoot. Leaving a branch takes its safe lane; the choice of lane comes with STORY-039. A pawn on the Finish
-    /// doesn't move, so the path is empty.
+    /// may overshoot. A pawn leaving a branch takes the lane its player chose there (STORY-039, DEC-041); with no
+    /// <paramref name="lane"/> it takes <see cref="DefaultLane"/>. The lane only matters when <paramref name="from"/> is a
+    /// branch. A pawn on the Finish doesn't move, so the path is empty.
     /// </summary>
-    public IReadOnlyList<int> Path(int from, int steps)
+    public IReadOnlyList<int> Path(int from, int steps, LifeLane? lane = null)
     {
         if (from < 0 || from >= Tiles.Count)
         {
@@ -144,9 +160,15 @@ public sealed class LifeRules
             throw new ArgumentOutOfRangeException(nameof(steps), steps, "A move has at least one step.");
         }
 
+        var exit = lane ?? DefaultLane;
+        if (exit is not (LifeLane.Safe or LifeLane.Degen))
+        {
+            throw new ArgumentOutOfRangeException(nameof(lane), lane, "A pawn leaves a branch by its Safe or Degen lane.");
+        }
+
         var path = new List<int>();
         var tile = Tiles[from];
-        while (path.Count < steps && (tile.Type == LifeTileType.Branch ? tile.SafeNext : tile.Next) is { } next)
+        while (path.Count < steps && NextFrom(tile, exit) is { } next)
         {
             tile = Tiles[next];
             path.Add(next);
@@ -158,6 +180,10 @@ public sealed class LifeRules
 
         return path;
     }
+
+    private static int? NextFrom(LifeTile tile, LifeLane lane) => tile.Type != LifeTileType.Branch
+        ? tile.Next
+        : lane == LifeLane.Degen ? tile.DegenNext : tile.SafeNext;
 
     /// <summary>
     /// What landing on <paramref name="tile"/> does to a player holding <paramref name="liquid"/> MON (STORY-038,

@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RoomMember } from '../../rooms/rooms-api';
 import { LifeBoardView } from './life-board';
 import { FORK_BOARD } from '../../testing';
-import { LifeBoard, lifeRows, seatColor, toLifeBoard } from './life-board-model';
+import { LifeBoard, laneSummary, laneTiles, lifeRows, seatColor, toLifeBoard } from './life-board-model';
 
 function member(displayName: string, seat: number, overrides: Partial<RoomMember> = {}): RoomMember {
   return {
@@ -47,6 +47,24 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 1.5 }] })).toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, change: -40 } })).not.toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, change: 'lots' } })).toBeNull();
+    // A lane choice (STORY-039): only the safe or degen route, a seat choosing and a default route.
+    const choosing = { ...FORK_BOARD, pawns: [{ seat: 1, tile: 2, mon: 100, lane: 'Degen' }], choosing: 1, defaultLane: 'Safe' };
+    expect(toLifeBoard(choosing)).toEqual(choosing);
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, lane: 'Safe', byDefault: true } })).not.toBeNull();
+    expect(toLifeBoard({ ...choosing, pawns: [{ seat: 1, tile: 2, mon: 100, lane: 'Main' }] })).toBeNull();
+    expect(toLifeBoard({ ...choosing, choosing: -1 })).toBeNull();
+    expect(toLifeBoard({ ...choosing, defaultLane: 'Sideways' })).toBeNull();
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, lane: 'safe' } })).toBeNull();
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, byDefault: 'yes' } })).toBeNull();
+  });
+
+  it('sums up what each lane of a fork holds', () => {
+    expect(laneTiles(FORK_BOARD.tiles, 2, 'Safe').map((t) => t.index)).toEqual([3, 4]);
+    expect(laneTiles(FORK_BOARD.tiles, 2, 'Degen').map((t) => t.index)).toEqual([5, 6, 7]);
+    expect(laneTiles(FORK_BOARD.tiles, 1, 'Degen')).toEqual([]);
+    expect(laneSummary(laneTiles(FORK_BOARD.tiles, 2, 'Safe'))).toBe('+10 MON');
+    expect(laneSummary(laneTiles(FORK_BOARD.tiles, 2, 'Degen'))).toBe('Rug pull, +60 MON, Liquidation');
+    expect(laneSummary([FORK_BOARD.tiles[4]])).toBe('Nothing happens');
   });
 
   it('lays a fork out as two lanes side by side that join the main track', () => {
@@ -172,6 +190,82 @@ describe('Chog Life board', () => {
 
     render(FORK_BOARD, members);
     expect(page.querySelector('[data-last-move]')).toBeNull();
+  });
+
+  describe('at a fork', () => {
+    const atFork = (seat: number): LifeBoard => ({
+      ...FORK_BOARD,
+      pawns: [
+        { seat: 1, tile: 2, mon: 100 },
+        { seat: 2, tile: 0, mon: 100 },
+      ].map((pawn) => (pawn.seat === seat ? { ...pawn, tile: 2 } : pawn)),
+      lastMove: { seat, roll: 2, from: 0, to: 2, path: [1, 2] },
+      choosing: seat,
+      defaultLane: 'Safe',
+    });
+    const highlighted = () => Array.from(page.querySelectorAll<HTMLElement>('.tile.choice')).map((t) => Number(t.dataset['tile']));
+
+    it('offers you both routes with what each lane holds, instead of Roll', () => {
+      const chosen: string[] = [];
+      fixture.componentInstance.chooseLane.subscribe((lane) => chosen.push(lane));
+      render(atFork(1), [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)]);
+
+      expect(page.querySelector('[data-roll]')).toBeNull();
+      expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('Choose your route.');
+      const routes = Array.from(page.querySelectorAll<HTMLButtonElement>('[data-route]'));
+      expect(routes.map((b) => [b.querySelector('.route-name')?.textContent, b.querySelector('.route-summary')?.textContent])).toEqual([
+        ['Take the safe route', '+10 MON'],
+        ['Take the degen route', 'Rug pull, +60 MON, Liquidation'],
+      ]);
+      expect(page.querySelector('[data-route-hint]')?.textContent).toBe('If time runs out, you take the safe route.');
+      expect(highlighted().sort((a, b) => a - b)).toEqual([3, 4, 5, 6, 7]);
+
+      routes[1].click();
+      routes[0].click();
+      expect(chosen).toEqual(['Degen', 'Safe']);
+
+      fixture.componentRef.setInput('rolling', true);
+      fixture.detectChanges();
+      expect(Array.from(page.querySelectorAll<HTMLButtonElement>('[data-route]')).every((b) => b.disabled)).toBe(true);
+    });
+
+    it('tells everyone else who is choosing, without the choice buttons', () => {
+      render(atFork(1), [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+
+      expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('Alice is choosing a route…');
+      expect(page.querySelector('[data-routes]')).toBeNull();
+      expect(page.querySelector('[data-roll]')).toBeNull();
+      expect(highlighted().length).toBe(5);
+    });
+
+    it('ignores a choice left over once the turn has moved on', () => {
+      render(atFork(1), [member('Alice', 1), member('Bob', 2, { isYou: true, isTurn: true })]);
+
+      expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s your turn.');
+      expect(page.querySelector('[data-roll]')).not.toBeNull();
+      expect(highlighted()).toEqual([]);
+    });
+
+    it('says which route was taken, and when time chose it', () => {
+      const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+      const chosen = (seat: number, byDefault?: boolean): LifeBoard => ({
+        ...FORK_BOARD,
+        pawns: [{ seat, tile: 2, mon: 100, lane: byDefault ? 'Safe' : 'Degen' }],
+        lastMove: { seat, roll: 2, from: 0, to: 2, path: [1, 2], lane: byDefault ? 'Safe' : 'Degen', byDefault },
+      });
+
+      render(chosen(2), members);
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob rolled 2 and moved to tile 2 (Safe or Degen?). Bob chose the degen route.');
+      expect(tile(2).getAttribute('aria-label')).toBe('Tile 2, Safe or Degen?, Bob, taking the degen route');
+      render(chosen(2, true), members);
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe(
+        'Bob rolled 2 and moved to tile 2 (Safe or Degen?). Time ran out, so Bob takes the safe route.',
+      );
+      render(chosen(1, true), members);
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe(
+        'You rolled 2 and moved to tile 2 (Safe or Degen?). Time ran out, so you take the safe route.',
+      );
+    });
   });
 
   it('shows every player’s MON in the legend', () => {

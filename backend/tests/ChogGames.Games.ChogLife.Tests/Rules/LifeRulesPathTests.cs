@@ -3,8 +3,9 @@ using ChogGames.Games.ChogLife.Rules;
 namespace ChogGames.Games.ChogLife.Tests.Rules;
 
 /// <summary>
-/// STORY-037, DEC-039: a roll moves a pawn forward along the board; it stops on a Branch whatever steps are left, leaves
-/// a branch by its safe lane (the choice comes with STORY-039), and stops on the Finish when it overshoots.
+/// STORY-037, DEC-039: a roll moves a pawn forward along the board; it stops on a Branch whatever steps are left and on
+/// the Finish when it overshoots. STORY-039, DEC-041: it leaves a branch by the lane chosen there, or the default lane
+/// (Safe in version 1) when none was.
 /// </summary>
 public class LifeRulesPathTests
 {
@@ -32,9 +33,36 @@ public class LifeRulesPathTests
     [Theory]
     [InlineData(9, 6, new[] { 10, 11, 12, 13, 18, 19 })]
     [InlineData(25, 4, new[] { 26, 27, 28, 32 })]
-    public void Leaving_a_branch_takes_the_safe_lane_until_the_choice_exists(int from, int roll, int[] path)
+    public void Leaving_a_branch_without_a_lane_takes_the_default_safe_lane(int from, int roll, int[] path)
     {
+        Assert.Equal(LifeLane.Safe, Rules.DefaultLane);
         Assert.Equal(path, Rules.Path(from, roll));
+        Assert.Equal(path, Rules.Path(from, roll, LifeLane.Safe));
+    }
+
+    [Theory]
+    [InlineData(9, 1, new[] { 14 })]
+    [InlineData(9, 6, new[] { 14, 15, 16, 17, 18, 19 })]
+    [InlineData(25, 4, new[] { 29, 30, 31, 32 })]
+    public void Leaving_a_branch_by_the_degen_lane_follows_it(int from, int roll, int[] path)
+    {
+        Assert.Equal(path, Rules.Path(from, roll, LifeLane.Degen));
+    }
+
+    [Theory]
+    [InlineData(4, 3, new[] { 5, 6, 7 })]
+    [InlineData(16, 3, new[] { 17, 18, 19 })]
+    public void The_lane_only_matters_when_leaving_a_branch(int from, int roll, int[] path)
+    {
+        Assert.Equal(path, Rules.Path(from, roll, LifeLane.Degen));
+        Assert.Equal(path, Rules.Path(from, roll, LifeLane.Safe));
+    }
+
+    [Fact]
+    public void Leaving_a_branch_by_the_main_lane_is_refused()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Rules.Path(9, 2, LifeLane.Main));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Rules.Path(9, 2, (LifeLane)7));
     }
 
     [Theory]
@@ -77,13 +105,16 @@ public class LifeRulesPathTests
         {
             foreach (var roll in new[] { 1, Rules.DieFaces })
             {
-                var tile = start;
-                for (var turn = 0; turn < Rules.Tiles.Count && tile != Rules.Finish.Index; turn++)
+                foreach (var lane in new[] { LifeLane.Safe, LifeLane.Degen })
                 {
-                    tile = Rules.Path(tile, roll)[^1];
-                }
+                    var tile = start;
+                    for (var turn = 0; turn < Rules.Tiles.Count && tile != Rules.Finish.Index; turn++)
+                    {
+                        tile = Rules.Path(tile, roll, lane)[^1];
+                    }
 
-                Assert.Equal(Rules.Finish.Index, tile);
+                    Assert.Equal(Rules.Finish.Index, tile);
+                }
             }
         }
     }
