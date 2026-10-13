@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-13 (STORY-034).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-13 (STORY-035).
 
 ## Stories done
 
@@ -41,7 +41,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-031 | #121 | Shared ability pool (Core): `IAbilityAssignmentStrategy` with `SharedAbilityPoolStrategy`, the only one, fixed in code; `AbilityPool` gives every player, guest or NFT holder, the game's whole catalog whatever their traits, never more than the catalog, and nothing for a game without one. Registered in DI; no API change (DEC-033). |
 | STORY-032 | #123 | Trait-ready boundary (Core): `TraitSet` normalizes traits for matching (trimmed, whitespace collapsed, lower-case, distinct, sorted) and `ITraitAbilityResolver` is the contract for a future trait-based strategy (catalog + traits only, deterministic, whole catalog as fallback). No resolver ships; a test-only strategy swapped in through DI shows the engine, pool and games stay unchanged, and an architecture test keeps traits out of game modules and the engine (DEC-034). |
 | STORY-033 | #125 | Lobby ability selection and lock: `PUT /api/rooms/{code}/ability` chooses from the player's pool (`abilities` in the room); in a game with abilities ready needs one (`ability_required`), unknown ids are `unknown_ability`, another choice un-readies, and others see only `hasAbility` until the start. Start re-checks each choice with the live character (`ability_unavailable` clears it and un-readies) and locks an `AbilitySnapshot` with the catalog version on the member; nothing switches after the start. Migration `AddAbilitySelection` (DEC-035). |
-| STORY-034 | (this PR) | Ability execution and usage tracking: `USE_ABILITY` goes to the shared `AbilityEngine` for every game (no catalog: `unknown_command`); only the locked ability, on your own turn, at most its max uses (`RoomMembers.AbilityUses`), with the values locked at start and the current handler (`not_your_ability`, `ability_used_up`, `ability_unavailable`). A use keeps the turn, counts once under the room lock and is pushed as usual; snapshots show `usesLeft` and `seat`. Migration `AddAbilityUses` (DEC-036). |
+| STORY-034 | #127 | Ability execution and usage tracking: `USE_ABILITY` goes to the shared `AbilityEngine` for every game (no catalog: `unknown_command`); only the locked ability, on your own turn, at most its max uses (`RoomMembers.AbilityUses`), with the values locked at start and the current handler (`not_your_ability`, `ability_used_up`, `ability_unavailable`). A use keeps the turn, counts once under the room lock and is pushed as usual; snapshots show `usesLeft` and `seat`. Migration `AddAbilityUses` (DEC-036). |
+| STORY-035 | (this PR) | Chog Life rules configuration: `LifeRules` (versioned code, `LifeRulesV1`) with a 36-tile board, a main track with two Safe/Degen forks, reward/loss amounts and event kinds, 100 MON start, +100 first-finish bonus, 20-minute cap, one d6; checked at startup (DI singleton). An architecture test keeps game modules off wallets and the network. No API, config or migration change (DEC-037). |
 
 ## Key architectural decisions
 
@@ -57,6 +58,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Traits (DEC-034): `TraitSet` (`Core.Nfts`) and `ITraitAbilityResolver` (`Core.Abilities`) are the contract for a future trait-based strategy; nothing implements the resolver. Only a strategy may read a character's traits; `TraitAccessTests` (Architecture.Tests) scans game modules and Core's `Abilities`, `Games`, `Matches` and `Rooms` for trait access.
   - Selection (DEC-035): `RoomMember.AbilityId` is the lobby choice (`GameRoom.SelectAbility`; a different one un-readies; `DropAbility` clears it and un-readies). `LobbyService` checks the pool with `LobbyCharacters.For(player)` (stored selection, no chain call, no traits) when choosing and readying, and again at start with the live snapshots; `AbilityPool.Lock` gives the `AbilitySnapshot` that `GameRoom.Start` stores in `RoomMember.Ability` (jsonb, `AbilitySnapshotConversion`). A game without a catalog needs no ability. `RoomSnapshots` shows a member's choice only to themselves while waiting (`hasAbility` to others) and the locked one to all.
   - Execution (DEC-036): `MatchCommandService` sends `USE_ABILITY` (`MatchCommand.UseAbility`) to `AbilityEngine` after the usual checks; the engine checks the locked ability (`not_your_ability`/`unknown_ability`), uses left (`ability_used_up`) and that the current handler still takes the locked values (`AbilityCatalog.Fits`, else `ability_unavailable`), then runs it with `AbilitySnapshot.ToDefinition()`. `GameRoom.ApplyAbility` counts the use in `RoomMember.AbilityUses` (check `CK_RoomMembers_AbilityUses`), keeps the turn and bumps the version. Snapshots show `usesLeft` on locked abilities and each member's `seat`. No game registers a catalog yet.
+- **Chog Life rules (DEC-037):** `ChogGames.Games.ChogLife.Rules`. `LifeRules.Create` checks the board (30–40 tiles in index order, one Start first and one Finish last, forward links only, every tile reachable, only a Branch enters a Safe/Degen lane, both lanes of a fork join at one main tile, amounts only on Reward/Loss tiles, event kinds only on Event tiles) and the values (MON, bonus, cap ≤ 20 min, die faces); refusals are `ArgumentException`. `LifeRulesV1.Rules` is built once and registered by `AddChogLife()` (Api), so a bad board stops startup. Nothing uses it yet; movement starts with STORY-037. `OffChainGameTests` (Architecture.Tests) scans game modules for wallets, `System.Net`, `HttpClient`, BouncyCastle and Infrastructure.
 - **Rooms:**
   - Supported games are seeded `GameDefinitions` rows; whether a game is enabled comes from `Games:Items` configuration.
   - A player can be in one open room at a time: a `Waiting` room (as host or member) or an `Active` match they haven't left.
@@ -106,6 +108,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Sync tests (`RoomSyncTests`) use two live hub clients and a fake game with per-player secrets to show convergence, resync and private views.
   - Chance is scripted: `ScriptedRandomSource` (in Core.Tests and Api.Tests) returns queued values, then the highest allowed, which keeps a shuffle's order. `ApiFactory` registers it by default, so seats stay in join order (host first) unless a test scripts otherwise.
   - Trait boundary tests: `TraitSetTests` (normalization), `TraitResolverBoundaryTests` (a test-only trait strategy over a fake resolver in the unchanged pool) and a DI swap in `AbilityPoolRegistrationTests`; `TraitAccessTests` with sample lines show the source rule reports trait access and ignores comments.
+  - Chog Life rules tests (`ChogGames.Games.ChogLife.Tests`, new project): `LifeRulesV1Tests` (the agreed values, two forks, all four routes reach the finish over 29 tiles) and `LifeRulesTests`, which break version 1's board one tile at a time and check each refusal's message; `ChogLifeRegistrationTests` (Api) resolves the registered rules.
   - Ability execution tests (`AbilityExecutionTests`, Api) use a shield-and-steal Chog Life with `END_TURN` rules and a hub listener: duplicate use, invalid targets, wrong ability, game reasons, several uses, 8 concurrent uses (one applied, rest `stale_version`), 8 concurrent retries (one applied, rest replayed), and catalog changes by redeploying on the same database. Raw-SQL checks for `CK_RoomMembers_AbilityUses` are in `RoomServiceTests`.
   - Ability selection tests: `GameRoomAbilityTests` (Core) and `LobbyAbilityTests` (Api), which registers a test catalog for `chog-life` (Chog Race has none) and models a catalog change by disposing the `ApiFactory` and starting another with a new catalog on the same database; a race test runs a switch against the start five times. Raw-SQL checks for `CK_RoomMembers_AbilityId`/`CK_RoomMembers_Ability` are in `RoomServiceTests`.
   - Ability tests (`Core.Tests/Abilities`) use `FakeAbilityGame` (a boost and a seat-targeted steal); `AbilityPoolTests` compare guests and NFT holders with different traits, and a fixed fake strategy shows the pool stays inside the catalog; a reflection test shows nothing in the handler-facing contract can reach characters, NFT traits or rooms.
@@ -160,7 +163,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Mock NFT ownership** isn't exclusive: every wallet that isn't a fixture sees the same tokens.
 - **Deferred:** WalletConnect (DEC-014) and smart-contract wallet (ERC-1271) sign-in.
 - **Pending decisions:**
-  - DEC-002: Chog Life rules.
+  - DEC-002: Chog Life movement over forks, the finish trigger and the tie-breaker (board and values decided in DEC-037).
   - DEC-003: Chog Race reactions.
   - DEC-004: merging guest and wallet histories.
   - DEC-005: branding and artwork.
@@ -168,7 +171,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-034 — Ability execution and usage tracking** (E05 abilities): route `USE_ABILITY` through `AbilityEngine` with the member's locked ability, count uses and refuse beyond `MaxUses`.
+1. **STORY-036 — Board rendering** (E06 Chog Life): render the board, 2–6 pawns, the current turn and tile types on a responsive, mobile-usable board. It will need the rules (and positions) in the room snapshot, which first needs Chog Life's game state; check the order against STORY-037 before starting.
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

@@ -4,7 +4,7 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
 
 ## Pending
 
-- DEC-002: Chog Life exact movement/finish/tie-break rules — Pending game design before final balancing.
+- DEC-002: Chog Life exact movement/finish/tie-break rules — Pending game design before final balancing. Board, starting MON, finish bonus, time cap and die decided in DEC-037; movement over forks, the finish trigger and the tie-breaker are still open (STORY-037, STORY-041).
 - DEC-003: Chog Race reaction windows and card resolution ordering — Pending before card engine.
 - DEC-004: Guest-to-wallet profile linking and account merge behavior — Pending before linking. Sign-in binding decided in DEC-015; merging two existing histories is still open.
 - DEC-005: Game branding/assets and permissions — Pending before public launch.
@@ -141,3 +141,9 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Turn:** only the current player can use an ability, before their deadline. A use never ends the turn or the match; like any action it resets the player's missed turns. Reactions on other players' turns come with Chog Race (STORY-055).
   - **Catalog changes mid-match:** the effect uses the values locked at start (parameters, windows, target, max uses) and the game's current handler for that id. If the handler is gone or no longer accepts the locked parameters, the use is refused with `ability_unavailable` and nothing changes (NFT-015).
   - **Broadcast:** a use is announced like any applied command (`RoomUpdated`). Locked abilities in snapshots show `usesLeft`, and every member shows their `seat` so targets can be named; the effect is visible through the game state. There's no separate ability event.
+- DEC-037 (2026-10-13, STORY-035 — confirmed by product owner): Chog Life rules configuration.
+  - **Home:** the rules are versioned code in the Chog Life module (`LifeRules`, version 1 in `LifeRulesV1`), like the ability catalogs (DEC-032), not an appsettings section. They are checked when built, at API startup, so a malformed board stops the API. Any change means a new version; matches will record the version they started with when the game's rules plug in (STORY-037).
+  - **Board:** 36 tiles on a main track with two Safe/Degen forks (tiles 9 and 25). Each fork splits into a short safe lane and a short degen lane that join the main track again at one tile, so every route is 29 tiles long. Tiles link forward by index: a branch to its two lanes, the finish to nothing, every other tile to one next tile. Checks: 30–40 tiles in index order, one Start first and one Finish last, forward links to existing tiles, every tile reachable, only a branch enters a lane, starts, finishes and branches on the main track, and both lanes of a fork joining at one tile.
+  - **Values:** 100 MON to start (LIFE-002); +100 MON only for the first player to reach the finish (LIFE-007); a 20-minute time cap, never above 20 minutes (ENG-011, enforced with STORY-041); one six-sided die (1–6). MON are whole numbers.
+  - **Tiles:** Start, Normal, Reward and Loss (a fixed amount of 1–1,000 MON), Event (a kind: market, airdrop, rug or liquidation), Branch and Finish. Event odds and outcomes come with STORY-038, branch payoffs with STORY-039. These are proposed defaults to balance in STORY-044.
+  - **Off-chain:** MON are fictional game points (DEC-010). No game module references wallets, the network or crypto libraries, which an architecture test enforces, so no real token can move.

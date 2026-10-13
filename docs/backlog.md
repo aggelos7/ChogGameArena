@@ -526,7 +526,7 @@
 
 #### STORY-035 — Life rules configuration
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Define versioned board of 30-40 spaces, starting 100 fictional MON, 20-minute cap and finish bonus.

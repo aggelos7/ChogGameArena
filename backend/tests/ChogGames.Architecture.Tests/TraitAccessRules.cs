@@ -31,7 +31,8 @@ public static partial class TraitAccessRules
     ];
 
     /// <summary>One violation per forbidden token found in <paramref name="source"/>, outside comment lines.</summary>
-    public static IReadOnlyList<string> FindViolations(string file, string source, IReadOnlyList<Regex> forbidden)
+    public static IReadOnlyList<string> FindViolations(
+        string file, string source, IReadOnlyList<Regex> forbidden, string reason = "read NFT traits")
     {
         var violations = new List<string>();
         var lines = source.Split('\n');
@@ -45,13 +46,13 @@ public static partial class TraitAccessRules
 
             violations.AddRange(forbidden
                 .Where(rule => rule.IsMatch(line))
-                .Select(rule => $"{file}:{i + 1} must not read NFT traits ({rule})."));
+                .Select(rule => $"{file}:{i + 1} must not {reason} ({rule})."));
         }
 
         return violations;
     }
 
     /// <summary>The pattern as a whole name: not part of a longer identifier (a leading <c>\.</c> matches member access).</summary>
-    private static Regex Token(string pattern) =>
+    internal static Regex Token(string pattern) =>
         new($@"{(pattern.StartsWith('\\') ? "" : "(?<![A-Za-z0-9_])")}{pattern}(?![A-Za-z0-9_])", RegexOptions.CultureInvariant);
 }
