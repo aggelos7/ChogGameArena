@@ -468,7 +468,7 @@
 
 #### STORY-031 — Shared ability pool strategy
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E05
 - **Implementation:** Implement IAbilityAssignmentStrategy with SharedAbilityPool default.
