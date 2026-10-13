@@ -507,7 +507,7 @@
 
 #### STORY-034 — Ability execution and usage tracking
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E05
 - **Implementation:** Validate timing/target, execute once, persist usage and broadcast result.

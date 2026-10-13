@@ -33,6 +33,7 @@ describe('Room page', () => {
       hasLeft: false,
       isTurn: false,
       rank: null,
+      seat: null,
       ...overrides,
     };
   }
@@ -255,6 +256,7 @@ describe('Room page', () => {
     description: 'Raise one reward.',
     target: 'None',
     maxUses: 1,
+    usesLeft: null,
   };
   const reroll: RoomAbility = {
     id: 'event_reroll',
@@ -262,6 +264,7 @@ describe('Room page', () => {
     description: 'Reroll one event.',
     target: 'None',
     maxUses: 1,
+    usesLeft: null,
   };
 
   /** Bob's view of a room with abilities; Alice's choice, if any, stays hidden from him. */
@@ -331,6 +334,27 @@ describe('Room page', () => {
     expect(column('[data-ability]')).toEqual(['Reward Boost', 'Lucky Reroll']);
     expect(element().querySelector('[data-list="abilities"]')).toBeNull();
     expect(element().querySelector('[data-locked-ability]')?.textContent).toBe('Lucky Reroll');
+  });
+
+  it('shows how often the locked ability can still be used', () => {
+    const started = (usesLeft: number): Room => ({
+      ...room,
+      version: 10 - usesLeft,
+      status: 'Active',
+      abilities: [],
+      members: [
+        member('Alice', { isHost: true, isReady: true, ability: { ...boost, usesLeft: 1 }, hasAbility: true, seat: 1 }),
+        { ...room.members[1], isReady: true, ability: { ...reroll, maxUses: 2, usesLeft }, hasAbility: true, seat: 2 },
+      ],
+    });
+    load(withAbilities({ ability: reroll, hasAbility: true }, true));
+
+    changed(started(2));
+    expect(element().querySelector('[data-uses-left]')?.textContent).toBe('2 uses left.');
+    changed(started(1));
+    expect(element().querySelector('[data-uses-left]')?.textContent).toBe('1 use left.');
+    changed(started(0));
+    expect(element().querySelector('[data-uses-left]')?.textContent).toBe('Already used.');
   });
 
   it('explains a start refused for an ability no longer offered and shows the lobby as it is now', () => {

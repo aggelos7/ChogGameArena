@@ -123,6 +123,12 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
                 "CK_RoomMembers_Ability",
                 "\"Ability\" IS NULL OR (jsonb_typeof(\"Ability\") = 'object' AND \"Character\" IS NOT NULL "
                 + "AND \"AbilityId\" IS NOT NULL AND \"Ability\" ->> 'id' IS NOT DISTINCT FROM \"AbilityId\")");
+
+            // Uses are counted only for a locked ability, up to its locked max uses (DEC-036); without one, COALESCE
+            // makes the limit 0 instead of a NULL that would pass.
+            table.HasCheckConstraint(
+                "CK_RoomMembers_AbilityUses",
+                "\"AbilityUses\" >= 0 AND \"AbilityUses\" <= COALESCE((\"Ability\" ->> 'maxUses')::integer, 0)");
         });
         builder.HasKey(m => new { m.RoomId, m.PlayerId });
         builder.Property(m => m.ReadyCharacterKind).HasConversion<string>().HasMaxLength(16);

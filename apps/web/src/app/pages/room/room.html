@@ -187,6 +187,9 @@
               <p class="hint">
                 You’re playing as <strong>{{ me.character.name }}</strong> with
                 <strong data-locked-ability>{{ ability.name }}</strong> for this game.
+                @if (ability.usesLeft !== null) {
+                  <span data-uses-left>{{ usesLeftLabel(ability.usesLeft) }}</span>
+                }
               </p>
             } @else {
               <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
