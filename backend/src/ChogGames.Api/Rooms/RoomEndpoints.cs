@@ -35,7 +35,9 @@ public static class RoomEndpoints
     public sealed record SelectAbilityRequest(string? AbilityId);
 
     /// <summary>An ability of the game (DEC-032), as offered in the lobby or as locked for a member at start (DEC-035).</summary>
-    public sealed record RoomAbilityResponse(string Id, string Name, string Description, AbilityTargetKind Target, int MaxUses);
+    /// <param name="UsesLeft">For an ability locked at start: the uses left in this match (DEC-036); null for a choice.</param>
+    public sealed record RoomAbilityResponse(
+        string Id, string Name, string Description, AbilityTargetKind Target, int MaxUses, int? UsesLeft = null);
 
     /// <summary>The member's selected Chog. <c>Color</c> is set for standard Chogs; NFTs show their token id.</summary>
     public sealed record RoomCharacterResponse(CharacterKind Kind, string Id, string Name, string? Color);
@@ -49,6 +51,9 @@ public static class RoomEndpoints
     /// <param name="HasLeft">The member left the started match (DEC-025).</param>
     /// <param name="IsTurn">It is this member's turn in the active match (DEC-027).</param>
     /// <param name="Rank">The member's final place in a completed match, from 1 for the winners; null otherwise (DEC-030).</param>
+    /// <param name="Seat">
+    /// The member's place in the turn order from 1, given at the start; how abilities name their target (DEC-036).
+    /// </param>
     public sealed record RoomMemberResponse(
         string DisplayName,
         string AvatarId,
@@ -60,7 +65,8 @@ public static class RoomEndpoints
         bool HasAbility,
         bool HasLeft,
         bool IsTurn,
-        int? Rank);
+        int? Rank,
+        int? Seat);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>

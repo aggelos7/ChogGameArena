@@ -8,8 +8,9 @@ namespace ChogGames.Core.Abilities;
 /// Uses abilities by id for the shared engine (STORY-030, NFT-014, DEC-032). It finds the ability in the match's game
 /// catalog, checks the command's payload and target, asks the game whether the match is in one of the ability's windows
 /// and whether its own conditions hold, and only then lets the handler apply the effect. Every refusal changes nothing
-/// and draws nothing. It reads only seats and ids from the match, never characters or NFT traits (ADR-007, NFT-016).
-/// Which ability a player selected and how many uses are left are checked from STORY-033/034.
+/// and draws nothing. It reads only seats, ids and locked abilities from the match, never characters or NFT traits
+/// (ADR-007, NFT-016). A player may only use the ability they locked at start, while it has uses left, with the values
+/// locked then; the game's current handler applies it (STORY-034, NFT-015, DEC-036).
 /// </summary>
 public sealed class AbilityEngine
 {
@@ -52,9 +53,24 @@ public sealed class AbilityEngine
             return AbilityResult.Reject(AbilityRefusal.InvalidPayload);
         }
 
-        if (CatalogFor(match.GameType) is not { } catalog || !catalog.TryFind(abilityId, out var ability, out var handler))
+        var catalog = CatalogFor(match.GameType);
+        var member = match.Members.Single(m => m.PlayerId == request.PlayerId);
+        if (member.Ability is not { } locked || !string.Equals(locked.Id, abilityId, StringComparison.Ordinal))
         {
-            return AbilityResult.Reject(AbilityRefusal.UnknownAbility);
+            return AbilityResult.Reject(catalog?.Contains(abilityId) == true ? AbilityRefusal.NotYourAbility : AbilityRefusal.UnknownAbility);
+        }
+
+        if (member.AbilityUsesLeft == 0)
+        {
+            return AbilityResult.Reject(AbilityRefusal.UsedUp);
+        }
+
+        // The values locked at start apply, even if a deploy changed the catalog since; a handler that is gone or no
+        // longer takes those values can't apply them.
+        var ability = locked.ToDefinition();
+        if (catalog is null || !catalog.TryFind(abilityId, out _, out var handler) || !AbilityCatalog.Fits(ability, handler))
+        {
+            return AbilityResult.Reject(AbilityRefusal.Unavailable);
         }
 
         AbilityPlayer? target = null;
@@ -138,9 +154,9 @@ public sealed class AbilityEngine
 /// <param name="Random">The server's source of chance, passed on to the handler.</param>
 public sealed record AbilityRequest(GameRoom Match, Guid PlayerId, JsonElement Payload, JsonElement? State, IRandomSource Random);
 
-/// <param name="Used">True when the effect was applied and <see cref="State"/> is the new game state.</param>
+/// <param name="Used">True when the effect was applied and <see cref="State"/> is the new game state; the caller counts the use.</param>
 /// <param name="Reason">When refused: a stable, lower-case code, from <see cref="AbilityRefusal"/> or the game's handler.</param>
-/// <param name="Ability">When used: the ability's definition.</param>
+/// <param name="Ability">When used: the ability as the player locked it.</param>
 /// <param name="Target">When used on an opponent: who.</param>
 public sealed record AbilityResult(
     bool Used,
@@ -166,6 +182,15 @@ public static class AbilityRefusal
 
     /// <summary>The match's game has no ability with that id.</summary>
     public const string UnknownAbility = "unknown_ability";
+
+    /// <summary>The game has the ability, but the player locked another one at start, or none (NFT-016).</summary>
+    public const string NotYourAbility = "not_your_ability";
+
+    /// <summary>The player's locked ability has no uses left in this match.</summary>
+    public const string UsedUp = "ability_used_up";
+
+    /// <summary>The game can no longer apply the locked ability: its handler is gone or takes other values now.</summary>
+    public const string Unavailable = "ability_unavailable";
 
     /// <summary>A target was missing, not an opponent still playing, or given to an ability that takes none.</summary>
     public const string InvalidTarget = "invalid_target";

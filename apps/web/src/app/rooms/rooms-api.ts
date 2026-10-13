@@ -23,6 +23,8 @@ export interface RoomAbility {
   description: string;
   target: 'None' | 'Opponent';
   maxUses: number;
+  /** For a locked ability: uses left in this game (DEC-036); null for a lobby choice. */
+  usesLeft: number | null;
 }
 
 /** Mirrors `RoomMemberResponse`. Player ids never leave the server. */
@@ -47,6 +49,8 @@ export interface RoomMember {
   isTurn: boolean;
   /** Final place in a completed match, from 1 for the winners (ties share a place); null otherwise (DEC-030). */
   rank: number | null;
+  /** Place in the turn order from 1, given at the start; how abilities name their target (DEC-036). Null before it. */
+  seat: number | null;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */

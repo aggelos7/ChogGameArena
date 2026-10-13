@@ -14,7 +14,8 @@ namespace ChogGames.Api.Rooms;
 /// What one member sees of a room (STORY-026, DEC-028): the same snapshot whether it is read over REST or pushed live,
 /// tagged with the room's version so clients keep the newest. Player ids stay on the server; members are described only
 /// by what the lobby shows. The game's state is shown only through its rules' per-player view (ENG-013), and never for a
-/// game without rules. A member's ability choice is shown only to themselves until the start locks it (DEC-035).
+/// game without rules. A member's ability choice is shown only to themselves until the start locks it (DEC-035); once
+/// locked, everyone sees its uses left and each member's seat, which ability targets name (DEC-036).
 /// </summary>
 public sealed class RoomSnapshots(
     ChogGamesDbContext db,
@@ -61,7 +62,8 @@ public sealed class RoomSnapshots(
                     ability is not null,
                     m.HasLeft,
                     m.PlayerId == room.CurrentPlayerId,
-                    m.Rank);
+                    m.Rank,
+                    m.Seat);
             })
             .ToArray();
 
@@ -91,7 +93,7 @@ public sealed class RoomSnapshots(
     {
         if (member.Ability is { } locked)
         {
-            return new RoomAbilityResponse(locked.Id, locked.Name, locked.Description, locked.Target, locked.MaxUses);
+            return new RoomAbilityResponse(locked.Id, locked.Name, locked.Description, locked.Target, locked.MaxUses, member.AbilityUsesLeft);
         }
 
         return room.Status == RoomStatus.Waiting

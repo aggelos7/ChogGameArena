@@ -457,6 +457,37 @@ public sealed class GameRoom
         return new MatchAction(Id, command.ActionId, playerId, command.Type, command.Payload.GetRawText(), Version, now);
     }
 
+    /// <summary>
+    /// Applies an ability the engine allowed (STORY-034, NFT-014, DEC-036): counts one use of the ability the player
+    /// locked at start and stores the effect's <paramref name="state"/>. Using an ability is an action, so it resets the
+    /// player's missed turns, but it never ends the turn or the match. Refused unchanged if the ability isn't the one
+    /// they locked or has no uses left, so a use is counted at most <see cref="AbilitySnapshot.MaxUses"/> times.
+    /// </summary>
+    public MatchAction ApplyAbility(Guid playerId, MatchCommand command, string abilityId, string state, DateTimeOffset now)
+    {
+        if (CheckCommand(playerId, command, now) is { } problem)
+        {
+            throw new InvalidOperationException($"The ability cannot be used: {problem}.");
+        }
+
+        var member = CurrentMember();
+        if (member.Ability is not { } locked || !string.Equals(locked.Id, abilityId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Only the ability the player locked at start can be used.");
+        }
+
+        if (member.AbilityUsesLeft == 0)
+        {
+            throw new InvalidOperationException($"The {abilityId} ability has no uses left.");
+        }
+
+        State = state;
+        member.UseAbility();
+        member.Act();
+        Version++;
+        return new MatchAction(Id, command.ActionId, playerId, command.Type, command.Payload.GetRawText(), Version, now);
+    }
+
     /// <summary>The only place the status changes; anything <see cref="RoomLifecycle"/> does not allow is refused unchanged.</summary>
     private void MoveTo(RoomStatus next, DateTimeOffset now)
     {
@@ -609,6 +640,15 @@ public sealed class RoomMember
     /// </summary>
     public AbilitySnapshot? Ability { get; private set; }
 
+    /// <summary>
+    /// How often the member has used their locked <see cref="Ability"/> in this match (STORY-034, NFT-015, DEC-036);
+    /// never more than its <see cref="AbilitySnapshot.MaxUses"/>.
+    /// </summary>
+    public int AbilityUses { get; private set; }
+
+    /// <summary>Uses of the locked ability still allowed in this match; null without one.</summary>
+    public int? AbilityUsesLeft => Ability is { } locked ? locked.MaxUses - AbilityUses : null;
+
     /// <summary>When the member left the started match (DEC-025); null while they play.</summary>
     public DateTimeOffset? LeftAt { get; private set; }
 
@@ -683,6 +723,8 @@ public sealed class RoomMember
     internal void LockCharacter(CharacterSnapshot character) => Character = character;
 
     internal void LockAbility(AbilitySnapshot? ability) => Ability = ability;
+
+    internal void UseAbility() => AbilityUses++;
 
     internal void Forfeit(DateTimeOffset now) => LeftAt = now;
 

@@ -113,26 +113,39 @@ public sealed class AbilityCatalog
         return new AbilityCatalog(gameType, version, definitionList, abilities, timing);
     }
 
+    /// <summary>
+    /// Whether <paramref name="definition"/> configures exactly the parameters <paramref name="handler"/> declares, each
+    /// within range; how the engine checks a locked ability against the handler running it now (DEC-036).
+    /// </summary>
+    internal static bool Fits(AbilityDefinition definition, IAbilityHandler handler) =>
+        ParameterProblem(definition, handler) is null;
+
     private static void CheckParameters(string gameType, AbilityDefinition definition, IAbilityHandler handler)
+    {
+        if (ParameterProblem(definition, handler) is { } problem)
+        {
+            throw new ArgumentException($"The {gameType} ability {definition.Id} {problem}.");
+        }
+    }
+
+    private static string? ParameterProblem(AbilityDefinition definition, IAbilityHandler handler)
     {
         var expected = handler.Parameters.ToDictionary(p => p.Name, StringComparer.Ordinal);
         foreach (var (name, value) in definition.Parameters)
         {
             if (!expected.TryGetValue(name, out var parameter))
             {
-                throw new ArgumentException($"The {gameType} ability {definition.Id} configures {name}, which its handler doesn't use.");
+                return $"configures {name}, which its handler doesn't use";
             }
 
             if (value < parameter.Min || value > parameter.Max)
             {
-                throw new ArgumentException(
-                    $"The {gameType} ability {definition.Id} sets {name} to {value}, outside {parameter.Min} to {parameter.Max}.");
+                return $"sets {name} to {value}, outside {parameter.Min} to {parameter.Max}";
             }
         }
 
-        if (expected.Keys.FirstOrDefault(name => !definition.Parameters.ContainsKey(name)) is { } missing)
-        {
-            throw new ArgumentException($"The {gameType} ability {definition.Id} doesn't configure {missing}.");
-        }
+        return expected.Keys.FirstOrDefault(name => !definition.Parameters.ContainsKey(name)) is { } missing
+            ? $"doesn't configure {missing}"
+            : null;
     }
 }

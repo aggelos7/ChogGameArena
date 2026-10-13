@@ -1,10 +1,12 @@
 using System.Text.Json;
+using ChogGames.Core.Abilities;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Persistence;
 using ChogGames.Infrastructure.Rooms;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace ChogGames.Infrastructure.Matches;
 
@@ -64,9 +66,11 @@ public sealed record MatchCommandResult(
 /// player acts, before their turn runs out (STORY-025, DEC-027). A command that finishes the match stores the standings
 /// and updates the players' stats in the same transaction, so results are recorded exactly once (STORY-028, DEC-030).
 /// The rules draw every outcome from the server's <see cref="IRandomSource"/>, never from the payload (STORY-029, DEC-031).
+/// <c>USE_ABILITY</c> goes to the shared <see cref="AbilityEngine"/> instead of the rules: under the same lock and checks,
+/// a use is applied and counted once, and a refused one changes nothing (STORY-034, DEC-036).
 /// </summary>
 public sealed class MatchCommandService(
-    ChogGamesDbContext db, IEnumerable<IMatchRules> rules, IRandomSource random, TimeProvider timeProvider)
+    ChogGamesDbContext db, IEnumerable<IMatchRules> rules, AbilityEngine abilities, IRandomSource random, TimeProvider timeProvider)
 {
     private readonly Dictionary<string, IMatchRules> _rulesByGame = rules.ToDictionary(r => r.GameType, StringComparer.Ordinal);
 
@@ -111,12 +115,17 @@ public sealed class MatchCommandService(
                 return new MatchCommandResult(MatchCommandOutcome.TurnExpired);
         }
 
+        using var state = room.State is null ? null : JsonDocument.Parse(room.State);
+        if (string.Equals(command.Type, MatchCommand.UseAbility, StringComparison.Ordinal))
+        {
+            return await UseAbilityAsync(room, player, command, state?.RootElement, now, transaction, cancellationToken);
+        }
+
         if (!_rulesByGame.TryGetValue(room.GameType, out var gameRules))
         {
             return new MatchCommandResult(MatchCommandOutcome.UnknownCommand);
         }
 
-        using var state = room.State is null ? null : JsonDocument.Parse(room.State);
         var decision = gameRules.Apply(new MatchCommandContext(room, player.Id, command.Type, command.Payload, state?.RootElement, random));
         switch (decision.Outcome)
         {
@@ -138,6 +147,39 @@ public sealed class MatchCommandService(
             await db.RecordStatsAsync(room, cancellationToken);
         }
 
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new MatchCommandResult(MatchCommandOutcome.Applied, action, room.Version);
+    }
+
+    /// <summary>A game without abilities has no such command; a refusal by the engine is reported with its reason.</summary>
+    private async Task<MatchCommandResult> UseAbilityAsync(
+        GameRoom room,
+        Player player,
+        MatchCommand command,
+        JsonElement? state,
+        DateTimeOffset now,
+        IDbContextTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (abilities.CatalogFor(room.GameType) is null)
+        {
+            return new MatchCommandResult(MatchCommandOutcome.UnknownCommand);
+        }
+
+        var result = abilities.Use(new AbilityRequest(room, player.Id, command.Payload, state, random));
+        if (!result.Used)
+        {
+            return new MatchCommandResult(MatchCommandOutcome.Rejected, Reason: result.Reason);
+        }
+
+        if (result.State is not { ValueKind: JsonValueKind.Object } newState)
+        {
+            throw new InvalidOperationException($"The {room.GameType} {result.Ability!.Id} handler returned no JSON object state.");
+        }
+
+        var action = room.ApplyAbility(player.Id, command, result.Ability!.Id, newState.GetRawText(), now);
+        db.MatchActions.Add(action);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new MatchCommandResult(MatchCommandOutcome.Applied, action, room.Version);
