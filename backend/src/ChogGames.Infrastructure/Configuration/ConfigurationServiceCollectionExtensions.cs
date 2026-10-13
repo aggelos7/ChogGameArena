@@ -69,7 +69,8 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddScoped<RoomService>();
         services.AddScoped<LobbyService>();
 
-        // Games add their IMatchRules as their rules are built (DEC-026); until then every command type is unknown.
+        // Games add their IMatchRules with their own registration, such as AddChogLife (DEC-026, DEC-038); a game without
+        // any answers every command type as unknown.
         services.AddOptions<MatchOptions>()
             .Bind(configuration.GetSection(MatchOptions.SectionName))
             .Validate(o => o.TurnTimeout >= MatchOptions.MinTurnTimeout && o.TurnTimeout <= MatchOptions.MaxTurnTimeout,

@@ -25,6 +25,7 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
         db,
         new CharacterEligibilityService(chain, clock, NullLogger<CharacterEligibilityService>.Instance),
         new AbilityPool(new AbilityEngine([]), new SharedAbilityPoolStrategy()),
+        [],
         Options.Create(new MatchOptions()),
         ScriptedRandomSource.KeepOrder,
         clock,

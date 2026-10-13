@@ -24,6 +24,7 @@ public sealed class LobbyService(
     ChogGamesDbContext db,
     CharacterEligibilityService eligibility,
     AbilityPool abilities,
+    IEnumerable<IMatchRules> rules,
     IOptions<MatchOptions> matchOptions,
     IRandomSource random,
     TimeProvider timeProvider,
@@ -225,7 +226,17 @@ public sealed class LobbyService(
             return new RoomResult(RoomOutcome.AbilityUnavailable);
         }
 
-        room.Start(caller.Id, players, characters, matchOptions.Value.TurnTimeout, random, timeProvider.GetUtcNow(), locked);
+        // The game's rules, if it has any, set out its start state, such as every pawn on the start tile (DEC-038).
+        var gameRules = rules.FirstOrDefault(r => r.GameType == room.GameType);
+        room.Start(
+            caller.Id,
+            players,
+            characters,
+            matchOptions.Value.TurnTimeout,
+            random,
+            timeProvider.GetUtcNow(),
+            locked,
+            started => gameRules?.StartState(new MatchStartContext(started, random))?.GetRawText());
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.Started, room);

@@ -1,0 +1,79 @@
+<div class="life-board" data-board>
+  <ul class="players" aria-label="Players and pawns" data-list="pawns">
+    @for (member of players(); track member.seat) {
+      <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
+        <span class="pawn" [style.background]="color(member.seat)" aria-hidden="true">{{ member.seat }}</span>
+        <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="1.75" />
+        <span class="name">{{ member.displayName }}</span>
+        @if (member.isYou) {
+          <span class="tag">You</span>
+        }
+        @if (member.isTurn) {
+          <span class="tag turn" data-turn>Turn</span>
+        }
+      </li>
+    }
+  </ul>
+  <p class="turn-line" role="status" data-turn-line>
+    @if (turnOf(); as current) {
+      @if (current.isYou) {
+        It’s your turn.
+      } @else {
+        It’s {{ current.displayName }}’s turn.
+      }
+    }
+  </p>
+
+  <ol class="track" aria-label="Board, from start to finish">
+    @for (row of rows(); track $index) {
+      @switch (row.kind) {
+        @case ('main') {
+          <li class="row main">
+            <ng-container *ngTemplateOutlet="tileView; context: { $implicit: row.tile }" />
+          </li>
+        }
+        @case ('lanes') {
+          <li class="row lanes" aria-hidden="true">
+            <span class="lane-name safe">Safe route</span>
+            <span class="lane-name degen">Degen route</span>
+          </li>
+        }
+        @case ('fork') {
+          <li class="row fork">
+            @if (row.safe; as tile) {
+              <ng-container *ngTemplateOutlet="tileView; context: { $implicit: tile }" />
+            } @else {
+              <span class="gap"></span>
+            }
+            @if (row.degen; as tile) {
+              <ng-container *ngTemplateOutlet="tileView; context: { $implicit: tile }" />
+            } @else {
+              <span class="gap"></span>
+            }
+          </li>
+        }
+      }
+    }
+  </ol>
+</div>
+
+<ng-template #tileView let-tile>
+  <div
+    role="group"
+    [class]="'tile type-' + tile.type.toLowerCase() + ' lane-' + tile.lane.toLowerCase()"
+    [attr.aria-label]="describe(tile)"
+    [attr.data-tile]="tile.index"
+    [attr.data-type]="tile.type"
+    [attr.data-lane]="tile.lane"
+  >
+    <span class="number" aria-hidden="true">{{ tile.index }}</span>
+    <span class="label" aria-hidden="true">{{ label(tile) }}</span>
+    <span class="pawns" aria-hidden="true">
+      @for (pawn of pawnsOn(tile); track pawn.seat) {
+        <span class="pawn" [class.turn]="pawn.isTurn" [class.you]="pawn.isYou" [style.background]="pawn.color" [attr.data-pawn]="pawn.seat">
+          {{ pawn.seat }}
+        </span>
+      }
+    </span>
+  </div>
+</ng-template>

@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ChogGames.Api.Tests.Realtime;
 
@@ -45,7 +46,7 @@ public sealed class RoomSyncTests(MigratedPostgresDatabase database) : IClassFix
             services =>
             {
                 services.AddSingleton<TimeProvider>(_clock);
-                services.AddSingleton<IMatchRules, SecretRules>();
+                services.RemoveAll<IMatchRules>().AddSingleton<IMatchRules, SecretRules>();
             });
     }
 
