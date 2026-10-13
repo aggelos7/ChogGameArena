@@ -14,8 +14,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ChogGames.Api.Tests.ChogLife;
 
 /// <summary>
-/// STORY-037, DEC-039: on their turn a player rolls; the server draws the die, moves the pawn and ends the turn, and every
-/// player, over REST and live, gets the same roll and destination. Rolls by anyone else change nothing and draw nothing.
+/// STORY-037/038, DEC-039/040: on their turn a player rolls; the server draws the die, moves the pawn, resolves the tile
+/// it stops on and ends the turn, and every player, over REST and live, gets the same roll, destination and MON. Rolls
+/// by anyone else change nothing and draw nothing.
 /// </summary>
 public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -201,7 +202,7 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         Assert.Equal(room.GetProperty("version").GetInt64() + 1, result.GetProperty("version").GetInt64());
         Assert.Equal([(1, 7)], _dice.Draws.Skip(drawsBefore));
         const string move = """{"seat":1,"roll":4,"from":0,"to":4,"path":[1,2,3,4]}""";
-        const string pawns = """[{"seat":1,"tile":4},{"seat":2,"tile":0}]""";
+        const string pawns = """[{"seat":1,"tile":4,"mon":100},{"seat":2,"tile":0,"mon":100}]""";
         foreach (var seen in new[] { await aliceLive.NextAsync(), await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) })
         {
             Assert.Equal(result.GetProperty("version").GetInt64(), seen.GetProperty("version").GetInt64());
@@ -216,14 +217,14 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         var alice = await GuestAsync("Alice");
         var bob = await GuestAsync("Bob");
         var code = await StartedAsync(alice, bob);
-        _dice.Enqueue(6, 1, 5);
+        _dice.Enqueue(6, 0, 1, 5);
 
         await RollAsync(alice, await ViewAsync(alice, code));
         await RollAsync(bob, await ViewAsync(bob, code));
         await RollAsync(alice, await ViewAsync(alice, code));
 
         var room = await ViewAsync(bob, code);
-        Assert.Equal("""[{"seat":1,"tile":9},{"seat":2,"tile":1}]""", Pawns(room));
+        Assert.Equal("""[{"seat":1,"tile":9,"mon":110},{"seat":2,"tile":1,"mon":100}]""", Pawns(room));
         Assert.Equal("""{"seat":1,"roll":5,"from":6,"to":9,"path":[7,8,9]}""", LastMove(room));
         Assert.Equal(2, TurnSeat(room));
     }
@@ -266,7 +267,31 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         Assert.True(retried.GetProperty("replayed").GetBoolean());
         Assert.Equal(drawsAfter, _dice.Draws.Count);
         var seen = await ViewAsync(bob, code);
-        Assert.Equal("""{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2]}""", LastMove(seen));
-        Assert.Equal("""[{"seat":1,"tile":2},{"seat":2,"tile":0}]""", Pawns(seen));
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2],"change":20}""", LastMove(seen));
+        Assert.Equal("""[{"seat":1,"tile":2,"mon":120},{"seat":2,"tile":0,"mon":100}]""", Pawns(seen));
+    }
+
+    [PostgresFact]
+    public async Task Every_player_sees_the_same_event_outcome_and_mon_live_and_over_rest()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        var aliceLive = await ConnectAsync(alice, code);
+        var bobLive = await ConnectAsync(bob, code);
+        var room = await ViewAsync(alice, code);
+        var drawsBefore = _dice.Draws.Count;
+        _dice.Enqueue(3, 95);
+
+        var result = await RollAsync(alice, room);
+
+        Assert.Equal([(1, 7), (0, 100)], _dice.Draws.Skip(drawsBefore));
+        const string move = """{"seat":1,"roll":3,"from":0,"to":3,"path":[1,2,3],"change":50}""";
+        const string pawns = """[{"seat":1,"tile":3,"mon":150},{"seat":2,"tile":0,"mon":100}]""";
+        foreach (var seen in new[] { await aliceLive.NextAsync(), await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) })
+        {
+            Assert.Equal(result.GetProperty("version").GetInt64(), seen.GetProperty("version").GetInt64());
+            Assert.Equal((move, pawns), (LastMove(seen), Pawns(seen)));
+        }
     }
 }

@@ -1,12 +1,14 @@
 using static ChogGames.Games.ChogLife.Rules.LifeLane;
+using static ChogGames.Games.ChogLife.Rules.LifeEventOutcome;
 using static ChogGames.Games.ChogLife.Rules.LifeTile;
 
 namespace ChogGames.Games.ChogLife.Rules;
 
 /// <summary>
 /// Chog Life rules version 1 (STORY-035, DEC-037): 36 tiles on a main track with two Safe/Degen forks, 100 MON to
-/// start, +100 MON for the first player to finish, a 20-minute cap and one six-sided die. These are proposed defaults
-/// to be balanced in STORY-044 (requirements §15); any change means version 2.
+/// start, +100 MON for the first player to finish, a 20-minute cap, one six-sided die and the event outcomes of
+/// STORY-038 (DEC-040). These are proposed defaults to be balanced in STORY-044 (requirements §15); any change means
+/// version 2.
 /// </summary>
 public static class LifeRulesV1
 {
@@ -19,7 +21,20 @@ public static class LifeRulesV1
         startingMon: 100,
         finishBonus: 100,
         timeCap: TimeSpan.FromMinutes(20),
-        dieFaces: 6);
+        dieFaces: 6,
+        events: Events());
+
+    /// <summary>
+    /// Airdrops always pay, a market moves 10% of liquid MON either way, a rug takes 40% and a liquidation 25%, at least
+    /// 20 MON. Losses never take more than the player has.
+    /// </summary>
+    private static IEnumerable<LifeEvent> Events() =>
+    [
+        new(LifeEventKind.Airdrop, [Gain(60, 10), Gain(30, 25), Gain(10, 50)]),
+        new(LifeEventKind.Market, [GainPercent(50, 10, minimum: 5), LosePercent(50, 10, minimum: 5)]),
+        new(LifeEventKind.Rug, [LosePercent(100, 40)]),
+        new(LifeEventKind.Liquidation, [LosePercent(100, 25, minimum: 20)]),
+    ];
 
     // S-1..8-[B9] safe 10-13 / degen 14-17 -> 18..24-[B25] safe 26-28 / degen 29-31 -> 32..34-F35
     private static IEnumerable<LifeTile> Board() =>

@@ -13,7 +13,9 @@ namespace ChogGames.Games.ChogLife;
 /// ships (DEC-037). Each player sees the board of that version and the pawns of the players still playing; the turn and
 /// seats come with the room snapshot. On their turn a player sends <c>ROLL</c> (STORY-037, DEC-039): the server rolls the
 /// die, moves the pawn along the board and ends the turn; the state keeps that last move, so every player sees the same
-/// roll and destination. A turn that runs out is skipped.
+/// roll and destination. The tile the pawn stops on then resolves (STORY-038, DEC-040): Reward and Loss tiles move
+/// their MON and an event tile draws one of its outcomes, and every player sees each player's liquid MON. A turn that
+/// runs out is skipped.
 /// </summary>
 public sealed class ChogLifeMatchRules : IMatchRules
 {
@@ -23,7 +25,7 @@ public sealed class ChogLifeMatchRules : IMatchRules
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>Roll the die and move: the whole turn until tile events and branch choices arrive (STORY-038/039).</summary>
+    /// <summary>Roll the die, move and resolve the tile: the whole turn until branch choices arrive (STORY-039).</summary>
     public const string Roll = "ROLL";
 
     private readonly Dictionary<int, LifeRules> _rulesByVersion;
@@ -49,16 +51,17 @@ public sealed class ChogLifeMatchRules : IMatchRules
         var pawns = match.Members
             .Where(member => member.Seat is not null)
             .OrderBy(member => member.Seat)
-            .Select(member => new LifePawn(member.Seat!.Value, rules.Start.Index))
+            .Select(member => new LifePawn(member.Seat!.Value, rules.Start.Index, rules.StartingMon))
             .ToArray();
         return new LifeMatchState(rules.Version, pawns);
     }
 
     /// <summary>
     /// <c>ROLL</c>: one die from the server's source of chance, never from the payload, which is ignored (DEC-031). The
-    /// pawn moves along <see cref="LifeRules.Path"/> and the turn ends. A pawn on the Finish doesn't move and draws nothing;
+    /// pawn moves along <see cref="LifeRules.Path"/>, the tile it stops on resolves with <see cref="LifeRules.Resolve"/>
+    /// (an event's draw comes after the die's) and the turn ends. A pawn on the Finish doesn't move and draws nothing;
     /// its roll just passes the turn until STORY-041 decides what finished players do. A match started before its state
-    /// existed (before STORY-036) gets its start state first.
+    /// existed (before STORY-036) gets its start state first, and pawns from before STORY-038 hold the starting MON.
     /// </summary>
     public MatchRuleDecision Apply(MatchCommandContext context)
     {
@@ -67,14 +70,18 @@ public sealed class ChogLifeMatchRules : IMatchRules
             return MatchRuleDecision.Unknown;
         }
 
-        var state = context.State is { } stored ? Read(stored) : StartOf(context.Match, _current);
-        if (state is null || !_rulesByVersion.TryGetValue(state.RulesVersion, out var rules))
+        var stored = context.State is { } json ? Read(json) : StartOf(context.Match, _current);
+        if (stored is null || !_rulesByVersion.TryGetValue(stored.RulesVersion, out var rules))
         {
             return MatchRuleDecision.Reject("game_state_unavailable");
         }
 
+        var state = WithMon(stored, rules);
         var seat = context.Match.Members.SingleOrDefault(member => member.PlayerId == context.PlayerId)?.Seat;
-        if (state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn || pawn.Tile < 0 || pawn.Tile >= rules.Tiles.Count)
+        if (state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn
+            || pawn.Tile < 0
+            || pawn.Tile >= rules.Tiles.Count
+            || pawn.Mon is not (>= 0 and <= LifeRules.MaxMon))
         {
             return MatchRuleDecision.Reject("game_state_unavailable");
         }
@@ -88,10 +95,13 @@ public sealed class ChogLifeMatchRules : IMatchRules
         {
             var roll = context.Random.Next(1, rules.DieFaces + 1);
             var path = rules.Path(pawn.Tile, roll);
-            move = new LifeMove(pawn.Seat, roll, pawn.Tile, path[^1], path);
+            var change = rules.Resolve(path[^1], pawn.Mon!.Value, context.Random);
+            move = new LifeMove(pawn.Seat, roll, pawn.Tile, path[^1], path, change);
         }
 
-        var pawns = state.Pawns.Select(p => p.Seat == pawn.Seat ? p with { Tile = move.To } : p).ToArray();
+        var pawns = state.Pawns
+            .Select(p => p.Seat == pawn.Seat ? p with { Tile = move.To, Mon = p.Mon + (move.Change ?? 0) } : p)
+            .ToArray();
         var next = state with { Pawns = pawns, LastMove = move };
         return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: true);
     }
@@ -99,8 +109,8 @@ public sealed class ChogLifeMatchRules : IMatchRules
     public JsonElement? TimeOutTurn(MatchTurnContext context) => null;
 
     /// <summary>
-    /// The board and the pawns, the same for every player: Chog Life has no hidden information on the board. Pawns of
-    /// players who left are taken off. A state this server can't read, or of a version it no longer knows, shows nothing.
+    /// The board and the pawns with each player's liquid MON, the same for every player: Chog Life has no hidden
+    /// information on the board. Pawns of players who left are taken off. A state this server can't read, or of a version it no longer knows, shows nothing.
     /// </summary>
     public JsonElement? ViewFor(MatchViewContext context)
     {
@@ -116,7 +126,7 @@ public sealed class ChogLifeMatchRules : IMatchRules
         var view = new LifeBoardView(
             rules.Version,
             rules.Tiles.Select(ToView).ToArray(),
-            state.Pawns.Where(pawn => playing.Contains(pawn.Seat)).OrderBy(pawn => pawn.Seat).ToArray(),
+            WithMon(state, rules).Pawns.Where(pawn => playing.Contains(pawn.Seat)).OrderBy(pawn => pawn.Seat).ToArray(),
             state.LastMove);
         return JsonSerializer.SerializeToElement(view, Json);
     }
@@ -133,6 +143,10 @@ public sealed class ChogLifeMatchRules : IMatchRules
         }
     }
 
+    /// <summary>Pawns stored before STORY-038 have no MON yet; they hold the starting MON.</summary>
+    private static LifeMatchState WithMon(LifeMatchState state, LifeRules rules) =>
+        state with { Pawns = state.Pawns.Select(pawn => pawn with { Mon = pawn.Mon ?? rules.StartingMon }).ToArray() };
+
     private static LifeTileView ToView(LifeTile tile) => new(
         tile.Index,
         tile.Type,
@@ -144,17 +158,20 @@ public sealed class ChogLifeMatchRules : IMatchRules
         tile.Event);
 
     /// <summary>
-    /// The stored state: the rules version the match started with, where each seat's pawn stands and the latest move.
+    /// The stored state: the rules version the match started with, where each seat's pawn stands with its liquid MON,
+    /// and the latest move.
     /// </summary>
     private sealed record LifeMatchState(int RulesVersion, IReadOnlyList<LifePawn> Pawns, LifeMove? LastMove = null);
 
     /// <summary>
-    /// A seat's move: the roll (null when a pawn on the Finish passed), the tiles it left and reached, and every tile it
-    /// passed on the way, ending with <paramref name="To"/>.
+    /// A seat's move: the roll (null when a pawn on the Finish passed), the tiles it left and reached, every tile it
+    /// passed on the way, ending with <paramref name="To"/>, and the signed MON the tile it stopped on moved (null for a
+    /// tile that does nothing).
     /// </summary>
-    private sealed record LifeMove(int Seat, int? Roll, int From, int To, IReadOnlyList<int> Path);
+    private sealed record LifeMove(int Seat, int? Roll, int From, int To, IReadOnlyList<int> Path, int? Change = null);
 
-    private sealed record LifePawn(int Seat, int Tile);
+    /// <summary>A seat's pawn: the tile it stands on and the player's liquid MON (null in states from before STORY-038).</summary>
+    private sealed record LifePawn(int Seat, int Tile, int? Mon);
 
     private sealed record LifeBoardView(
         int RulesVersion, IReadOnlyList<LifeTileView> Tiles, IReadOnlyList<LifePawn> Pawns, LifeMove? LastMove);

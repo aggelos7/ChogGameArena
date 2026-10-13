@@ -34,13 +34,19 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...FORK_BOARD, tiles: [...FORK_BOARD.tiles].reverse() })).toBeNull();
     expect(toLifeBoard({ ...FORK_BOARD, tiles: FORK_BOARD.tiles.map((t) => (t.index === 4 ? { ...t, next: 1 } : t)) })).toBeNull();
     expect(toLifeBoard({ ...FORK_BOARD, tiles: FORK_BOARD.tiles.map((t) => (t.index === 1 ? { ...t, type: 'Teleport' } : t)) })).toBeNull();
-    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 10 }] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 10, mon: 100 }] })).toBeNull();
     // A last move must name tiles on the board.
     const moved = { ...FORK_BOARD, lastMove: { seat: 1, roll: 3, from: 0, to: 2, path: [1, 2] } };
     expect(toLifeBoard(moved)).toEqual(moved);
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, to: 12 } })).toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, path: 'far' } })).toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, roll: -1 } })).toBeNull();
+    // Every pawn carries a whole, non-negative MON balance, and a move's change is a whole number.
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0 }] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: -5 }] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 1.5 }] })).toBeNull();
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, change: -40 } })).not.toBeNull();
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, change: 'lots' } })).toBeNull();
   });
 
   it('lays a fork out as two lanes side by side that join the main track', () => {
@@ -98,7 +104,7 @@ describe('Chog Life board', () => {
 
   it.each([2, 6])('shows all %i pawns, numbered by seat, and whose turn it is', (count) => {
     const members = NAMES.slice(0, count).map((name, i) => member(name, i + 1, { isTurn: i === 1, isYou: i === 0 }));
-    render({ ...FORK_BOARD, pawns: members.map((_, i) => ({ seat: i + 1, tile: 0 })) }, members);
+    render({ ...FORK_BOARD, pawns: members.map((_, i) => ({ seat: i + 1, tile: 0, mon: 100 })) }, members);
 
     expect(pawnsOn(0)).toEqual(NAMES.slice(0, count).map((_, i) => String(i + 1)));
     expect(page.querySelectorAll('[data-pawn]').length).toBe(count);
@@ -114,7 +120,7 @@ describe('Chog Life board', () => {
 
   it('puts each pawn on its own tile and tells you when it is your turn', () => {
     render(
-      { ...FORK_BOARD, pawns: [{ seat: 1, tile: 6 }, { seat: 2, tile: 3 }, { seat: 3, tile: 9 }] },
+      { ...FORK_BOARD, pawns: [{ seat: 1, tile: 6, mon: 100 }, { seat: 2, tile: 3, mon: 100 }, { seat: 3, tile: 9, mon: 100 }] },
       [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2), member('Carol', 3)],
     );
 
@@ -123,7 +129,7 @@ describe('Chog Life board', () => {
   });
 
   it('only lists players who still have a pawn', () => {
-    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 3, tile: 0 }] }, [
+    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 3, tile: 0, mon: 100 }] }, [
       member('Alice', 1, { isTurn: true }),
       member('Bob', 2, { hasLeft: true }),
       member('Carol', 3),
@@ -155,16 +161,45 @@ describe('Chog Life board', () => {
 
   it('shows the last move and marks where it ended', () => {
     const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
-    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
+    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2, mon: 100 }, { seat: 2, tile: 0, mon: 100 }], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
 
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 2 and moved to tile 2 (Safe or Degen?).');
     expect(Array.from(page.querySelectorAll('.last-stop')).map((t) => (t as HTMLElement).dataset['tile'])).toEqual(['2']);
 
-    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 9 }], lastMove: { seat: 2, from: 9, to: 9, path: [] } }, members);
+    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2, mon: 100 }, { seat: 2, tile: 9, mon: 100 }], lastMove: { seat: 2, from: 9, to: 9, path: [] } }, members);
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob passed at the finish.');
     expect(page.querySelector('.last-stop')).toBeNull();
 
     render(FORK_BOARD, members);
     expect(page.querySelector('[data-last-move]')).toBeNull();
+  });
+
+  it('shows every player’s MON in the legend', () => {
+    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 1, mon: 120 }, { seat: 2, tile: 0, mon: 0 }] }, [
+      member('Alice', 1, { isYou: true }),
+      member('Bob', 2, { isTurn: true }),
+    ]);
+
+    expect(Array.from(page.querySelectorAll('[data-list="pawns"] li')).map((li) => li.querySelector('[data-mon]')?.textContent?.trim())).toEqual([
+      '120 MON',
+      '0 MON',
+    ]);
+  });
+
+  it('says what the tile did to the mover’s MON', () => {
+    const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+    const moved = (change: number, seat = 1) => ({
+      ...FORK_BOARD,
+      lastMove: { seat, roll: 1, from: 0, to: 1, path: [1], change },
+    });
+
+    render(moved(20), members);
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1, landed on tile 1 (+20 MON) and won 20 MON.');
+    render(moved(-40, 2), members);
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob rolled 1, landed on tile 1 (+20 MON) and lost 40 MON.');
+    render(moved(0, 2), members);
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob rolled 1, landed on tile 1 (+20 MON) and their MON didn’t change.');
+    render(moved(0), members);
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1, landed on tile 1 (+20 MON) and your MON didn’t change.');
   });
 });

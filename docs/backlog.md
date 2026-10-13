@@ -565,7 +565,7 @@
 
 #### STORY-038 — Tile event resolver
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Implement reward, loss, market, airdrop, rug and liquidation events with configurable outcomes.

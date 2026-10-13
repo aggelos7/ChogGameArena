@@ -22,7 +22,8 @@ interface DrawnPawn {
  * side by side, every tile's type and the pawns standing on it. Pawns are numbered and coloured by seat, and the legend
  * names each player and whose turn it is. It only draws what the server sent; it has no moves of its own. On your turn it
  * offers Roll, which the page sends to the server (STORY-037, DEC-039); the server's roll and move come back in the next
- * snapshot, shown as the last move with its destination marked.
+ * snapshot, shown as the last move with its destination marked and what the tile did to their MON. The legend shows
+ * every player's liquid MON (STORY-038, DEC-040).
  */
 @Component({
   selector: 'app-life-board',
@@ -68,7 +69,10 @@ export class LifeBoardView {
 
   protected readonly turnOf = computed(() => this.players().find((member) => member.isTurn) ?? null);
 
-  /** What the latest move was, in words: who rolled what and where they went. */
+  /** Each player's liquid MON, by seat. */
+  protected readonly monBySeat = computed(() => new Map(this.board().pawns.map((pawn) => [pawn.seat, pawn.mon])));
+
+  /** What the latest move was, in words: who rolled what, where they went and what the tile did to their MON. */
   protected readonly lastMove = computed(() => {
     const move = this.board().lastMove;
     if (!move) {
@@ -78,7 +82,19 @@ export class LifeBoardView {
     const who = member?.isYou ? 'You' : (member?.displayName ?? `Seat ${move.seat}`);
     const tile = this.board().tiles[move.to];
     const where = tile ? `tile ${move.to}${this.label(tile) ? ` (${this.label(tile)})` : ''}` : `tile ${move.to}`;
-    return move.roll === undefined ? `${who} passed at the finish.` : `${who} rolled ${move.roll} and moved to ${where}.`;
+    if (move.roll === undefined) {
+      return `${who} passed at the finish.`;
+    }
+    if (move.change === undefined) {
+      return `${who} rolled ${move.roll} and moved to ${where}.`;
+    }
+    const outcome =
+      move.change > 0
+        ? `won ${move.change} MON`
+        : move.change < 0
+          ? `lost ${-move.change} MON`
+          : `${member?.isYou ? 'your' : 'their'} MON didn’t change`;
+    return `${who} rolled ${move.roll}, landed on ${where} and ${outcome}.`;
   });
 
   protected isLastStop(tile: LifeTile): boolean {

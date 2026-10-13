@@ -35,8 +35,10 @@ public class LifeRulesTests
         int startingMon = 100,
         int finishBonus = 100,
         TimeSpan? timeCap = null,
-        int dieFaces = 6) =>
-        LifeRules.Create(version, tiles ?? Board(), startingMon, finishBonus, timeCap ?? TimeSpan.FromMinutes(20), dieFaces);
+        int dieFaces = 6,
+        IEnumerable<LifeEvent>? events = null) =>
+        LifeRules.Create(
+            version, tiles ?? Board(), startingMon, finishBonus, timeCap ?? TimeSpan.FromMinutes(20), dieFaces, events ?? LifeRulesV1.Rules.Events.Values);
 
     private static string Refused(IEnumerable<LifeTile> tiles) => Assert.ThrowsAny<ArgumentException>(() => Build(tiles)).Message;
 
@@ -72,7 +74,7 @@ public class LifeRulesTests
     [Fact]
     public void Missing_tiles_are_refused()
     {
-        Assert.Throws<ArgumentNullException>(() => LifeRules.Create(1, null!, 100, 100, TimeSpan.FromMinutes(20), 6));
+        Assert.Throws<ArgumentNullException>(() => LifeRules.Create(1, null!, 100, 100, TimeSpan.FromMinutes(20), 6, LifeRulesV1.Rules.Events.Values));
         Assert.Contains("missing", Refused(Board(4, _ => null!)));
     }
 
