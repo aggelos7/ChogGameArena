@@ -1,3 +1,4 @@
+using ChogGames.Core.Abilities;
 using ChogGames.Core.Games;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
@@ -148,6 +149,42 @@ public sealed class GameRoom
     }
 
     /// <summary>
+    /// <paramref name="playerId"/> chooses <paramref name="abilityId"/> for the match (STORY-033, NFT-013, DEC-035). The
+    /// caller has checked that their pool offers it. Ready counts only for the ability chosen when marking ready, so
+    /// choosing another one makes the member not ready.
+    /// </summary>
+    public void SelectAbility(Guid playerId, string abilityId)
+    {
+        if (!AbilityDefinition.IsValidId(abilityId))
+        {
+            throw new ArgumentException("Not an ability id.", nameof(abilityId));
+        }
+
+        var member = MemberForChange(playerId);
+        if (string.Equals(member.AbilityId, abilityId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        member.SelectAbility(abilityId);
+        member.MarkNotReady();
+        Version++;
+    }
+
+    /// <summary>
+    /// The member's chosen ability is no longer offered to them (DEC-035): the choice is cleared and they are not ready,
+    /// so they must choose again.
+    /// </summary>
+    public void DropAbility(Guid playerId)
+    {
+        var member = MemberForChange(playerId);
+        if (member.SelectAbility(null) | member.MarkNotReady())
+        {
+            Version++;
+        }
+    }
+
+    /// <summary>
     /// <paramref name="playerId"/> leaves. In a waiting room (STORY-063, DEC-023) a member is removed, freeing their
     /// seat, and nobody else's ready status changes; when the host leaves, the room is cancelled for everyone and its
     /// members stay listed, so they can see it was closed. In a started match leaving is a forfeit (DEC-025): the member
@@ -226,7 +263,8 @@ public sealed class GameRoom
     /// no first move by default (STORY-029, DEC-031), and the first turn begins with <paramref name="turnTimeout"/> to
     /// play it (DEC-027). The caller has checked
     /// <see cref="CheckStart"/> and verified every member's Chog (STORY-018); <paramref name="characters"/> holds a
-    /// snapshot for every member.
+    /// snapshot for every member. Each member's chosen ability is locked with the snapshot in
+    /// <paramref name="abilities"/> (STORY-033, NFT-015, DEC-035); members of a game without abilities have none.
     /// </summary>
     public void Start(
         Guid callerId,
@@ -234,8 +272,10 @@ public sealed class GameRoom
         IReadOnlyDictionary<Guid, CharacterSnapshot> characters,
         TimeSpan turnTimeout,
         IRandomSource random,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        IReadOnlyDictionary<Guid, AbilitySnapshot>? abilities = null)
     {
+        abilities ??= new Dictionary<Guid, AbilitySnapshot>();
         if (turnTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(turnTimeout), turnTimeout, "A turn must last some time.");
@@ -251,11 +291,17 @@ public sealed class GameRoom
             throw new InvalidOperationException("Every member needs a character snapshot to start.");
         }
 
+        if (abilities.Any(a => _members.SingleOrDefault(m => m.PlayerId == a.Key)?.AbilityId != a.Value.Id))
+        {
+            throw new InvalidOperationException("Only a member's chosen ability can be locked for them.");
+        }
+
         MoveTo(RoomStatus.Active, now);
         StartedAt = now;
         foreach (var member in _members)
         {
             member.LockCharacter(characters[member.PlayerId]);
+            member.LockAbility(abilities.GetValueOrDefault(member.PlayerId));
         }
 
         // Shuffled from a fixed order (host, then join order), so a scripted source gives the same seats every time.
@@ -551,6 +597,18 @@ public sealed class RoomMember
     /// <summary>The character locked when the match started (DEC-019, DEC-025); null before the start.</summary>
     public CharacterSnapshot? Character { get; private set; }
 
+    /// <summary>
+    /// The ability the member chose in the lobby (STORY-033, DEC-035), kept when they are not ready; null until they
+    /// choose. It isn't shown to other members before the start.
+    /// </summary>
+    public string? AbilityId { get; private set; }
+
+    /// <summary>
+    /// The ability locked when the match started (NFT-015, DEC-035); null before the start and for games without
+    /// abilities.
+    /// </summary>
+    public AbilitySnapshot? Ability { get; private set; }
+
     /// <summary>When the member left the started match (DEC-025); null while they play.</summary>
     public DateTimeOffset? LeftAt { get; private set; }
 
@@ -610,7 +668,21 @@ public sealed class RoomMember
         return true;
     }
 
+    /// <summary>Returns whether anything changed.</summary>
+    internal bool SelectAbility(string? abilityId)
+    {
+        if (string.Equals(AbilityId, abilityId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        AbilityId = abilityId;
+        return true;
+    }
+
     internal void LockCharacter(CharacterSnapshot character) => Character = character;
+
+    internal void LockAbility(AbilitySnapshot? ability) => Ability = ability;
 
     internal void Forfeit(DateTimeOffset now) => LeftAt = now;
 

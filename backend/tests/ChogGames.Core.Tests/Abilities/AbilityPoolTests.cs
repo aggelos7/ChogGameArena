@@ -160,4 +160,24 @@ public class AbilityPoolTests
 
         public System.Text.Json.JsonElement Execute(AbilityContext context) => context.State!.Value;
     }
+
+    [Fact]
+    public void Lock_snapshots_an_offered_ability_with_the_catalog_version()
+    {
+        var locked = _pool.Lock(GameType, NftChog(7, new NftTrait("Rarity", "Rare")), "steal");
+
+        Assert.Equal(AbilitySnapshot.Lock(Catalog(), Steal()), locked);
+        Assert.Equal(Catalog().Version, locked!.CatalogVersion);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("teleport")]
+    [InlineData("Boost")]
+    public void Lock_refuses_what_the_pool_does_not_offer(string? abilityId)
+    {
+        Assert.Null(_pool.Lock(GameType, Guest(), abilityId));
+        Assert.Null(_pool.Lock("chog-race", Guest(), "boost"));
+    }
 }

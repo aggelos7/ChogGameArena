@@ -64,9 +64,24 @@ public enum RoomOutcome
 
     /// <summary>The member had already left this started match; nothing changed.</summary>
     AlreadyLeft,
+
+    /// <summary>The member chose an ability (or already had that one); a different choice made them not ready (DEC-035).</summary>
+    AbilitySelected,
+
+    /// <summary>The ability isn't one the player's pool offers for this game, or the game has no abilities; nothing changed.</summary>
+    UnknownAbility,
+
+    /// <summary>The game has abilities and the member hasn't chosen one their pool offers, so they can't be ready.</summary>
+    AbilityRequired,
+
+    /// <summary>
+    /// At start, a member's chosen ability is no longer offered to them; those members' choices were cleared and they
+    /// were set back to not ready (DEC-035).
+    /// </summary>
+    AbilityUnavailable,
 }
 
-/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c>, <c>AlreadyMember</c>, <c>ReadyChanged</c>, <c>Started</c>, <c>Left</c> or <c>AlreadyLeft</c>.</param>
+/// <param name="Room">The room when the outcome is <c>Created</c>, <c>Joined</c>, <c>AlreadyMember</c>, <c>ReadyChanged</c>, <c>AbilitySelected</c>, <c>Started</c>, <c>Left</c> or <c>AlreadyLeft</c>.</param>
 /// <param name="OpenRoomCode">For <c>AlreadyInRoom</c>: the code of the room the player is already in.</param>
 public sealed record RoomResult(RoomOutcome Outcome, GameRoom? Room = null, string? OpenRoomCode = null)
 {

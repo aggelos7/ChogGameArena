@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using ChogGames.Api.Realtime;
+using ChogGames.Core.Abilities;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Persistence;
@@ -20,6 +21,8 @@ namespace ChogGames.Api.Rooms;
 /// player's open room, so they can return to it after a refresh or a lost connection (STORY-027, DEC-029).
 /// The player is always the session's; errors carry a stable <c>code</c> (DEC-021, DEC-022). Every committed change
 /// is pushed to the room's subscribed members over SignalR as their own versioned snapshot (STORY-022, STORY-026).
+/// In a game with abilities each member chooses one before marking ready; it stays hidden from the others until the
+/// start, which locks it (STORY-033, DEC-035).
 /// </summary>
 public static class RoomEndpoints
 {
@@ -29,11 +32,20 @@ public static class RoomEndpoints
 
     public sealed record SetReadyRequest(bool? Ready);
 
+    public sealed record SelectAbilityRequest(string? AbilityId);
+
+    /// <summary>An ability of the game (DEC-032), as offered in the lobby or as locked for a member at start (DEC-035).</summary>
+    public sealed record RoomAbilityResponse(string Id, string Name, string Description, AbilityTargetKind Target, int MaxUses);
+
     /// <summary>The member's selected Chog. <c>Color</c> is set for standard Chogs; NFTs show their token id.</summary>
     public sealed record RoomCharacterResponse(CharacterKind Kind, string Id, string Name, string? Color);
 
     /// <param name="Character">The selected Chog while waiting; the Chog locked at start once the match has started.</param>
-    /// <param name="Ability">The chosen ability; always null until ability selection (STORY-033).</param>
+    /// <param name="Ability">
+    /// The member's ability: their choice while waiting, shown only to themselves; the one locked at start, shown to
+    /// everyone (DEC-035). Null when they have none.
+    /// </param>
+    /// <param name="HasAbility">The member has chosen (or, once started, locked) an ability; what others see before the start.</param>
     /// <param name="HasLeft">The member left the started match (DEC-025).</param>
     /// <param name="IsTurn">It is this member's turn in the active match (DEC-027).</param>
     /// <param name="Rank">The member's final place in a completed match, from 1 for the winners; null otherwise (DEC-030).</param>
@@ -44,7 +56,8 @@ public static class RoomEndpoints
         bool IsYou,
         bool IsReady,
         RoomCharacterResponse Character,
-        string? Ability,
+        RoomAbilityResponse? Ability,
+        bool HasAbility,
         bool HasLeft,
         bool IsTurn,
         int? Rank);
@@ -57,6 +70,10 @@ public static class RoomEndpoints
     /// What this member may see of the game's state (DEC-028); null before the game's first command and for games
     /// without rules.
     /// </param>
+    /// <param name="Abilities">
+    /// The abilities this member may choose from while the room waits, in catalog order (DEC-035); empty for a game
+    /// without abilities and once the room has started.
+    /// </param>
     public sealed record RoomResponse(
         string Code,
         Guid MatchId,
@@ -68,7 +85,8 @@ public static class RoomEndpoints
         int TurnNumber,
         DateTimeOffset? TurnEndsAt,
         RoomMemberResponse[] Members,
-        JsonElement? State);
+        JsonElement? State,
+        RoomAbilityResponse[] Abilities);
 
     /// <summary>Stable error codes; clients rely on these, never on the message text.</summary>
     public static class ErrorCodes
@@ -85,6 +103,9 @@ public static class RoomEndpoints
         public const string PlayersNotReady = "players_not_ready";
         public const string CharacterUnavailable = "character_unavailable";
         public const string OwnershipUnavailable = "ownership_unavailable";
+        public const string UnknownAbility = "unknown_ability";
+        public const string AbilityRequired = "ability_required";
+        public const string AbilityUnavailable = "ability_unavailable";
     }
 
     public static IServiceCollection AddRooms(this IServiceCollection services, IConfiguration configuration)
@@ -117,6 +138,7 @@ public static class RoomEndpoints
         rooms.MapPost("/{code}/join", JoinRoomAsync).WithName("JoinRoom");
         rooms.MapGet("/{code}", GetRoomAsync).WithName("GetRoom");
         rooms.MapPut("/{code}/ready", SetReadyAsync).WithName("SetRoomReady");
+        rooms.MapPut("/{code}/ability", SelectAbilityAsync).WithName("SelectRoomAbility");
         rooms.MapPost("/{code}/start", StartRoomAsync).WithName("StartRoom");
         rooms.MapPost("/{code}/leave", LeaveRoomAsync).WithName("LeaveRoom");
 
@@ -242,6 +264,43 @@ public static class RoomEndpoints
         return TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
     }
 
+    private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, ValidationProblem, NotFound>> SelectAbilityAsync(
+        string code,
+        SelectAbilityRequest? request,
+        ClaimsPrincipal user,
+        ChogGamesDbContext db,
+        LobbyService lobby,
+        RoomSnapshots snapshots,
+        RoomNotifier notifier,
+        CancellationToken cancellationToken)
+    {
+        var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
+        if (player is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (request?.AbilityId is not { } abilityId)
+        {
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["abilityId"] = ["An ability id is required."] });
+        }
+
+        if (!RoomCode.TryParse(code, out var roomCode))
+        {
+            return Failure(new RoomResult(RoomOutcome.RoomNotFound));
+        }
+
+        var result = await lobby.SelectAbilityAsync(player, roomCode, abilityId, cancellationToken);
+        if (result.Room is not { } room)
+        {
+            return Failure(result);
+        }
+
+        await notifier.RoomChangedAsync(room.Code);
+
+        return TypedResults.Ok(await snapshots.ForAsync(room, player.Id, cancellationToken));
+    }
+
     private static async Task<Results<Ok<RoomResponse>, ProblemHttpResult, NotFound>> StartRoomAsync(
         string code,
         ClaimsPrincipal user,
@@ -263,9 +322,9 @@ public static class RoomEndpoints
         }
 
         var result = await lobby.StartAsync(player, roomCode, cancellationToken);
-        if (result.Outcome == RoomOutcome.CharacterUnavailable)
+        if (result.Outcome is RoomOutcome.CharacterUnavailable or RoomOutcome.AbilityUnavailable)
         {
-            // Members whose NFT left their wallet were set back to not ready.
+            // Members whose NFT left their wallet, or whose ability is no longer offered, were set back to not ready.
             await notifier.RoomChangedAsync(roomCode.Value);
         }
 
@@ -326,6 +385,10 @@ public static class RoomEndpoints
                 StatusCodes.Status409Conflict, ErrorCodes.CharacterUnavailable, "A player no longer owns their chosen Chog and must choose again."),
             RoomOutcome.OwnershipUnavailable => (
                 StatusCodes.Status503ServiceUnavailable, ErrorCodes.OwnershipUnavailable, "Chog ownership can't be checked right now. Try again shortly."),
+            RoomOutcome.UnknownAbility => (StatusCodes.Status400BadRequest, ErrorCodes.UnknownAbility, "This ability can't be chosen in this game."),
+            RoomOutcome.AbilityRequired => (StatusCodes.Status409Conflict, ErrorCodes.AbilityRequired, "Choose an ability before marking ready."),
+            RoomOutcome.AbilityUnavailable => (
+                StatusCodes.Status409Conflict, ErrorCodes.AbilityUnavailable, "A player's chosen ability is no longer available and they must choose again."),
             _ => throw new ArgumentOutOfRangeException(nameof(result), result.Outcome, "Not a failure."),
         };
 
@@ -351,7 +414,7 @@ public sealed class RoomOptions
     public const string SectionName = "Rooms";
 
     /// <summary>
-    /// Room requests (create, join, read, ready, start, leave, match commands, opening a live connection) per player per minute; calls
+    /// Room requests (create, join, read, ready, ability choice, start, leave, match commands, opening a live connection) per player per minute; calls
     /// over a live connection have their own budget of the same size.
     /// </summary>
     public int RequestsPerMinutePerPlayer { get; set; } = 60;
