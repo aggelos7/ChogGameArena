@@ -1,0 +1,272 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Threading.Channels;
+using ChogGames.Api.Matches;
+using ChogGames.Api.Realtime;
+using ChogGames.Core.Matches;
+using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace ChogGames.Api.Tests.ChogLife;
+
+/// <summary>
+/// STORY-037, DEC-039: on their turn a player rolls; the server draws the die, moves the pawn and ends the turn, and every
+/// player, over REST and live, gets the same roll and destination. Rolls by anyone else change nothing and draw nothing.
+/// </summary>
+public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Empty, it keeps seats in join order; each test queues its rolls after the start.</summary>
+    private readonly ScriptedRandomSource _dice = new();
+
+    private readonly List<IAsyncDisposable> _disposables = [];
+
+    private ApiFactory _factory = null!;
+
+    public async Task InitializeAsync()
+    {
+        if (database.ConnectionString.Length > 0)
+        {
+            await using var db = database.CreateDbContext();
+            await db.Database.ExecuteSqlRawAsync("TRUNCATE \"GuestSessions\", \"Players\" CASCADE");
+        }
+
+        _factory = new ApiFactory(
+            database.ConnectionString,
+            new Dictionary<string, string?>
+            {
+                ["Games:Items:0:Status"] = "Available",
+                ["Matches:TurnTimeout"] = "00:05:00",
+            },
+            services =>
+            {
+                services.AddSingleton<IRandomSource>(_dice);
+                foreach (var worker in services.Where(d => d.ImplementationType == typeof(TurnTimeoutWorker)).ToList())
+                {
+                    services.Remove(worker);
+                }
+            });
+    }
+
+    public async Task DisposeAsync()
+    {
+        foreach (var disposable in _disposables)
+        {
+            await disposable.DisposeAsync();
+        }
+
+        await _factory.DisposeAsync();
+    }
+
+    /// <summary>A browser with a guest session; the cookie is kept so live connections can send it too.</summary>
+    private sealed record Guest(HttpClient Client, string Cookie);
+
+    private async Task<Guest> GuestAsync(string name)
+    {
+        var client = _factory.CreateClient(
+            new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
+        _disposables.Add(new DisposableClient(client));
+        using var response = await client.PostAsJsonAsync("/api/guest-sessions", new { displayName = name });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var cookie = response.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+        client.DefaultRequestHeaders.Add("Cookie", cookie);
+        return new Guest(client, cookie);
+    }
+
+    private sealed class DisposableClient(HttpClient client) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            client.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>One live connection and the snapshots it receives.</summary>
+    private sealed class Listener(HubConnection connection) : IAsyncDisposable
+    {
+        private readonly Channel<JsonElement> _snapshots = Channel.CreateUnbounded<JsonElement>();
+
+        public void Listen() => connection.On<JsonElement>(nameof(IRoomClient.RoomUpdated), room => _snapshots.Writer.TryWrite(room));
+
+        public Task StartAsync() => connection.StartAsync();
+
+        public Task<JsonElement> SubscribeAsync(string code) => connection.InvokeAsync<JsonElement>(nameof(RoomHub.SubscribeRoom), code);
+
+        public async Task<JsonElement> NextAsync()
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            return await _snapshots.Reader.ReadAsync(timeout.Token);
+        }
+
+        public ValueTask DisposeAsync() => connection.DisposeAsync();
+    }
+
+    private async Task<Listener> ConnectAsync(Guest guest, string code)
+    {
+        var server = _factory.Server;
+        var connection = new HubConnectionBuilder()
+            .WithUrl(new Uri($"https://localhost{RoomHub.Path}"), HttpTransportType.WebSockets, options =>
+            {
+                options.SkipNegotiation = true;
+                options.WebSocketFactory = async (context, cancellationToken) =>
+                {
+                    var client = server.CreateWebSocketClient();
+                    client.ConfigureRequest = request => request.Headers.Cookie = guest.Cookie;
+                    return await client.ConnectAsync(context.Uri, cancellationToken);
+                };
+            })
+            .Build();
+        var listener = new Listener(connection);
+        _disposables.Add(listener);
+        listener.Listen();
+        await listener.StartAsync();
+        await listener.SubscribeAsync(code);
+        return listener;
+    }
+
+    private static async Task<JsonElement> SendAsync(Guest guest, HttpMethod method, string path, object? body = null, HttpStatusCode expected = HttpStatusCode.OK)
+    {
+        using var request = new HttpRequestMessage(method, path) { Content = body is null ? null : JsonContent.Create(body) };
+        using var response = await guest.Client.SendAsync(request);
+        Assert.Equal(expected, response.StatusCode);
+        return response.Content.Headers.ContentLength == 0 ? default : await response.Content.ReadFromJsonAsync<JsonElement>(Json);
+    }
+
+    private static Task<JsonElement> ViewAsync(Guest guest, string code) => SendAsync(guest, HttpMethod.Get, $"/api/rooms/{code}");
+
+    /// <summary>A started Chog Life match of <paramref name="players"/>, seated in join order; returns its code.</summary>
+    private static async Task<string> StartedAsync(params Guest[] players)
+    {
+        var created = await SendAsync(players[0], HttpMethod.Post, "/api/rooms", new { gameType = "chog-life" }, HttpStatusCode.Created);
+        var code = created.GetProperty("code").GetString()!;
+        foreach (var player in players[1..])
+        {
+            await SendAsync(player, HttpMethod.Post, $"/api/rooms/{code}/join");
+        }
+
+        foreach (var player in players)
+        {
+            await SendAsync(player, HttpMethod.Put, $"/api/rooms/{code}/ready", new { ready = true });
+        }
+
+        await SendAsync(players[0], HttpMethod.Post, $"/api/rooms/{code}/start");
+        return code;
+    }
+
+    private static Task<JsonElement> RollAsync(
+        Guest guest, JsonElement room, HttpStatusCode expected = HttpStatusCode.OK, object? payload = null, Guid? actionId = null) =>
+        SendAsync(guest, HttpMethod.Post, $"/api/rooms/{room.GetProperty("code").GetString()}/commands", new
+        {
+            actionId = actionId ?? Guid.NewGuid(),
+            matchId = room.GetProperty("matchId").GetGuid(),
+            expectedVersion = room.GetProperty("version").GetInt64(),
+            type = "ROLL",
+            payload,
+        }, expected);
+
+    private static string LastMove(JsonElement room) => room.GetProperty("state").GetProperty("lastMove").GetRawText();
+
+    private static string Pawns(JsonElement room) => room.GetProperty("state").GetProperty("pawns").GetRawText();
+
+    private static int? TurnSeat(JsonElement room) =>
+        room.GetProperty("members").EnumerateArray().Single(m => m.GetProperty("isTurn").GetBoolean()).GetProperty("seat").GetInt32();
+
+    private async Task<string?> StoredStateAsync(string code)
+    {
+        await using var db = database.CreateDbContext();
+        var state = await db.GameRooms.AsNoTracking().Where(r => r.Code == code).Select(r => r.State).SingleAsync();
+        return state is null ? null : JsonSerializer.Serialize(JsonDocument.Parse(state).RootElement);
+    }
+
+    [PostgresFact]
+    public async Task Every_player_gets_the_same_roll_and_destination_live_and_over_rest()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        var aliceLive = await ConnectAsync(alice, code);
+        var bobLive = await ConnectAsync(bob, code);
+        var room = await ViewAsync(alice, code);
+        var drawsBefore = _dice.Draws.Count;
+        _dice.Enqueue(4);
+
+        var result = await RollAsync(alice, room);
+
+        Assert.Equal(room.GetProperty("version").GetInt64() + 1, result.GetProperty("version").GetInt64());
+        Assert.Equal([(1, 7)], _dice.Draws.Skip(drawsBefore));
+        const string move = """{"seat":1,"roll":4,"from":0,"to":4,"path":[1,2,3,4]}""";
+        const string pawns = """[{"seat":1,"tile":4},{"seat":2,"tile":0}]""";
+        foreach (var seen in new[] { await aliceLive.NextAsync(), await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) })
+        {
+            Assert.Equal(result.GetProperty("version").GetInt64(), seen.GetProperty("version").GetInt64());
+            Assert.Equal((move, pawns), (LastMove(seen), Pawns(seen)));
+            Assert.Equal(2, TurnSeat(seen));
+        }
+    }
+
+    [PostgresFact]
+    public async Task Players_take_turns_rolling_and_a_move_stops_on_the_branch()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        _dice.Enqueue(6, 1, 5);
+
+        await RollAsync(alice, await ViewAsync(alice, code));
+        await RollAsync(bob, await ViewAsync(bob, code));
+        await RollAsync(alice, await ViewAsync(alice, code));
+
+        var room = await ViewAsync(bob, code);
+        Assert.Equal("""[{"seat":1,"tile":9},{"seat":2,"tile":1}]""", Pawns(room));
+        Assert.Equal("""{"seat":1,"roll":5,"from":6,"to":9,"path":[7,8,9]}""", LastMove(room));
+        Assert.Equal(2, TurnSeat(room));
+    }
+
+    [PostgresFact]
+    public async Task Rolls_out_of_turn_or_from_outside_change_nothing_and_draw_nothing()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var mallory = await GuestAsync("Mallory");
+        var code = await StartedAsync(alice, bob);
+        var room = await ViewAsync(bob, code);
+        var before = await StoredStateAsync(code);
+        var drawsBefore = _dice.Draws.Count;
+
+        var outOfTurn = await RollAsync(bob, room, HttpStatusCode.Conflict);
+        Assert.Equal("not_your_turn", outOfTurn.GetProperty("code").GetString());
+        var outsider = await RollAsync(mallory, room, HttpStatusCode.NotFound);
+        Assert.Equal("room_not_found", outsider.GetProperty("code").GetString());
+
+        Assert.Equal(before, await StoredStateAsync(code));
+        Assert.Equal(room.GetProperty("version").GetInt64(), (await ViewAsync(alice, code)).GetProperty("version").GetInt64());
+        Assert.Equal(drawsBefore, _dice.Draws.Count);
+    }
+
+    [PostgresFact]
+    public async Task A_forged_roll_is_ignored_and_a_retry_does_not_roll_again()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        var room = await ViewAsync(alice, code);
+        var actionId = Guid.NewGuid();
+        _dice.Enqueue(2);
+
+        await RollAsync(alice, room, payload: new { roll = 6, to = 35 }, actionId: actionId);
+        var drawsAfter = _dice.Draws.Count;
+        var retried = await RollAsync(alice, room, payload: new { roll = 6, to = 35 }, actionId: actionId);
+
+        Assert.True(retried.GetProperty("replayed").GetBoolean());
+        Assert.Equal(drawsAfter, _dice.Draws.Count);
+        var seen = await ViewAsync(bob, code);
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2]}""", LastMove(seen));
+        Assert.Equal("""[{"seat":1,"tile":2},{"seat":2,"tile":0}]""", Pawns(seen));
+    }
+}

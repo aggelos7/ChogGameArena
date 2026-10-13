@@ -23,12 +23,29 @@ export interface LifePawn {
   tile: number;
 }
 
+/**
+ * A seat's latest move (STORY-037, DEC-039): the server's roll, the tiles left and reached, and every tile passed on the
+ * way, ending with `to`. A pawn already on the Finish passes without a roll.
+ */
+export interface LifeMove {
+  seat: number;
+  roll?: number;
+  from: number;
+  to: number;
+  path: number[];
+}
+
 /** The Chog Life view in a room snapshot's `state` (STORY-036, DEC-038). */
 export interface LifeBoard {
   rulesVersion: number;
   tiles: LifeTile[];
   pawns: LifePawn[];
+  /** The latest move, the same for every player; absent before the first roll. */
+  lastMove?: LifeMove;
 }
+
+/** The command that rolls the die and moves your pawn on your turn. */
+export const LIFE_ROLL = 'ROLL';
 
 /**
  * One line of the drawn track: a main tile across the board, the heading of a fork's two lanes, or a fork's safe and
@@ -60,7 +77,18 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       ['next', 'safeNext', 'degenNext'].every((link) => tile[link] === undefined || (isIndex(tile[link]) && tile[link] > i && tile[link] < tiles.length)),
   );
   const validPawns = state['pawns'].every((pawn) => isRecord(pawn) && isIndex(pawn['seat']) && isIndex(pawn['tile']) && pawn['tile'] < tiles.length);
-  if (tiles.length === 0 || !validTiles || !validPawns) {
+  const move = state['lastMove'];
+  const validMove =
+    move === undefined ||
+    (isRecord(move) &&
+      isIndex(move['seat']) &&
+      isIndex(move['from']) &&
+      isIndex(move['to']) &&
+      move['to'] < tiles.length &&
+      (move['roll'] === undefined || isIndex(move['roll'])) &&
+      Array.isArray(move['path']) &&
+      move['path'].every((tile) => isIndex(tile) && tile < tiles.length));
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove) {
     return null;
   }
   return state as unknown as LifeBoard;

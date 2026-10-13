@@ -175,20 +175,146 @@ public class ChogLifeMatchRulesTests
         Assert.Null(Rules.ViewFor(new MatchViewContext(room, players[0].Id, document.RootElement)));
     }
 
+    /// <summary>Returns the queued rolls in order and records every draw.</summary>
+    private sealed class Dice(params int[] rolls) : IRandomSource
+    {
+        private readonly Queue<int> _rolls = new(rolls);
+
+        public List<(int Min, int Max)> Draws { get; } = [];
+
+        public int Next(int minInclusive, int maxExclusive)
+        {
+            Draws.Add((minInclusive, maxExclusive));
+            return _rolls.Dequeue();
+        }
+    }
+
+    private static readonly JsonElement NoPayload = JsonSerializer.SerializeToElement(new { });
+
+    private static MatchRuleDecision Roll(GameRoom room, Player player, string? state, IRandomSource dice, JsonElement? payload = null)
+    {
+        using var document = state is null ? null : JsonDocument.Parse(state);
+        var decision = Rules.Apply(new MatchCommandContext(
+            room, player.Id, ChogLifeMatchRules.Roll, payload ?? NoPayload, document?.RootElement.Clone(), dice));
+        return decision;
+    }
+
+    private static string StateWith(params (int Seat, int Tile)[] pawns) =>
+        JsonSerializer.Serialize(new { rulesVersion = 1, pawns = pawns.Select(p => new { seat = p.Seat, tile = p.Tile }) });
+
+    private static JsonElement LastMove(MatchRuleDecision decision) => decision.State!.Value.GetProperty("lastMove");
+
     [Fact]
-    public void There_are_no_moves_yet_and_a_turn_that_runs_out_is_skipped()
+    public void A_roll_draws_one_die_moves_the_pawn_and_ends_the_turn()
+    {
+        var (room, players) = Started(3);
+        var dice = new Dice(4);
+
+        var decision = Roll(room, players[0], room.State, dice);
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
+        Assert.Equal([(1, 7)], dice.Draws);
+        Assert.Equal([(1, 4), (2, 0), (3, 0)], Pawns(decision.State!.Value));
+        Assert.Equal("""{"seat":1,"roll":4,"from":0,"to":4,"path":[1,2,3,4]}""", LastMove(decision).GetRawText());
+        Assert.Equal(1, decision.State.Value.GetProperty("rulesVersion").GetInt32());
+        Assert.Null(decision.Standings);
+    }
+
+    [Fact]
+    public void A_roll_in_the_payload_is_ignored()
+    {
+        var (room, players) = Started(2);
+        var forged = JsonSerializer.SerializeToElement(new { roll = 6, to = 35, seat = 2 });
+
+        var decision = Roll(room, players[1], room.State, new Dice(2), forged);
+
+        Assert.Equal([(1, 0), (2, 2)], Pawns(decision.State!.Value));
+        Assert.Equal(2, LastMove(decision).GetProperty("roll").GetInt32());
+    }
+
+    [Fact]
+    public void A_move_stops_on_a_branch_and_the_next_one_takes_the_safe_lane()
+    {
+        var (room, players) = Started(2);
+
+        var toBranch = Roll(room, players[0], StateWith((1, 6), (2, 0)), new Dice(6));
+        Assert.Equal("""{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9]}""", LastMove(toBranch).GetRawText());
+
+        var offBranch = Roll(room, players[0], toBranch.State!.Value.GetRawText(), new Dice(2));
+        Assert.Equal("""{"seat":1,"roll":2,"from":9,"to":11,"path":[10,11]}""", LastMove(offBranch).GetRawText());
+    }
+
+    [Fact]
+    public void A_roll_past_the_finish_stops_on_it_and_a_finished_pawn_passes_without_a_roll()
+    {
+        var (room, players) = Started(2);
+
+        var finished = Roll(room, players[1], StateWith((1, 0), (2, 33)), new Dice(6));
+        Assert.Equal([(1, 0), (2, 35)], Pawns(finished.State!.Value));
+
+        var dice = new Dice();
+        var passed = Roll(room, players[1], finished.State.Value.GetRawText(), dice);
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (passed.Outcome, passed.EndsTurn));
+        Assert.Empty(dice.Draws);
+        Assert.Equal([(1, 0), (2, 35)], Pawns(passed.State!.Value));
+        Assert.Equal("""{"seat":2,"from":35,"to":35,"path":[]}""", LastMove(passed).GetRawText());
+    }
+
+    [Fact]
+    public void A_match_without_a_state_starts_from_the_start_tile()
+    {
+        // A match started before STORY-036 has no state; its first roll sets every pawn out from the start.
+        var (room, players) = Started(2);
+
+        var decision = Roll(room, players[0], null, new Dice(3));
+
+        Assert.Equal([(1, 3), (2, 0)], Pawns(decision.State!.Value));
+    }
+
+    [Theory]
+    [InlineData("""{"rulesVersion":7,"pawns":[{"seat":1,"tile":0},{"seat":2,"tile":0}]}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":2,"tile":0}]}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":40},{"seat":2,"tile":0}]}""")]
+    [InlineData("""{"rulesVersion":1}""")]
+    public void A_roll_on_a_state_it_cant_play_is_rejected_without_a_draw(string state)
+    {
+        var (room, players) = Started(2);
+        var dice = new Dice();
+
+        var decision = Roll(room, players[0], state, dice);
+
+        Assert.Equal((MatchRuleOutcome.Rejected, "game_state_unavailable"), (decision.Outcome, decision.Reason));
+        Assert.Empty(dice.Draws);
+    }
+
+    [Fact]
+    public void Every_player_sees_the_same_last_move()
+    {
+        var (room, players) = Started(3);
+        var decision = Roll(room, players[0], room.State, new Dice(5));
+        using var state = JsonDocument.Parse(decision.State!.Value.GetRawText());
+
+        var moves = players
+            .Select(p => Rules.ViewFor(new MatchViewContext(room, p.Id, state.RootElement))!.Value.GetProperty("lastMove").GetRawText())
+            .Distinct();
+
+        Assert.Equal(["""{"seat":1,"roll":5,"from":0,"to":5,"path":[1,2,3,4,5]}"""], moves);
+    }
+
+    [Fact]
+    public void Other_commands_are_unknown_and_a_turn_that_runs_out_is_skipped()
     {
         var (room, players) = Started(2);
         using var state = JsonDocument.Parse(room.State!);
-        var payload = JsonSerializer.SerializeToElement(new { });
 
-        foreach (var type in new[] { "ROLL", "MOVE", "END_TURN" })
+        foreach (var type in new[] { "MOVE", "END_TURN", "roll" })
         {
-            var decision = Rules.Apply(new MatchCommandContext(room, players[0].Id, type, payload, state.RootElement, new KeepOrder()));
+            var decision = Rules.Apply(new MatchCommandContext(room, players[0].Id, type, NoPayload, state.RootElement, new Dice()));
             Assert.Equal(MatchRuleOutcome.UnknownCommand, decision.Outcome);
         }
 
-        Assert.Null(Rules.TimeOutTurn(new MatchTurnContext(room, state.RootElement, new KeepOrder())));
+        Assert.Null(Rules.TimeOutTurn(new MatchTurnContext(room, state.RootElement, new Dice())));
     }
 
     [Fact]
