@@ -277,6 +277,13 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("PlayerId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Ability")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("AbilityId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("Character")
                         .HasColumnType("jsonb");
 
@@ -313,6 +320,10 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                     b.ToTable("RoomMembers", null, t =>
                         {
+                            t.HasCheckConstraint("CK_RoomMembers_Ability", "\"Ability\" IS NULL OR (jsonb_typeof(\"Ability\") = 'object' AND \"Character\" IS NOT NULL AND \"AbilityId\" IS NOT NULL AND \"Ability\" ->> 'id' IS NOT DISTINCT FROM \"AbilityId\")");
+
+                            t.HasCheckConstraint("CK_RoomMembers_AbilityId", "\"AbilityId\" IS NULL OR \"AbilityId\" ~ '^[a-z][a-z0-9_]{0,31}$'");
+
                             t.HasCheckConstraint("CK_RoomMembers_Character", "\"Character\" IS NULL OR jsonb_typeof(\"Character\") = 'object'");
 
                             t.HasCheckConstraint("CK_RoomMembers_MissedTurns", "\"MissedTurns\" >= 0");

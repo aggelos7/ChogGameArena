@@ -4,7 +4,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { Subject } from 'rxjs';
 import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
-import { Room, RoomMember } from '../../rooms/rooms-api';
+import { Room, RoomAbility, RoomMember } from '../../rooms/rooms-api';
 import { CATALOGUE } from '../../testing';
 import { RoomPage } from './room';
 
@@ -29,6 +29,7 @@ describe('Room page', () => {
       isReady: false,
       character: { kind: 'Standard', id: 'classic', name: 'Classic', color: '#5b2bd6' },
       ability: null,
+      hasAbility: false,
       hasLeft: false,
       isTurn: false,
       rank: null,
@@ -51,6 +52,7 @@ describe('Room page', () => {
       member('Bob', { isYou: true, character: { kind: 'Standard', id: 'mint', name: 'Mint', color: '#1a7f5a' } }),
     ],
     state: null,
+    abilities: [],
   };
   const withCarol = (version: number): Room => ({ ...room, version, members: [...room.members, member('Carol')] });
 
@@ -237,12 +239,120 @@ describe('Room page', () => {
     expect(members()).toHaveLength(2);
   });
 
-  it('shows each player’s Chog, the ability placeholder and who is ready', () => {
+  it('shows each player’s Chog and who is ready, and no ability in a game without abilities', () => {
     load(hostView({}, [false, true]));
 
     expect(column('[data-chog]')).toEqual(['Classic', 'Chog #7']);
-    expect(column('[data-ability]')).toEqual(['Ability not chosen yet', 'Ability not chosen yet']);
+    expect(column('[data-ability]')).toEqual([]);
     expect(column('[data-readiness]')).toEqual(['Not ready', 'Ready']);
+    expect(element().querySelector('[data-list="abilities"]')).toBeNull();
+    expect(button('I’m ready').disabled).toBe(false);
+  });
+
+  const boost: RoomAbility = {
+    id: 'reward_boost',
+    name: 'Reward Boost',
+    description: 'Raise one reward.',
+    target: 'None',
+    maxUses: 1,
+  };
+  const reroll: RoomAbility = {
+    id: 'event_reroll',
+    name: 'Lucky Reroll',
+    description: 'Reroll one event.',
+    target: 'None',
+    maxUses: 1,
+  };
+
+  /** Bob's view of a room with abilities; Alice's choice, if any, stays hidden from him. */
+  const withAbilities = (bob: Partial<RoomMember> = {}, aliceChose = false): Room => ({
+    ...room,
+    abilities: [boost, reroll],
+    members: [member('Alice', { isHost: true, hasAbility: aliceChose }), { ...room.members[1], ...bob }],
+  });
+  const abilityButtons = () =>
+    Array.from(element().querySelectorAll('[data-list="abilities"] button')) as HTMLButtonElement[];
+
+  it('offers the game’s abilities and needs one before ready', () => {
+    load(withAbilities());
+
+    expect(abilityButtons().map((b) => b.querySelector('.ability-name')?.textContent)).toEqual(['Reward Boost', 'Lucky Reroll']);
+    expect(abilityButtons().map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'false']);
+    expect(column('[data-ability]')).toEqual(['Ability not chosen yet', 'Ability not chosen yet']);
+    expect(button('I’m ready').disabled).toBe(true);
+    expect(element().querySelector('[data-ability-hint]')?.textContent?.trim()).toBe('Choose an ability to get ready.');
+  });
+
+  it('chooses an ability, then allows ready', () => {
+    load(withAbilities());
+
+    abilityButtons()[1].click();
+    const choose = http.expectOne('/api/rooms/K7QF3M/ability');
+    expect(choose.request.method).toBe('PUT');
+    expect(choose.request.body).toEqual({ abilityId: 'event_reroll' });
+    choose.flush({ ...withAbilities({ ability: reroll, hasAbility: true }), version: 2 });
+    fixture.detectChanges();
+
+    expect(abilityButtons().map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+    expect(column('[data-ability]')).toEqual(['Ability not chosen yet', 'Lucky Reroll']);
+    expect(button('I’m ready').disabled).toBe(false);
+    expect(element().querySelector('[data-ability-hint]')).toBeNull();
+  });
+
+  it('does not send the ability already chosen again', () => {
+    load(withAbilities({ ability: boost, hasAbility: true }));
+
+    abilityButtons()[0].click();
+
+    http.expectNone('/api/rooms/K7QF3M/ability');
+  });
+
+  it('shows only that another player has chosen, not what', () => {
+    load(withAbilities({}, true));
+
+    expect(column('[data-ability]')).toEqual(['Ability chosen', 'Ability not chosen yet']);
+    expect(element().textContent).not.toContain('Reward Boost ·');
+  });
+
+  it('shows everyone’s locked ability once the game has started', () => {
+    load(withAbilities({ ability: reroll, hasAbility: true }, true));
+
+    changed({
+      ...room,
+      version: 5,
+      status: 'Active',
+      abilities: [],
+      members: [
+        member('Alice', { isHost: true, isReady: true, ability: boost, hasAbility: true }),
+        { ...room.members[1], isReady: true, ability: reroll, hasAbility: true },
+      ],
+    });
+
+    expect(column('[data-ability]')).toEqual(['Reward Boost', 'Lucky Reroll']);
+    expect(element().querySelector('[data-list="abilities"]')).toBeNull();
+    expect(element().querySelector('[data-locked-ability]')?.textContent).toBe('Lucky Reroll');
+  });
+
+  it('explains a start refused for an ability no longer offered and shows the lobby as it is now', () => {
+    const view = (bobReady: boolean, bobChose: boolean): Room => ({
+      ...hostView({ abilities: [boost] }, [true, bobReady]),
+      members: [
+        member('Alice', { isHost: true, isYou: true, isReady: true, ability: boost, hasAbility: true }),
+        member('Bob', { isReady: bobReady, hasAbility: bobChose }),
+      ],
+    });
+    load(view(true, true));
+
+    button('Start game').click();
+    http.expectOne('/api/rooms/K7QF3M/start').flush({ code: 'ability_unavailable' }, { status: 409, statusText: 'Conflict' });
+    http.expectOne('/api/rooms/K7QF3M').flush({ ...view(false, false), version: 3 });
+    fixture.detectChanges();
+
+    expect(element().querySelector('[data-error="action"]')?.textContent).toBe(
+      'A player’s chosen ability is no longer available and they must choose again.',
+    );
+    expect(column('[data-ability]')).toEqual(['Reward Boost', 'Ability not chosen yet']);
+    expect(button('Start game').disabled).toBe(true);
   });
 
   it('marks the player ready and back', () => {

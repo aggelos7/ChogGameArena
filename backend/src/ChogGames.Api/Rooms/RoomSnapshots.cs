@@ -1,7 +1,9 @@
 using System.Text.Json;
+using ChogGames.Core.Abilities;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
+using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using static ChogGames.Api.Rooms.RoomEndpoints;
@@ -12,9 +14,14 @@ namespace ChogGames.Api.Rooms;
 /// What one member sees of a room (STORY-026, DEC-028): the same snapshot whether it is read over REST or pushed live,
 /// tagged with the room's version so clients keep the newest. Player ids stay on the server; members are described only
 /// by what the lobby shows. The game's state is shown only through its rules' per-player view (ENG-013), and never for a
-/// game without rules.
+/// game without rules. A member's ability choice is shown only to themselves until the start locks it (DEC-035).
 /// </summary>
-public sealed class RoomSnapshots(ChogGamesDbContext db, IEnumerable<IMatchRules> rules)
+public sealed class RoomSnapshots(
+    ChogGamesDbContext db,
+    IEnumerable<IMatchRules> rules,
+    AbilityEngine abilityEngine,
+    AbilityPool abilityPool,
+    TimeProvider timeProvider)
 {
     private readonly Dictionary<string, IMatchRules> _rulesByGame = rules.ToDictionary(r => r.GameType, StringComparer.Ordinal);
 
@@ -42,6 +49,7 @@ public sealed class RoomSnapshots(ChogGamesDbContext db, IEnumerable<IMatchRules
             .Select(m =>
             {
                 var player = players[m.PlayerId];
+                var ability = AbilityOf(room, m);
                 return new RoomMemberResponse(
                     player.DisplayName,
                     player.AvatarId,
@@ -49,7 +57,8 @@ public sealed class RoomSnapshots(ChogGamesDbContext db, IEnumerable<IMatchRules
                     m.PlayerId == viewerId,
                     m.IsReadyWith(player),
                     m.Character is { } locked ? ToCharacter(locked) : ToCharacter(player),
-                    Ability: null,
+                    room.Status == RoomStatus.Waiting && m.PlayerId != viewerId ? null : ability,
+                    ability is not null,
                     m.HasLeft,
                     m.PlayerId == room.CurrentPlayerId,
                     m.Rank);
@@ -70,8 +79,42 @@ public sealed class RoomSnapshots(ChogGamesDbContext db, IEnumerable<IMatchRules
             room.TurnNumber,
             room.TurnEndsAt,
             members,
-            view);
+            view,
+            AbilityOptions(room, players, viewerId));
     }
+
+    /// <summary>
+    /// The member's ability: the one locked at start, or their choice while waiting if the game still defines it. Who
+    /// may see it is decided by the caller.
+    /// </summary>
+    private RoomAbilityResponse? AbilityOf(GameRoom room, RoomMember member)
+    {
+        if (member.Ability is { } locked)
+        {
+            return new RoomAbilityResponse(locked.Id, locked.Name, locked.Description, locked.Target, locked.MaxUses);
+        }
+
+        return room.Status == RoomStatus.Waiting
+            && member.AbilityId is { } chosen
+            && abilityEngine.CatalogFor(room.GameType) is { } catalog
+            && catalog.TryFind(chosen, out var definition, out _)
+                ? ToAbility(definition)
+                : null;
+    }
+
+    /// <summary>What the viewer may choose from while the room waits: their pool for the Chog they have selected.</summary>
+    private RoomAbilityResponse[] AbilityOptions(GameRoom room, Dictionary<Guid, Player> players, Guid viewerId)
+    {
+        if (room.Status != RoomStatus.Waiting || !room.IsPlaying(viewerId) || !players.TryGetValue(viewerId, out var viewer))
+        {
+            return [];
+        }
+
+        return [.. abilityPool.For(room.GameType, LobbyCharacters.For(viewer, timeProvider.GetUtcNow())).Select(ToAbility)];
+    }
+
+    private static RoomAbilityResponse ToAbility(AbilityDefinition ability) =>
+        new(ability.Id, ability.Name, ability.Description, ability.Target, ability.MaxUses);
 
     /// <summary>
     /// The selected Chog as stored; ownership is checked when the host starts, not here. A retired standard Chog

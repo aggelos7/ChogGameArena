@@ -1,3 +1,4 @@
+using ChogGames.Core.Abilities;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
@@ -16,11 +17,13 @@ namespace ChogGames.Infrastructure.Rooms;
 /// start cannot race a join, a leave, a ready change or a Chog change. Every member's Chog is checked live at start
 /// (STORY-018, DEC-022) and its snapshot stored with the member (STORY-023, DEC-025); leaving a started match is a forfeit.
 /// The first turn begins at start, with the configured turn timeout (STORY-025, DEC-027), in a secure random seat order
-/// (STORY-029, DEC-031).
+/// (STORY-029, DEC-031). In a game with abilities each member chooses one before marking ready, and it is locked at start
+/// (STORY-033, NFT-013, NFT-015, DEC-035).
 /// </summary>
 public sealed class LobbyService(
     ChogGamesDbContext db,
     CharacterEligibilityService eligibility,
+    AbilityPool abilities,
     IOptions<MatchOptions> matchOptions,
     IRandomSource random,
     TimeProvider timeProvider,
@@ -45,6 +48,11 @@ public sealed class LobbyService(
             // Ready is for the Chog selected now, read under the player's lock rather than from the caller's copy.
             await db.LockPlayersAsync([player.Id], cancellationToken);
             var current = await db.Players.AsNoTracking().SingleAsync(p => p.Id == player.Id, cancellationToken);
+            if (!HasAbilityFor(room, current))
+            {
+                return new RoomResult(RoomOutcome.AbilityRequired);
+            }
+
             room.MarkReady(current);
         }
         else
@@ -55,6 +63,37 @@ public sealed class LobbyService(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.ReadyChanged, room);
+    }
+
+    /// <summary>
+    /// The player chooses the ability they will use in the match (STORY-033, DEC-035); it must be one their pool offers.
+    /// Choosing another one than before makes them not ready.
+    /// </summary>
+    public async Task<RoomResult> SelectAbilityAsync(Player player, RoomCode code, string abilityId, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var room = await db.LockRoomAsync(code, cancellationToken);
+        if (room is null || !room.IsMember(player.Id))
+        {
+            return new RoomResult(RoomOutcome.RoomNotFound);
+        }
+
+        if (StatusFailure(room) is { } failure)
+        {
+            return failure;
+        }
+
+        await db.LockPlayersAsync([player.Id], cancellationToken);
+        var current = await db.Players.AsNoTracking().SingleAsync(p => p.Id == player.Id, cancellationToken);
+        if (!abilities.Offers(room.GameType, LobbyCharacters.For(current, timeProvider.GetUtcNow()), abilityId))
+        {
+            return new RoomResult(RoomOutcome.UnknownAbility);
+        }
+
+        room.SelectAbility(player.Id, abilityId);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new RoomResult(RoomOutcome.AbilitySelected, room);
     }
 
     /// <summary>
@@ -151,10 +190,56 @@ public sealed class LobbyService(
             return new RoomResult(RoomOutcome.OwnershipUnavailable);
         }
 
-        room.Start(caller.Id, players, characters, matchOptions.Value.TurnTimeout, random, timeProvider.GetUtcNow());
+        // Each choice is checked again with the live character and locked with the catalog's version (DEC-035).
+        var locked = new Dictionary<Guid, AbilitySnapshot>();
+        var withoutAbility = new List<Guid>();
+        foreach (var member in room.Members)
+        {
+            var character = characters[member.PlayerId];
+            if (abilities.For(room.GameType, character).Count == 0)
+            {
+                continue;
+            }
+
+            if (abilities.Lock(room.GameType, character, member.AbilityId) is { } ability)
+            {
+                locked[member.PlayerId] = ability;
+            }
+            else
+            {
+                withoutAbility.Add(member.PlayerId);
+            }
+        }
+
+        if (withoutAbility.Count > 0)
+        {
+            // They must choose again, so they are no longer ready; nobody else changes.
+            foreach (var playerId in withoutAbility)
+            {
+                room.DropAbility(playerId);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            logger.LogInformation("Room start refused: {Count} member(s) chose an ability no longer offered.", withoutAbility.Count);
+            return new RoomResult(RoomOutcome.AbilityUnavailable);
+        }
+
+        room.Start(caller.Id, players, characters, matchOptions.Value.TurnTimeout, random, timeProvider.GetUtcNow(), locked);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.Started, room);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="player"/> may mark ready as far as abilities go: in a game with abilities they have chosen
+    /// one their pool offers; a game without abilities needs none (DEC-035).
+    /// </summary>
+    private bool HasAbilityFor(GameRoom room, Player player)
+    {
+        var character = LobbyCharacters.For(player, timeProvider.GetUtcNow());
+        var chosen = room.Members.Single(m => m.PlayerId == player.Id).AbilityId;
+        return abilities.For(room.GameType, character).Count == 0 || abilities.Offers(room.GameType, character, chosen);
     }
 
     private static RoomResult? StatusFailure(GameRoom room) => room.Status switch

@@ -494,7 +494,7 @@
 
 #### STORY-033 — Lobby ability selection and lock
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E05
 - **Implementation:** Require one valid ability per player and persist configured version/uses at start.

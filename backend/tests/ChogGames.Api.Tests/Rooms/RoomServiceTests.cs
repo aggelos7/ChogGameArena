@@ -531,6 +531,58 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
     }
 
     [PostgresTheory]
+    [InlineData("")] // check: a chosen ability is an ability id (DEC-035)
+    [InlineData("Reward_Boost")]
+    [InlineData("reward boost")]
+    [InlineData("1boost")]
+    public async Task Database_rejects_a_malformed_ability_choice(string abilityId)
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "AbilityId" = {abilityId}
+            WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+
+        Assert.Equal(("23514", "CK_RoomMembers_AbilityId"), (error.SqlState, error.ConstraintName));
+    }
+
+    [PostgresTheory]
+    [InlineData("reward_boost", "{\"id\":\"reward_boost\"}", false)] // check: locked only at start, with the character
+    [InlineData(null, "{\"id\":\"reward_boost\"}", true)] // check: only a chosen ability is locked
+    [InlineData("reward_boost", "{\"id\":\"event_reroll\"}", true)] // check: the locked one is the chosen one
+    [InlineData("reward_boost", "{\"name\":\"Reward Boost\"}", true)] // check: a null id is not a match
+    [InlineData("reward_boost", "[\"reward_boost\"]", true)] // check: a JSON object
+    [InlineData("reward_boost", "null", true)]
+    public async Task Database_rejects_an_inconsistent_locked_ability(string? abilityId, string ability, bool withCharacter)
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+        string? character = withCharacter ? "{\"kind\":\"Standard\"}" : null;
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "AbilityId" = {abilityId}, "Ability" = {ability}::jsonb, "Character" = {character}::jsonb
+            WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+
+        Assert.Equal(("23514", "CK_RoomMembers_Ability"), (error.SqlState, error.ConstraintName));
+    }
+
+    [PostgresFact]
+    public async Task Database_accepts_a_locked_ability_that_matches_the_choice()
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+
+        Assert.Equal(1, await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "AbilityId" = 'reward_boost', "Ability" = {"{\"id\":\"reward_boost\"}"}::jsonb,
+                "Character" = {"{\"kind\":\"Standard\"}"}::jsonb
+            WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+    }
+
+    [PostgresTheory]
     [InlineData("Standard", null)] // check: ready needs both the kind and the id
     [InlineData(null, "mint")]
     [InlineData("Shiny", "mint")] // check: kind

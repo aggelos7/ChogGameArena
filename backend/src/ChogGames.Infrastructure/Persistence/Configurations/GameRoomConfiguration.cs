@@ -1,3 +1,4 @@
+using ChogGames.Core.Abilities;
 using ChogGames.Core.Games;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Nfts;
@@ -114,6 +115,14 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
             table.HasCheckConstraint(
                 "CK_RoomMembers_Rank",
                 $"\"Rank\" IS NULL OR (\"Rank\" BETWEEN 1 AND {GameDefinition.MaxRoomPlayers} AND \"Seat\" IS NOT NULL)");
+
+            // A chosen ability is an ability id; a locked one is a JSON object of the chosen ability, taken at the
+            // start with the character (DEC-035).
+            table.HasCheckConstraint("CK_RoomMembers_AbilityId", "\"AbilityId\" IS NULL OR \"AbilityId\" ~ '^[a-z][a-z0-9_]{0,31}$'");
+            table.HasCheckConstraint(
+                "CK_RoomMembers_Ability",
+                "\"Ability\" IS NULL OR (jsonb_typeof(\"Ability\") = 'object' AND \"Character\" IS NOT NULL "
+                + "AND \"AbilityId\" IS NOT NULL AND \"Ability\" ->> 'id' IS NOT DISTINCT FROM \"AbilityId\")");
         });
         builder.HasKey(m => new { m.RoomId, m.PlayerId });
         builder.Property(m => m.ReadyCharacterKind).HasConversion<string>().HasMaxLength(16);
@@ -121,6 +130,10 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
         builder.Property(m => m.Character)
             .HasColumnType("jsonb")
             .HasConversion(CharacterSnapshotConversion.Converter, CharacterSnapshotConversion.Comparer);
+        builder.Property(m => m.AbilityId).HasMaxLength(AbilityDefinition.MaxIdLength);
+        builder.Property(m => m.Ability)
+            .HasColumnType("jsonb")
+            .HasConversion(AbilitySnapshotConversion.Converter, AbilitySnapshotConversion.Comparer);
         builder.HasIndex(m => m.PlayerId);
         builder.HasIndex(m => new { m.RoomId, m.Seat }).IsUnique().HasFilter("\"Seat\" IS NOT NULL");
         builder.HasOne<Player>().WithMany().HasForeignKey(m => m.PlayerId).OnDelete(DeleteBehavior.Restrict);

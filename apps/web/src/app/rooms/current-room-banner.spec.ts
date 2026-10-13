@@ -22,6 +22,7 @@ const room = (status: RoomStatus, code = 'K7QF3M'): Room => ({
   turnEndsAt: null,
   members: [],
   state: null,
+  abilities: [],
 });
 
 const guest = (displayName: string): CurrentPlayer => ({ playerId: displayName, displayName, kind: 'Guest', walletAddress: null });

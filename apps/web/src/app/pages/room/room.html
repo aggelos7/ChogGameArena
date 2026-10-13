@@ -86,8 +86,10 @@
                 </p>
                 <p class="details">
                   <span data-chog>{{ member.character.name }}</span>
-                  ·
-                  <span data-ability>{{ member.ability ?? 'Ability not chosen yet' }}</span>
+                  @if (hasAbilities()) {
+                    ·
+                    <span data-ability>{{ abilityLabel(member) }}</span>
+                  }
                 </p>
               </div>
               @if (current.status === 'Waiting') {
@@ -117,9 +119,36 @@
             You’re playing as <strong>{{ me.character.name }}</strong>.
             <a routerLink="/chogs">Change Chog</a> (you’ll need to mark ready again).
           </p>
-          <button type="button" class="primary" [disabled]="busy()" (click)="toggleReady()">
+
+          @if (current.abilities.length > 0) {
+            <fieldset class="abilities" data-list="abilities">
+              <legend>Choose your ability</legend>
+              <p class="hint">Use it once in the game. The others won’t see your choice until the game starts.</p>
+              @for (ability of current.abilities; track ability.id) {
+                <button
+                  type="button"
+                  class="ability"
+                  [class.chosen]="me.ability?.id === ability.id"
+                  [attr.aria-pressed]="me.ability?.id === ability.id"
+                  [disabled]="busy()"
+                  (click)="chooseAbility(ability)"
+                >
+                  <span class="ability-name">{{ ability.name }}</span>
+                  <span class="ability-description">{{ ability.description }}</span>
+                </button>
+              }
+              @if (me.isReady) {
+                <p class="hint">Choosing another ability means marking ready again.</p>
+              }
+            </fieldset>
+          }
+
+          <button type="button" class="primary" [disabled]="busy() || (!me.isReady && needsAbility())" (click)="toggleReady()">
             {{ me.isReady ? 'Not ready' : 'I’m ready' }}
           </button>
+          @if (!me.isReady && needsAbility()) {
+            <p class="hint" data-ability-hint>Choose an ability to get ready.</p>
+          }
 
           @if (me.isHost) {
             <button type="button" class="primary" [disabled]="busy() || !canStart()" (click)="start()">Start game</button>
@@ -154,7 +183,14 @@
         @if (!me.hasLeft) {
           <section class="match" aria-labelledby="match-heading">
             <h2 id="match-heading">Game</h2>
-            <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
+            @if (me.ability; as ability) {
+              <p class="hint">
+                You’re playing as <strong>{{ me.character.name }}</strong> with
+                <strong data-locked-ability>{{ ability.name }}</strong> for this game.
+              </p>
+            } @else {
+              <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
+            }
             <div class="leave" data-leave>
               @if (confirmingLeave()) {
                 <p class="warning" role="alert">Leaving forfeits this game, and you can’t come back to it.</p>
