@@ -552,7 +552,7 @@
 
 #### STORY-037 — Roll and movement
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Server generates move and resolves position within valid paths.
@@ -571,6 +571,7 @@
 - **Implementation:** Implement reward, loss, market, airdrop, rug and liquidation events with configurable outcomes.
 - **Acceptance criteria:**
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** each event has deterministic tests with injected RNG; balance never becomes invalid.
+  - **Given** a live match, **when** a tile changes a player's balance, **then** every player sees each player's liquid MON next to their name in the board legend, updated in the same snapshot as the move.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
@@ -597,6 +598,7 @@
 - **Implementation:** Track liquid MON, assets, bonuses and liabilities and compute total portfolio.
 - **Acceptance criteria:**
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** valuation consistent across clients; zero/negative balances handled by explicit rules.
+  - **Given** a live match, **when** any player's portfolio changes, **then** every player sees each player's liquid MON, assets, bonuses, liabilities and total portfolio in the board legend, matching the server values.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.

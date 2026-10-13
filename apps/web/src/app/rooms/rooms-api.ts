@@ -79,6 +79,15 @@ export interface Room {
   abilities: RoomAbility[];
 }
 
+/** Mirrors `MatchCommandResponse`: the room's `version` after the command and whether it was a replayed retry. */
+export interface CommandResult {
+  actionId: string;
+  type: string;
+  version: number;
+  currentVersion: number;
+  replayed: boolean;
+}
+
 /** Whether `next` is at least as recent as `current`, so it may replace it; snapshots of other rooms never are. */
 export function isNewerRoom(next: Room, current: Room | null): boolean {
   return !current || (next.matchId === current.matchId && next.version >= current.version);
@@ -100,7 +109,15 @@ export type RoomErrorCode =
   | 'ownership_unavailable'
   | 'unknown_ability'
   | 'ability_required'
-  | 'ability_unavailable';
+  | 'ability_unavailable'
+  | 'not_your_turn'
+  | 'turn_expired'
+  | 'stale_version'
+  | 'match_not_started'
+  | 'not_in_match'
+  | 'unknown_command'
+  | 'command_rejected'
+  | 'action_conflict';
 
 /** A room error from the server, or `unknown` for anything else (network, 5xx). */
 export interface RoomError {
@@ -145,6 +162,14 @@ const ROOM_ERROR_MESSAGES: Record<RoomError['code'], string> = {
   unknown_ability: 'That ability can’t be chosen in this game.',
   ability_required: 'Choose an ability before marking ready.',
   ability_unavailable: 'A player’s chosen ability is no longer available and they must choose again.',
+  not_your_turn: 'It isn’t your turn.',
+  turn_expired: 'Your turn has run out.',
+  stale_version: 'The game moved on before your move arrived. Here’s where it is now.',
+  match_not_started: 'The game hasn’t started yet.',
+  not_in_match: 'You have left this game.',
+  unknown_command: 'That move doesn’t exist in this game.',
+  command_rejected: 'That move isn’t allowed right now.',
+  action_conflict: 'That move was already sent differently. Try again.',
   rate_limited: 'Too many tries in a short time. Wait a minute and try again.',
   unknown: 'Something went wrong. Try again.',
 };
@@ -189,6 +214,21 @@ export class RoomsApi {
 
   start(code: string): Observable<Room> {
     return this.http.post<Room>(`/api/rooms/${encodeURIComponent(code)}/start`, null);
+  }
+
+  /**
+   * Sends a game command (DEC-026), such as Chog Life's `ROLL`, for the version the player saw; a new `actionId` each
+   * time, so a retry of the same request is replayed rather than played twice. The result arrives as the next room
+   * snapshot (DEC-028).
+   */
+  sendCommand(room: Room, type: string, payload: object = {}, actionId: string = crypto.randomUUID()): Observable<CommandResult> {
+    return this.http.post<CommandResult>(`/api/rooms/${encodeURIComponent(room.code)}/commands`, {
+      actionId,
+      matchId: room.matchId,
+      expectedVersion: room.version,
+      type,
+      payload,
+    });
   }
 
   /**

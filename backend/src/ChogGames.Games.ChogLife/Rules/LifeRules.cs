@@ -106,6 +106,39 @@ public sealed class LifeRules
         return new LifeRules(version, board, startingMon, finishBonus, timeCap, dieFaces);
     }
 
+    /// <summary>
+    /// The tiles a pawn on <paramref name="from"/> passes for a roll of <paramref name="steps"/>, the last being where it
+    /// stops (STORY-037, DEC-039). It stops early on a Branch, whatever steps are left, and on the Finish, which a roll
+    /// may overshoot. Leaving a branch takes its safe lane; the choice of lane comes with STORY-039. A pawn on the Finish
+    /// doesn't move, so the path is empty.
+    /// </summary>
+    public IReadOnlyList<int> Path(int from, int steps)
+    {
+        if (from < 0 || from >= Tiles.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(from), from, "The pawn isn't on the board.");
+        }
+
+        if (steps < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(steps), steps, "A move has at least one step.");
+        }
+
+        var path = new List<int>();
+        var tile = Tiles[from];
+        while (path.Count < steps && (tile.Type == LifeTileType.Branch ? tile.SafeNext : tile.Next) is { } next)
+        {
+            tile = Tiles[next];
+            path.Add(next);
+            if (tile.Type is LifeTileType.Branch or LifeTileType.Finish)
+            {
+                break;
+            }
+        }
+
+        return path;
+    }
+
     private static void CheckBoard(LifeTile[] board)
     {
         if (board.Length is < MinTiles or > MaxTiles)

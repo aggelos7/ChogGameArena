@@ -578,6 +578,59 @@ describe('Room page', () => {
       expect(board()?.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s your turn.');
     });
 
+    it('rolls on your turn and shows the room as the server left it', () => {
+      const started: Room = {
+        ...room,
+        version: 4,
+        status: 'Active',
+        state: FORK_BOARD,
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+      };
+      load(started);
+
+      element().querySelector<HTMLButtonElement>('[data-roll]')?.click();
+      const roll = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(roll.request.method).toBe('POST');
+      expect(roll.request.body).toEqual({
+        actionId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        matchId: room.matchId,
+        expectedVersion: 4,
+        type: 'ROLL',
+        payload: {},
+      });
+      fixture.detectChanges();
+      expect(element().querySelector<HTMLButtonElement>('[data-roll]')?.disabled).toBe(true);
+      roll.flush({ actionId: roll.request.body.actionId, type: 'ROLL', version: 5, currentVersion: 5, replayed: false });
+
+      http.expectOne('/api/rooms/K7QF3M').flush({
+        ...started,
+        version: 5,
+        state: { ...FORK_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 1 }], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1] } },
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      });
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1 and moved to tile 1 (+20 MON).');
+      expect(element().querySelector('[data-roll]')).toBeNull();
+    });
+
+    it('explains a refused roll and shows the room as it is now', () => {
+      const started: Room = {
+        ...room,
+        status: 'Active',
+        state: FORK_BOARD,
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+      };
+      load(started);
+
+      element().querySelector<HTMLButtonElement>('[data-roll]')?.click();
+      http.expectOne('/api/rooms/K7QF3M/commands').flush({ code: 'turn_expired' }, { status: 409, statusText: 'Conflict' });
+      http.expectOne('/api/rooms/K7QF3M').flush({ ...started, version: 2 });
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-error="action"]')?.textContent).toBe('Your turn has run out.');
+    });
+
     it('shows no board while waiting, for another game or for a state it cannot read', () => {
       load({ ...room, state: FORK_BOARD });
       expect(element().querySelector('[data-board]')).toBeNull();

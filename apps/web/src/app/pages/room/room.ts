@@ -20,7 +20,7 @@ import {
 } from '../../rooms/rooms-api';
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { LifeBoardView } from '../../games/chog-life/life-board';
-import { toLifeBoard } from '../../games/chog-life/life-board-model';
+import { LIFE_ROLL, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
@@ -33,7 +33,8 @@ const NFT_COLOR = 'var(--brand)';
  * marking ready; others only see that a choice was made until the start locks it (STORY-033, DEC-035). It follows the room live (STORY-022, STORY-026): the
  * server pushes a versioned snapshot after every change and the page keeps the newest one it has seen, from the push or
  * a request alike, so an older answer never wins. A lost connection keeps retrying (STORY-027); Refresh is offered
- * while live updates are down. A started Chog Life game shows its board with every pawn (STORY-036, DEC-038).
+ * while live updates are down. A started Chog Life game shows its board with every pawn (STORY-036, DEC-038), and the
+ * player whose turn it is rolls from it (STORY-037, DEC-039).
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
@@ -182,6 +183,30 @@ export class RoomPage implements OnInit {
       return 'Already used.';
     }
     return usesLeft === 1 ? '1 use left.' : `${usesLeft} uses left.`;
+  }
+
+  /**
+   * Rolls on the player's turn. The server rolls and moves; the new room arrives live, and is fetched as well in case live
+   * updates are down. A refused roll (another player's turn, a turn that ran out, a stale view) shows the room as it is.
+   */
+  protected roll(): void {
+    const room = this.room();
+    if (!room || this.busy()) {
+      return;
+    }
+    this.busy.set(true);
+    this.actionError.set(null);
+    this.api.sendCommand(room, LIFE_ROLL).subscribe({
+      next: () => {
+        this.busy.set(false);
+        this.refreshQuietly();
+      },
+      error: (error: unknown) => {
+        this.busy.set(false);
+        this.actionError.set(toRoomError(error));
+        this.refreshQuietly();
+      },
+    });
   }
 
   protected start(): void {

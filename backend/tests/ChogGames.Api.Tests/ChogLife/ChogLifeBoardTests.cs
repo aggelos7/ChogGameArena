@@ -223,7 +223,7 @@ public sealed class ChogLifeBoardTests(MigratedPostgresDatabase database) : ICla
             Assert.Equal(HttpStatusCode.NotFound, peek.StatusCode);
             Assert.Equal("room_not_found", (await peek.Content.ReadFromJsonAsync<ProblemDto>(Json))!.Code);
 
-            // Nothing moves a pawn yet (STORY-037): a forged move by the current player is an unknown command.
+            // Only ROLL moves a pawn (STORY-037): a forged move straight to the finish is an unknown command.
             using var moved = await players[0].PostAsJsonAsync(
                 $"/api/rooms/{room.Code}/commands",
                 new { actionId = Guid.NewGuid(), matchId = room.MatchId, expectedVersion = room.Version, type = "MOVE", payload = new { tile = 35 } });

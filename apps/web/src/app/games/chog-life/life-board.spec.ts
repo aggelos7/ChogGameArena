@@ -35,6 +35,12 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...FORK_BOARD, tiles: FORK_BOARD.tiles.map((t) => (t.index === 4 ? { ...t, next: 1 } : t)) })).toBeNull();
     expect(toLifeBoard({ ...FORK_BOARD, tiles: FORK_BOARD.tiles.map((t) => (t.index === 1 ? { ...t, type: 'Teleport' } : t)) })).toBeNull();
     expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 10 }] })).toBeNull();
+    // A last move must name tiles on the board.
+    const moved = { ...FORK_BOARD, lastMove: { seat: 1, roll: 3, from: 0, to: 2, path: [1, 2] } };
+    expect(toLifeBoard(moved)).toEqual(moved);
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, to: 12 } })).toBeNull();
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, path: 'far' } })).toBeNull();
+    expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, roll: -1 } })).toBeNull();
   });
 
   it('lays a fork out as two lanes side by side that join the main track', () => {
@@ -128,5 +134,37 @@ describe('Chog Life board', () => {
       'Carol',
     ]);
     expect(pawnsOn(0)).toEqual(['1', '3']);
+  });
+
+  it('offers Roll only on your turn and tells the page when it is pressed', () => {
+    const rolls: number[] = [];
+    fixture.componentInstance.roll.subscribe(() => rolls.push(1));
+    render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+    expect(page.querySelector('[data-roll]')).toBeNull();
+
+    render(FORK_BOARD, [member('Alice', 1), member('Bob', 2, { isYou: true, isTurn: true })]);
+    const roll = page.querySelector<HTMLButtonElement>('[data-roll]');
+    expect(roll?.textContent?.trim()).toBe('Roll the die');
+    roll?.click();
+    expect(rolls).toEqual([1]);
+
+    fixture.componentRef.setInput('rolling', true);
+    fixture.detectChanges();
+    expect(page.querySelector<HTMLButtonElement>('[data-roll]')?.disabled).toBe(true);
+  });
+
+  it('shows the last move and marks where it ended', () => {
+    const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
+
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 2 and moved to tile 2 (Safe or Degen?).');
+    expect(Array.from(page.querySelectorAll('.last-stop')).map((t) => (t as HTMLElement).dataset['tile'])).toEqual(['2']);
+
+    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 9 }], lastMove: { seat: 2, from: 9, to: 9, path: [] } }, members);
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob passed at the finish.');
+    expect(page.querySelector('.last-stop')).toBeNull();
+
+    render(FORK_BOARD, members);
+    expect(page.querySelector('[data-last-move]')).toBeNull();
   });
 });

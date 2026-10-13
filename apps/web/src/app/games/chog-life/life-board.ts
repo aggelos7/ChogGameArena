@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, input, output } from '@angular/core';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
@@ -20,7 +20,9 @@ interface DrawnPawn {
 /**
  * The Chog Life board (STORY-036, DEC-038): a vertical track from start to finish, with each fork's Safe and Degen lanes
  * side by side, every tile's type and the pawns standing on it. Pawns are numbered and coloured by seat, and the legend
- * names each player and whose turn it is. It only draws what the server sent; it has no moves of its own.
+ * names each player and whose turn it is. It only draws what the server sent; it has no moves of its own. On your turn it
+ * offers Roll, which the page sends to the server (STORY-037, DEC-039); the server's roll and move come back in the next
+ * snapshot, shown as the last move with its destination marked.
  */
 @Component({
   selector: 'app-life-board',
@@ -31,6 +33,9 @@ interface DrawnPawn {
 export class LifeBoardView {
   readonly board = input.required<LifeBoard>();
   readonly members = input.required<RoomMember[]>();
+  /** A roll is on its way to the server. */
+  readonly rolling = input(false);
+  readonly roll = output<void>();
 
   protected readonly label = tileLabel;
   protected readonly rows = computed(() => lifeRows(this.board().tiles));
@@ -62,6 +67,24 @@ export class LifeBoardView {
   });
 
   protected readonly turnOf = computed(() => this.players().find((member) => member.isTurn) ?? null);
+
+  /** What the latest move was, in words: who rolled what and where they went. */
+  protected readonly lastMove = computed(() => {
+    const move = this.board().lastMove;
+    if (!move) {
+      return null;
+    }
+    const member = this.players().find((player) => player.seat === move.seat);
+    const who = member?.isYou ? 'You' : (member?.displayName ?? `Seat ${move.seat}`);
+    const tile = this.board().tiles[move.to];
+    const where = tile ? `tile ${move.to}${this.label(tile) ? ` (${this.label(tile)})` : ''}` : `tile ${move.to}`;
+    return move.roll === undefined ? `${who} passed at the finish.` : `${who} rolled ${move.roll} and moved to ${where}.`;
+  });
+
+  protected isLastStop(tile: LifeTile): boolean {
+    const move = this.board().lastMove;
+    return !!move && move.roll !== undefined && move.to === tile.index;
+  }
 
   protected pawnsOn(tile: LifeTile): DrawnPawn[] {
     return this.pawnsByTile().get(tile.index) ?? [];
