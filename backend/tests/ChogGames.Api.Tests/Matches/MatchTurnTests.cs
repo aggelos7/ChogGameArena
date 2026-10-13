@@ -7,6 +7,7 @@ using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Matches;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -67,7 +68,7 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
         return new ApiFactory(database.ConnectionString, settings, services =>
         {
             services.AddSingleton<TimeProvider>(_clock);
-            services.AddSingleton<IMatchRules, TurnRules>();
+            services.RemoveAll<IMatchRules>().AddSingleton<IMatchRules, TurnRules>();
             if (!withScheduler)
             {
                 foreach (var worker in services.Where(d => d.ImplementationType == typeof(TurnTimeoutWorker)).ToList())

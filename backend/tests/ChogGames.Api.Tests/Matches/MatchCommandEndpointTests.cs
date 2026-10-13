@@ -6,6 +6,7 @@ using ChogGames.Core.Matches;
 using ChogGames.Core.Rooms;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 
 namespace ChogGames.Api.Tests.Matches;
@@ -34,7 +35,7 @@ public sealed class MatchCommandEndpointTests(MigratedPostgresDatabase database)
         _factory = new ApiFactory(
             database.ConnectionString,
             new Dictionary<string, string?> { ["Games:Items:0:Status"] = "Available", ["Games:Items:1:Status"] = "Available" },
-            services => services.AddSingleton<IMatchRules, CounterRules>());
+            services => services.RemoveAll<IMatchRules>().AddSingleton<IMatchRules, CounterRules>());
     }
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();

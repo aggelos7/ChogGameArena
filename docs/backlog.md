@@ -539,7 +539,7 @@
 
 #### STORY-036 — Board rendering
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Render player positions, current turn and tile type on responsive board.
@@ -652,6 +652,19 @@
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-064 — Chog Life illustrated board
+
+- **Status:** Todo
+- **Priority:** P2
+- **Epic:** E06
+- **Implementation:** Replace the functional vertical track of STORY-036 with an illustrated Chog Life board in the web app, once the rules are final (requirements §15, after STORY-044). Draw the route as a winding SVG path with each Safe/Degen fork as a visible split that joins again, tile icons and artwork by type and event kind, and pawns that animate from tile to tile along the route the server resolved (STORY-037). Lay the board out from the server's tile graph (`state.tiles`, DEC-038), never from a copy in the client, so a new rules version needs no web change. Keep the STORY-036 vertical track as the accessible fallback (screen readers, reduced motion) and wherever the illustrated board doesn't fit. No API, rules or server change. Implement after STORY-044.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the illustrated board shows every tile, both lanes of each fork, 2–6 pawns and the current turn as the server sends them; it stays usable at 375px without horizontal page scroll; pawn moves animate along the resolved route and are skipped with reduced motion.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** a state the client can't read shows the fallback or no board, and the board never changes a position on its own.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. No change to rules, odds, the board layout data or the API; no Chog Race board; no collector cosmetics (STORY-060).
 
 
 ## E07 — First-game launch and operations

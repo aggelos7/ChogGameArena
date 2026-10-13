@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ChogGames.Api.Tests.Matches;
 
@@ -77,7 +78,7 @@ public sealed class AbilityExecutionTests(MigratedPostgresDatabase database) : I
             services =>
             {
                 services.AddSingleton<IRandomSource>(_random);
-                services.AddSingleton<IMatchRules>(new TurnRules());
+                services.RemoveAll<IMatchRules>().AddSingleton<IMatchRules>(new TurnRules());
                 services.AddSingleton(catalog);
                 foreach (var worker in services.Where(d => d.ImplementationType == typeof(TurnTimeoutWorker)).ToList())
                 {

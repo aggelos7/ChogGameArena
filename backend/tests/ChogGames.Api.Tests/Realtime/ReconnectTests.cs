@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ChogGames.Api.Tests.Realtime;
 
@@ -49,7 +50,7 @@ public sealed class ReconnectTests(MigratedPostgresDatabase database) : IClassFi
             services =>
             {
                 services.AddSingleton<TimeProvider>(_clock);
-                services.AddSingleton<IMatchRules, TurnRules>();
+                services.RemoveAll<IMatchRules>().AddSingleton<IMatchRules, TurnRules>();
                 foreach (var worker in services.Where(d => d.ImplementationType == typeof(TurnTimeoutWorker)).ToList())
                 {
                     services.Remove(worker);

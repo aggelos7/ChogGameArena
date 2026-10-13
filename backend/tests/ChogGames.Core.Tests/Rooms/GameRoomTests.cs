@@ -340,6 +340,44 @@ public class GameRoomTests
         Assert.Equal((RoomStatus.Waiting, 2), (room.Status, room.Members.Count));
     }
 
+    [Fact]
+    public void Start_stores_the_games_start_state_once_the_players_are_seated()
+    {
+        // STORY-036, DEC-038: the start state is built from the seated, active match and stored with the start.
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+        var versionBefore = room.Version;
+        (RoomStatus Status, int?[] Seats, Guid? Current)? seen = null;
+
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now, startState: started =>
+        {
+            seen = (started.Status, started.Members.Select(m => m.Seat).ToArray(), started.CurrentPlayerId);
+            return """{"pawns":[1,2]}""";
+        });
+
+        Assert.Equal((RoomStatus.Active, new int?[] { 1, 2 }, (Guid?)host.Id), seen);
+        Assert.Equal("""{"pawns":[1,2]}""", room.State);
+        Assert.Equal(versionBefore + 1, room.Version);
+    }
+
+    [Fact]
+    public void Start_without_a_start_state_leaves_the_state_empty()
+    {
+        Assert.Null(Started(Guest(), Guest()).State);
+
+        var host = Guest();
+        var bob = Guest();
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+        room.Start(host.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now, startState: _ => null);
+
+        Assert.Null(room.State);
+    }
+
     private static IReadOnlyDictionary<Guid, CharacterSnapshot> Snapshots(params Player[] players) =>
         players.ToDictionary(p => p.Id, p => CharacterSnapshot.Standard(DefaultAvatar.Classic, Now));
 

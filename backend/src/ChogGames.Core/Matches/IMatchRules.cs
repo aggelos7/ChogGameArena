@@ -19,6 +19,13 @@ public interface IMatchRules
     /// <summary>The <see cref="GameRoom.GameType"/> these rules play.</summary>
     string GameType { get; }
 
+    /// <summary>
+    /// The game's state as the match starts (STORY-036, DEC-038), such as every player's pawn on the start tile, stored
+    /// with the start in its transaction. The match is seated and its first turn has begun. Null, the default, leaves
+    /// the state empty until the first accepted command.
+    /// </summary>
+    JsonElement? StartState(MatchStartContext context) => null;
+
     MatchRuleDecision Apply(MatchCommandContext context);
 
     /// <summary>
@@ -40,15 +47,19 @@ public interface IMatchRules
 /// <param name="State">The game's state; views are only asked for once there is one.</param>
 public sealed record MatchViewContext(GameRoom Match, Guid PlayerId, JsonElement State);
 
+/// <param name="Match">The match just started, read only: active, with every member seated.</param>
+/// <param name="Random">The server's source of chance, for a start that needs a draw.</param>
+public sealed record MatchStartContext(GameRoom Match, IRandomSource Random);
+
 /// <param name="Match">The active match, read only; <see cref="GameRoom.CurrentPlayerId"/> is the player whose turn ran out.</param>
-/// <param name="State">The game's state, or null before its first accepted command.</param>
+/// <param name="State">The game's state, or null while it has none: no start state and no accepted command yet.</param>
 /// <param name="Random">The server's source of chance, for a safe default that needs a draw.</param>
 public sealed record MatchTurnContext(GameRoom Match, JsonElement? State, IRandomSource Random);
 
 /// <param name="Match">The active match, read only; its members are the players.</param>
 /// <param name="PlayerId">The session's player, whose turn it is.</param>
 /// <param name="Payload">The player's choices only; anything in it that claims an outcome, such as a roll, is ignored.</param>
-/// <param name="State">The game's state, or null before its first accepted command.</param>
+/// <param name="State">The game's state, or null while it has none: no start state and no accepted command yet.</param>
 /// <param name="Random">The server's source of chance: the only place rolls, draws and random targets come from.</param>
 public sealed record MatchCommandContext(
     GameRoom Match, Guid PlayerId, string Type, JsonElement Payload, JsonElement? State, IRandomSource Random);
