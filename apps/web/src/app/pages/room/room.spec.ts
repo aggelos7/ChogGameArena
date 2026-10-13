@@ -605,7 +605,7 @@ describe('Room page', () => {
       http.expectOne('/api/rooms/K7QF3M').flush({
         ...started,
         version: 5,
-        state: { ...FORK_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 1 }], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1] } },
+        state: { ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 2, tile: 1, mon: 100 }], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1] } },
         members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
       });
       fixture.detectChanges();

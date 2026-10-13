@@ -17,15 +17,17 @@ export interface LifeTile {
   event?: LifeEventKind;
 }
 
-/** A player's pawn, by their seat (the room's `seat`); player ids never reach the client. */
+/** A player's pawn, by their seat (the room's `seat`), with their liquid MON (STORY-038); player ids never reach the client. */
 export interface LifePawn {
   seat: number;
   tile: number;
+  mon: number;
 }
 
 /**
  * A seat's latest move (STORY-037, DEC-039): the server's roll, the tiles left and reached, and every tile passed on the
- * way, ending with `to`. A pawn already on the Finish passes without a roll.
+ * way, ending with `to`. A pawn already on the Finish passes without a roll. `change` is the MON the tile it stopped on
+ * moved (STORY-038, DEC-040), absent for a tile that does nothing.
  */
 export interface LifeMove {
   seat: number;
@@ -33,6 +35,7 @@ export interface LifeMove {
   from: number;
   to: number;
   path: number[];
+  change?: number;
 }
 
 /** The Chog Life view in a room snapshot's `state` (STORY-036, DEC-038). */
@@ -76,7 +79,9 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       LANES.includes(tile['lane'] as string) &&
       ['next', 'safeNext', 'degenNext'].every((link) => tile[link] === undefined || (isIndex(tile[link]) && tile[link] > i && tile[link] < tiles.length)),
   );
-  const validPawns = state['pawns'].every((pawn) => isRecord(pawn) && isIndex(pawn['seat']) && isIndex(pawn['tile']) && pawn['tile'] < tiles.length);
+  const validPawns = state['pawns'].every(
+    (pawn) => isRecord(pawn) && isIndex(pawn['seat']) && isIndex(pawn['tile']) && pawn['tile'] < tiles.length && isIndex(pawn['mon']),
+  );
   const move = state['lastMove'];
   const validMove =
     move === undefined ||
@@ -86,6 +91,7 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       isIndex(move['to']) &&
       move['to'] < tiles.length &&
       (move['roll'] === undefined || isIndex(move['roll'])) &&
+      (move['change'] === undefined || Number.isInteger(move['change'])) &&
       Array.isArray(move['path']) &&
       move['path'].every((tile) => isIndex(tile) && tile < tiles.length));
   if (tiles.length === 0 || !validTiles || !validPawns || !validMove) {

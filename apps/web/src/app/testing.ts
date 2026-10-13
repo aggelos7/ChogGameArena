@@ -24,7 +24,7 @@ export const FORK_BOARD: LifeBoard = {
     { index: 9, type: 'Finish', lane: 'Main' },
   ],
   pawns: [
-    { seat: 1, tile: 0 },
-    { seat: 2, tile: 0 },
+    { seat: 1, tile: 0, mon: 100 },
+    { seat: 2, tile: 0, mon: 100 },
   ],
 };
