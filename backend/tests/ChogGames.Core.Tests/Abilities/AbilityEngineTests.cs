@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Games;
+using ChogGames.Core.Matches;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
@@ -45,25 +46,55 @@ public class AbilityEngineTests
         return room;
     }
 
-    /// <summary>A started match seated in join order (seat 1 first); the first player plays <paramref name="hostChog"/>.</summary>
-    private static GameRoom Started(Player[] players, CharacterSnapshot? hostChog = null, string gameType = GameType)
+    /// <summary>
+    /// A started match seated in join order (seat 1 first); the first player plays <paramref name="hostChog"/>. In a game
+    /// with a catalog everyone locks <paramref name="ability"/> from <paramref name="catalog"/> (the fake game's by default).
+    /// </summary>
+    private static GameRoom Started(
+        Player[] players,
+        CharacterSnapshot? hostChog = null,
+        string gameType = GameType,
+        string ability = "boost",
+        AbilityCatalog? catalog = null)
     {
         var room = Waiting(gameType, players);
+        catalog ??= gameType == GameType ? Catalog() : null;
         foreach (var player in players)
         {
+            if (catalog is not null)
+            {
+                room.SelectAbility(player.Id, ability);
+            }
+
             room.MarkReady(player);
         }
 
         var characters = players.ToDictionary(p => p.Id, p => CharacterSnapshot.Standard(DefaultAvatar.Classic, Now));
         characters[players[0].Id] = hostChog ?? characters[players[0].Id];
-        room.Start(players[0].Id, players, characters, TimeSpan.FromSeconds(20), ScriptedRandomSource.KeepOrder, Now);
+        var abilities = catalog is not null && catalog.TryFind(ability, out var definition, out _)
+            ? players.ToDictionary(p => p.Id, _ => AbilitySnapshot.Lock(catalog, definition))
+            : null;
+        room.Start(players[0].Id, players, characters, TimeSpan.FromSeconds(20), ScriptedRandomSource.KeepOrder, Now, abilities);
         return room;
     }
 
     private static JsonElement Payload(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
+    /// <summary>The ability a payload names, or <c>boost</c> when it names none of the fake game's.</summary>
+    private static string NamedIn(string payload) =>
+        payload.Contains("\"steal\"", StringComparison.Ordinal) ? "steal" : "boost";
+
     private AbilityResult Use(GameRoom room, Player player, string payload, JsonElement? state, ScriptedRandomSource? random = null) =>
         _engine.Use(new AbilityRequest(room, player.Id, Payload(payload), state, random ?? new ScriptedRandomSource()));
+
+    /// <summary>Counts the use as the command service does after the engine allowed it.</summary>
+    private static void Apply(GameRoom room, Player player, AbilityResult result) =>
+        room.ApplyAbility(
+            player.Id,
+            new MatchCommand(Guid.NewGuid(), room.Id, room.Version, MatchCommand.UseAbility, Payload("{}")),
+            result.Ability!.Id,
+            result.State!.Value.GetRawText(),
+            Now);
 
     [Fact]
     public void Ability_is_used_by_id_with_its_configured_value()
@@ -83,7 +114,7 @@ public class AbilityEngineTests
     public void Opponent_is_targeted_by_seat_and_chance_comes_from_the_server()
     {
         Player[] players = [Guest("Alice"), Guest("Bob"), Guest("Carol")];
-        var room = Started(players);
+        var room = Started(players, ability: "steal");
         var random = new ScriptedRandomSource(2);
 
         var result = Use(room, players[0], """{"abilityId":"steal","target":2}""", State("own_turn", targetCards: 3), random);
@@ -162,7 +193,7 @@ public class AbilityEngineTests
     public void Game_refuses_with_its_own_reason_and_nothing_changes(string payload, string reason)
     {
         Player[] players = [Guest("Alice"), Guest("Bob")];
-        var room = Started(players);
+        var room = Started(players, ability: NamedIn(payload));
         var random = new ScriptedRandomSource();
         var version = room.Version;
 
@@ -208,8 +239,8 @@ public class AbilityEngineTests
     {
         Player[] withNft = [Guest("Alice"), Guest("Bob")];
         Player[] withGuest = [Guest("Alice"), Guest("Bob")];
-        var nftMatch = Started(withNft, NftChog(new NftTrait("Background", "Gold"), new NftTrait("Rarity", "Legendary")));
-        var guestMatch = Started(withGuest);
+        var nftMatch = Started(withNft, NftChog(new NftTrait("Background", "Gold"), new NftTrait("Rarity", "Legendary")), ability: "steal");
+        var guestMatch = Started(withGuest, ability: "steal");
 
         var nft = Use(nftMatch, withNft[0], """{"abilityId":"steal","target":2}""", State("own_turn"), new ScriptedRandomSource(1));
         var guest = Use(guestMatch, withGuest[0], """{"abilityId":"steal","target":2}""", State("own_turn"), new ScriptedRandomSource(1));
@@ -217,6 +248,90 @@ public class AbilityEngineTests
         Assert.True(nft.Used && guest.Used);
         Assert.Equal(guest.Ability, nft.Ability);
         Assert.Equal(guest.State!.Value.GetRawText(), nft.State!.Value.GetRawText());
+    }
+
+    [Fact]
+    public void Only_the_locked_ability_can_be_used()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players, ability: "steal");
+
+        AssertRefusedIn(room, players[0], AbilityRefusal.NotYourAbility, """{"abilityId":"boost"}""");
+        AssertRefusedIn(room, players[0], AbilityRefusal.UnknownAbility, """{"abilityId":"reward_boost"}""");
+    }
+
+    [Fact]
+    public void Player_without_a_locked_ability_can_use_none()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players, ability: "missing");
+
+        Assert.Null(room.Members[0].Ability);
+        AssertRefusedIn(room, players[0], AbilityRefusal.NotYourAbility, """{"abilityId":"boost"}""");
+    }
+
+    [Fact]
+    public void Ability_is_used_at_most_its_max_uses()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players);
+        var first = Use(room, players[0], """{"abilityId":"boost"}""", State("before_reward"));
+        Apply(room, players[0], first);
+
+        Assert.Equal((1, 0), (room.Members[0].AbilityUses, room.Members[0].AbilityUsesLeft));
+        AssertRefusedIn(room, players[0], AbilityRefusal.UsedUp, """{"abilityId":"boost"}""", expectedChecks: 1);
+        Assert.Equal(1, _boost.Executions);
+    }
+
+    [Fact]
+    public void Ability_with_several_uses_counts_each()
+    {
+        var catalog = AbilityCatalog.Create(GameType, 1, [Boost(), Steal(maxUses: 2)], [_boost, _steal], new StateWindow());
+        var engine = new AbilityEngine([catalog]);
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players, ability: "steal", catalog: catalog);
+
+        for (var use = 1; use <= 2; use++)
+        {
+            var result = engine.Use(new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"steal","target":2}"""), State("own_turn"), new ScriptedRandomSource()));
+            Assert.True(result.Used);
+            Apply(room, players[0], result);
+            Assert.Equal(2 - use, room.Members[0].AbilityUsesLeft);
+        }
+
+        var refused = engine.Use(new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"steal","target":2}"""), State("own_turn"), new ScriptedRandomSource()));
+        Assert.Equal(AbilityRefusal.UsedUp, refused.Reason);
+    }
+
+    /// <summary>NFT-015: a deploy that changes the catalog mid-match doesn't change the values a locked ability uses.</summary>
+    [Fact]
+    public void Locked_values_apply_after_the_catalog_changes()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players);
+        var deployed = new AbilityEngine([AbilityCatalog.Create(GameType, 2, [Boost(percent: 50), Steal()], [_boost, _steal], new StateWindow())]);
+
+        var result = deployed.Use(new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"boost"}"""), State("before_reward", reward: 100), new ScriptedRandomSource()));
+
+        Assert.True(result.Used);
+        Assert.Equal(25, result.Ability!.Parameters["percent"]);
+        Assert.Equal(125, result.State!.Value.GetProperty("reward").GetInt32());
+    }
+
+    [Fact]
+    public void Locked_ability_the_game_can_no_longer_apply_is_unavailable()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players);
+        var withoutBoost = new AbilityEngine([AbilityCatalog.Create(GameType, 2, [Steal()], [_steal], new StateWindow())]);
+        var narrowerBoost = new AbilityEngine([AbilityCatalog.Create(GameType, 2, [Boost(percent: 10), Steal()], [new BoostHandler(maxPercent: 20), _steal], new StateWindow())]);
+        var noCatalog = new AbilityEngine([]);
+        var request = new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"boost"}"""), State("before_reward"), new ScriptedRandomSource());
+
+        Assert.Equal(AbilityRefusal.Unavailable, withoutBoost.Use(request).Reason);
+        Assert.Equal(AbilityRefusal.Unavailable, narrowerBoost.Use(request).Reason);
+        Assert.Equal(AbilityRefusal.Unavailable, noCatalog.Use(request).Reason);
+        AssertNothingRan();
     }
 
     /// <summary>
@@ -272,7 +387,7 @@ public class AbilityEngineTests
     private void AssertRefused(string reason, string payload, JsonElement? state, bool leaveSeat3 = false)
     {
         Player[] players = [Guest("Alice"), Guest("Bob"), Guest("Carol")];
-        var room = Started(players);
+        var room = Started(players, ability: NamedIn(payload));
         if (leaveSeat3)
         {
             room.Leave(players[2].Id, Now.AddMinutes(1));
@@ -287,6 +402,21 @@ public class AbilityEngineTests
         Assert.Empty(random.Draws);
         Assert.Equal(version, room.Version);
         AssertNothingRan();
+    }
+
+    private void AssertRefusedIn(GameRoom room, Player player, string reason, string payload, int expectedChecks = 0)
+    {
+        var version = room.Version;
+        var uses = room.Members.Select(m => m.AbilityUses).ToArray();
+        var random = new ScriptedRandomSource();
+
+        var result = Use(room, player, payload, State("before_reward"), random);
+
+        Assert.Equal((false, reason, null), (result.Used, result.Reason, result.State));
+        Assert.Empty(random.Draws);
+        Assert.Equal(version, room.Version);
+        Assert.Equal(uses, room.Members.Select(m => m.AbilityUses));
+        Assert.Equal(expectedChecks, _boost.Checks + _steal.Checks);
     }
 
     private void AssertNothingRan() => Assert.Equal((0, 0, 0), (_boost.Checks, _steal.Checks, _boost.Executions));

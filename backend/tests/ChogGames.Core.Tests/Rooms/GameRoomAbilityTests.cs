@@ -1,12 +1,17 @@
+using System.Text.Json;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Games;
+using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Core.Tests.Abilities;
 
 namespace ChogGames.Core.Tests.Rooms;
 
-/// <summary>Choosing an ability in the lobby and locking it at start (STORY-033, NFT-013, NFT-015, DEC-035).</summary>
+/// <summary>
+/// Choosing an ability in the lobby and locking it at start (STORY-033, NFT-013, NFT-015, DEC-035), and counting its
+/// uses in the match (STORY-034, DEC-036).
+/// </summary>
 public class GameRoomAbilityTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 13, 12, 0, 0, TimeSpan.Zero);
@@ -188,5 +193,81 @@ public class GameRoomAbilityTests
     public void A_snapshot_is_only_taken_of_the_catalogs_own_definition()
     {
         Assert.Throws<ArgumentException>(() => AbilitySnapshot.Lock(FakeAbilityGame.Catalog(), FakeAbilityGame.Boost(percent: 99)));
+    }
+
+    /// <summary>A started pair, seated host first, both locking <c>boost</c>; the host plays the first turn.</summary>
+    private static (GameRoom Room, Player Host, Player Bob) StartedPair()
+    {
+        var (room, host, bob) = Pair();
+        room.SelectAbility(host.Id, "boost");
+        room.SelectAbility(bob.Id, "boost");
+        room.MarkReady(host);
+        room.MarkReady(bob);
+        room.Start(host.Id, [host, bob], Characters(host, bob), TimeSpan.FromSeconds(20), ScriptedRandomSource.KeepOrder, Now,
+            new Dictionary<Guid, AbilitySnapshot> { [host.Id] = Locked("boost"), [bob.Id] = Locked("boost") });
+        return (room, host, bob);
+    }
+
+    private static MatchCommand UseCommand(GameRoom room) =>
+        new(Guid.NewGuid(), room.Id, room.Version, MatchCommand.UseAbility, JsonDocument.Parse("""{"abilityId":"boost"}""").RootElement.Clone());
+
+    [Fact]
+    public void A_use_is_counted_and_keeps_the_turn()
+    {
+        var (room, host, _) = StartedPair();
+        var (version, turn, endsAt) = (room.Version, room.TurnNumber, room.TurnEndsAt);
+        Assert.Equal((0, 1), (Member(room, host).AbilityUses, Member(room, host).AbilityUsesLeft));
+
+        var action = room.ApplyAbility(host.Id, UseCommand(room), "boost", """{"reward":125}""", Now.AddSeconds(5));
+
+        Assert.Equal((1, 0), (Member(room, host).AbilityUses, Member(room, host).AbilityUsesLeft));
+        Assert.Equal((version + 1, version + 1, MatchCommand.UseAbility), (room.Version, action.Version, action.Type));
+        Assert.Equal((host.Id, turn, endsAt, """{"reward":125}"""), (room.CurrentPlayerId, room.TurnNumber, room.TurnEndsAt, room.State));
+    }
+
+    [Fact]
+    public void A_use_resets_missed_turns()
+    {
+        var (room, host, bob) = StartedPair();
+        room.TimeOutTurn(null, 3, Now.AddSeconds(20));
+        room.TimeOutTurn(null, 3, Now.AddSeconds(40));
+        Assert.Equal(1, Member(room, host).MissedTurns);
+
+        room.ApplyAbility(host.Id, UseCommand(room), "boost", "{}", Now.AddSeconds(41));
+
+        Assert.Equal((0, 1), (Member(room, host).MissedTurns, Member(room, bob).MissedTurns));
+    }
+
+    [Fact]
+    public void A_use_past_the_limit_or_of_another_ability_is_refused_unchanged()
+    {
+        var (room, host, _) = StartedPair();
+        room.ApplyAbility(host.Id, UseCommand(room), "boost", """{"n":1}""", Now);
+        var version = room.Version;
+
+        Assert.Throws<InvalidOperationException>(() => room.ApplyAbility(host.Id, UseCommand(room), "boost", """{"n":2}""", Now));
+        Assert.Throws<InvalidOperationException>(() => room.ApplyAbility(host.Id, UseCommand(room), "steal", """{"n":2}""", Now));
+        Assert.Equal((version, 1, """{"n":1}"""), (room.Version, Member(room, host).AbilityUses, room.State));
+    }
+
+    [Fact]
+    public void Only_the_current_player_uses_an_ability()
+    {
+        var (room, _, bob) = StartedPair();
+
+        Assert.Throws<InvalidOperationException>(() => room.ApplyAbility(bob.Id, UseCommand(room), "boost", "{}", Now));
+        Assert.Equal(0, Member(room, bob).AbilityUses);
+    }
+
+    [Fact]
+    public void A_member_without_a_locked_ability_has_no_uses()
+    {
+        var (room, host, bob) = Pair();
+        room.MarkReady(host);
+        room.MarkReady(bob);
+        room.Start(host.Id, [host, bob], Characters(host, bob), TimeSpan.FromSeconds(20), ScriptedRandomSource.KeepOrder, Now);
+
+        Assert.Null(Member(room, host).AbilityUsesLeft);
+        Assert.Throws<InvalidOperationException>(() => room.ApplyAbility(host.Id, UseCommand(room), "boost", "{}", Now));
     }
 }

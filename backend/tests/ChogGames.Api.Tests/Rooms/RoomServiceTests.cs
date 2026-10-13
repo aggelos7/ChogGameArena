@@ -583,6 +583,46 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
     }
 
     [PostgresTheory]
+    [InlineData(-1, 1)] // check: never negative
+    [InlineData(2, 1)] // check: at most the locked max uses
+    [InlineData(1, null)] // check: no uses without a locked ability; a NULL limit must not pass
+    [InlineData(1, -1)] // check: a missing maxUses counts as 0
+    public async Task Database_rejects_ability_uses_beyond_the_locked_ability(int uses, int? maxUses)
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+        var (abilityId, ability) = maxUses switch
+        {
+            null => ((string?)null, (string?)null),
+            -1 => ("reward_boost", "{\"id\":\"reward_boost\"}"),
+            _ => ("reward_boost", $"{{\"id\":\"reward_boost\",\"maxUses\":{maxUses}}}"),
+        };
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "AbilityId" = {abilityId}, "Ability" = {ability}::jsonb,
+                "Character" = {"{\"kind\":\"Standard\"}"}::jsonb, "AbilityUses" = {uses}
+            WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+
+        Assert.Equal(("23514", "CK_RoomMembers_AbilityUses"), (error.SqlState, error.ConstraintName));
+    }
+
+    [PostgresTheory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task Database_accepts_ability_uses_up_to_the_locked_max(int uses)
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+
+        Assert.Equal(1, await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "AbilityId" = 'reward_boost', "Ability" = {"{\"id\":\"reward_boost\",\"maxUses\":2}"}::jsonb,
+                "Character" = {"{\"kind\":\"Standard\"}"}::jsonb, "AbilityUses" = {uses}
+            WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+    }
+
+    [PostgresTheory]
     [InlineData("Standard", null)] // check: ready needs both the kind and the id
     [InlineData(null, "mint")]
     [InlineData("Shiny", "mint")] // check: kind

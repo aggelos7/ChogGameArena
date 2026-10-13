@@ -5,7 +5,7 @@ namespace ChogGames.Core.Abilities;
 /// <summary>
 /// The ability a player locked for one match (STORY-033, NFT-015, ADR-008, DEC-035): a copy of its definition and the
 /// catalog version it came from, taken at start. Later catalog changes never alter it; the next match takes a new one.
-/// How many uses are left is counted from STORY-034.
+/// Uses are counted on the member (STORY-034, DEC-036), and the engine applies the values locked here.
 /// </summary>
 public sealed record AbilitySnapshot
 {
@@ -64,6 +64,10 @@ public sealed record AbilitySnapshot
             [.. defined.Windows],
             defined.Parameters.ToImmutableSortedDictionary(StringComparer.Ordinal));
     }
+
+    /// <summary>The locked ability as a definition, with the values taken at start, for its handler to use (DEC-036).</summary>
+    public AbilityDefinition ToDefinition() =>
+        AbilityDefinition.Create(Id, Name, Description, Target, Windows, Parameters, MaxUses);
 
     /// <summary>Rebuilds a snapshot exactly as it was stored with its match; never a new lookup in the catalog.</summary>
     public static AbilitySnapshot Restore(

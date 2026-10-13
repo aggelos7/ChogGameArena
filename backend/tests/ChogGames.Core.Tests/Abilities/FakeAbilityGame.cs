@@ -17,8 +17,8 @@ public static class FakeAbilityGame
         "boost", "Boost", "Raise the pending reward.", AbilityTargetKind.None, ["before_reward"],
         new Dictionary<string, decimal> { ["percent"] = percent });
 
-    public static AbilityDefinition Steal() => AbilityDefinition.Create(
-        "steal", "Steal", "Take a random card from an opponent.", AbilityTargetKind.Opponent, ["own_turn", "before_reward"]);
+    public static AbilityDefinition Steal(int maxUses = 1) => AbilityDefinition.Create(
+        "steal", "Steal", "Take a random card from an opponent.", AbilityTargetKind.Opponent, ["own_turn", "before_reward"], maxUses: maxUses);
 
     public static AbilityCatalog Catalog(BoostHandler? boost = null, StealHandler? steal = null) =>
         AbilityCatalog.Create(GameType, 1, [Boost(), Steal()], [boost ?? new BoostHandler(), steal ?? new StealHandler()], new StateWindow());
@@ -33,7 +33,7 @@ public static class FakeAbilityGame
             context.State is { } state && state.TryGetProperty("window", out var window) ? window.GetString() : null;
     }
 
-    public sealed class BoostHandler : IAbilityHandler
+    public sealed class BoostHandler(decimal maxPercent = 100) : IAbilityHandler
     {
         public int Checks { get; private set; }
 
@@ -41,7 +41,7 @@ public static class FakeAbilityGame
 
         public string AbilityId => "boost";
 
-        public IReadOnlyList<AbilityParameter> Parameters { get; } = [new("percent", 1, 100)];
+        public IReadOnlyList<AbilityParameter> Parameters { get; } = [new("percent", 1, maxPercent)];
 
         public string? CanExecute(AbilityContext context)
         {

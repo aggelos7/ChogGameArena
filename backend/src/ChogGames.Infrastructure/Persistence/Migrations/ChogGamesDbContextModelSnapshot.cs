@@ -284,6 +284,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<int>("AbilityUses")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Character")
                         .HasColumnType("jsonb");
 
@@ -323,6 +326,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_RoomMembers_Ability", "\"Ability\" IS NULL OR (jsonb_typeof(\"Ability\") = 'object' AND \"Character\" IS NOT NULL AND \"AbilityId\" IS NOT NULL AND \"Ability\" ->> 'id' IS NOT DISTINCT FROM \"AbilityId\")");
 
                             t.HasCheckConstraint("CK_RoomMembers_AbilityId", "\"AbilityId\" IS NULL OR \"AbilityId\" ~ '^[a-z][a-z0-9_]{0,31}$'");
+
+                            t.HasCheckConstraint("CK_RoomMembers_AbilityUses", "\"AbilityUses\" >= 0 AND \"AbilityUses\" <= COALESCE((\"Ability\" ->> 'maxUses')::integer, 0)");
 
                             t.HasCheckConstraint("CK_RoomMembers_Character", "\"Character\" IS NULL OR jsonb_typeof(\"Character\") = 'object'");
 

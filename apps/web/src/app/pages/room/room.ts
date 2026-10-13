@@ -168,6 +168,14 @@ export class RoomPage implements OnInit {
     return member.hasAbility ? 'Ability chosen' : 'Ability not chosen yet';
   }
 
+  /** How often the locked ability can still be used in this game (DEC-036). */
+  protected usesLeftLabel(usesLeft: number): string {
+    if (usesLeft === 0) {
+      return 'Already used.';
+    }
+    return usesLeft === 1 ? '1 use left.' : `${usesLeft} uses left.`;
+  }
+
   protected start(): void {
     const room = this.room();
     if (room) {

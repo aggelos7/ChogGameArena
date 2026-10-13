@@ -15,6 +15,12 @@ public sealed partial record MatchCommand(Guid ActionId, Guid MatchId, long Expe
 {
     public const int MaxTypeLength = 32;
 
+    /// <summary>
+    /// Uses the player's locked ability, <c>{"abilityId": "...", "target": seat}</c>. The shared engine handles it for
+    /// every game, never the game's rules (STORY-034, ENG-003, DEC-036).
+    /// </summary>
+    public const string UseAbility = "USE_ABILITY";
+
     /// <summary>Largest payload accepted, in characters of its JSON text.</summary>
     public const int MaxPayloadLength = 4096;
 
