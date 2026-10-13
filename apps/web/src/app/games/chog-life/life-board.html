@@ -23,6 +23,12 @@
       }
     }
   </p>
+  @if (lastMove(); as move) {
+    <p class="last-move" data-last-move>{{ move }}</p>
+  }
+  @if (turnOf()?.isYou) {
+    <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
+  }
 
   <ol class="track" aria-label="Board, from start to finish">
     @for (row of rows(); track $index) {
@@ -65,6 +71,7 @@
     [attr.data-tile]="tile.index"
     [attr.data-type]="tile.type"
     [attr.data-lane]="tile.lane"
+    [class.last-stop]="isLastStop(tile)"
   >
     <span class="number" aria-hidden="true">{{ tile.index }}</span>
     <span class="label" aria-hidden="true">{{ label(tile) }}</span>
