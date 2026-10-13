@@ -4,8 +4,9 @@ namespace ChogGames.Core.Abilities;
 
 /// <summary>
 /// Decides which of a game's abilities a player may choose from with their character (STORY-031, NFT-012, ADR-007,
-/// DEC-033). MVP registers only <see cref="SharedAbilityPoolStrategy"/>; a future trait-based strategy replaces it in
-/// one registration, without changes to the engine or the games. Callers go through <see cref="AbilityPool"/>, which
+/// DEC-033). MVP registers only <see cref="SharedAbilityPoolStrategy"/>; a future trait-based strategy, built on an
+/// <see cref="ITraitAbilityResolver"/> (STORY-032, DEC-034), replaces it in one registration, without changes to the
+/// engine or the games. A strategy is the only place a character's traits may be read. Callers go through <see cref="AbilityPool"/>, which
 /// keeps any strategy's answer inside the game's catalog.
 /// </summary>
 public interface IAbilityAssignmentStrategy

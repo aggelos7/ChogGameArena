@@ -4,12 +4,14 @@ using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
 using ChogGames.Core.Wallets;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ChogGames.Api.Tests.Abilities;
 
 /// <summary>
 /// STORY-031, DEC-033: the API uses the shared ability pool for every player, and a game's abilities reach it by
-/// registering the game's <see cref="AbilityCatalog"/>, with no other change.
+/// registering the game's <see cref="AbilityCatalog"/>, with no other change. STORY-032, DEC-034: a trait-based strategy
+/// would replace that one registration, and nothing else.
 /// </summary>
 public class AbilityPoolRegistrationTests
 {
@@ -61,6 +63,39 @@ public class AbilityPoolRegistrationTests
 
         Assert.Equal(["reward_boost", "event_reroll"], guest.Select(a => a.Id));
         Assert.Equal(guest, holder);
+    }
+
+    [Fact]
+    public async Task Swapping_the_strategy_registration_is_the_only_change_a_trait_resolver_needs()
+    {
+        await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, configureServices: s =>
+        {
+            s.AddSingleton(Catalog());
+            s.RemoveAll<IAbilityAssignmentStrategy>();
+            s.AddSingleton<IAbilityAssignmentStrategy>(new TraitBasedTestStrategy(new LegendaryRerollResolver()));
+        });
+        var pool = factory.Services.GetRequiredService<AbilityPool>();
+
+        Assert.Equal(["event_reroll"], pool.For(GameType, NftChog()).Select(a => a.Id));
+        Assert.Equal(["reward_boost", "event_reroll"], pool.For(GameType, CharacterSnapshot.Standard(DefaultAvatar.Classic, Now)).Select(a => a.Id));
+        Assert.Same(factory.Services.GetRequiredService<AbilityEngine>().CatalogFor(GameType), Assert.Single(factory.Services.GetServices<AbilityCatalog>()));
+    }
+
+    /// <summary>A stand-in for a future trait-based strategy (DEC-034): resolver ids, else the whole catalog.</summary>
+    private sealed class TraitBasedTestStrategy(ITraitAbilityResolver resolver) : IAbilityAssignmentStrategy
+    {
+        public IReadOnlyList<AbilityDefinition> AvailableAbilities(AbilityCatalog catalog, CharacterSnapshot character)
+        {
+            var eligible = resolver.EligibleAbilityIds(catalog, TraitSet.From(character));
+            var chosen = catalog.Definitions.Where(d => eligible.Contains(d.Id)).ToList();
+            return chosen.Count == 0 ? catalog.Definitions : chosen;
+        }
+    }
+
+    private sealed class LegendaryRerollResolver : ITraitAbilityResolver
+    {
+        public IReadOnlyList<string> EligibleAbilityIds(AbilityCatalog catalog, TraitSet traits) =>
+            traits.Has("rarity", "legendary") ? ["event_reroll"] : [];
     }
 
     private sealed class NoEffect(string abilityId) : IAbilityHandler
