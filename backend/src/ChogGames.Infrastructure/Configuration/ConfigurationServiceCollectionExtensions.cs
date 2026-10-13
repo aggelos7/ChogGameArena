@@ -1,3 +1,4 @@
+using ChogGames.Core.Abilities;
 using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Matches;
@@ -81,6 +82,12 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddScoped<MatchCommandService>();
         services.AddScoped<TurnTimeoutService>();
         services.AddScoped<MatchRecoveryService>();
+
+        // Games add their AbilityCatalog as their abilities are built (DEC-032). Every player gets the shared pool;
+        // a trait-based strategy would replace this one registration (DEC-033).
+        services.AddSingleton<AbilityEngine>();
+        services.AddSingleton<IAbilityAssignmentStrategy, SharedAbilityPoolStrategy>();
+        services.AddSingleton<AbilityPool>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()
