@@ -113,6 +113,8 @@ Game catalogue (`GET /api/games`): games and their status come from the non-secr
 [{ "id": "chog-life", "name": "Chog Life", "description": "...", "status": "ComingSoon" }]
 ```
 
+Chog Life rules (STORY-035, DEC-037): versioned code in `ChogGames.Games.ChogLife/Rules`, not configuration. `LifeRulesV1` is a 36-tile board: a main track with two Safe/Degen forks whose lanes join again, reward and loss tiles with whole-MON amounts, and event tiles that name their kind (market, airdrop, rug, liquidation). It also sets 100 MON to start, +100 MON for the first player to finish, a 20-minute cap and one six-sided die. `LifeRules.Create` checks everything when the API starts: 30–40 tiles in index order from one Start to one Finish, forward links to existing tiles, every tile reachable, both lanes of a fork joining at one tile, and amounts and event kinds only where they belong. A malformed board stops startup. MON are fictional game points; an architecture test keeps game modules away from wallets, the network and crypto libraries. There's no API, configuration or migration change; the rules are used from STORY-036 on.
+
 Guest identity (SUITE-002, ADR-005): the web app calls `GET /api/me` on startup and, only on `401`, `POST /api/guest-sessions`. The server creates a `Player` (opaque server-generated id, display name) and sets the session in an **HttpOnly, SameSite=Lax** cookie `chog_session` (Secure outside local development). Only the SHA-256 hash of the 256-bit token is stored. Identity comes **only** from that cookie; player ids in bodies, queries or headers are ignored.
 
 | Endpoint | Request | Responses |
