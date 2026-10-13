@@ -13,6 +13,18 @@ export interface RoomCharacter {
   color: string | null;
 }
 
+/**
+ * Mirrors `RoomAbilityResponse`: an ability of the game, as offered in the lobby or as locked for a player at the
+ * start (DEC-035).
+ */
+export interface RoomAbility {
+  id: string;
+  name: string;
+  description: string;
+  target: 'None' | 'Opponent';
+  maxUses: number;
+}
+
 /** Mirrors `RoomMemberResponse`. Player ids never leave the server. */
 export interface RoomMember {
   displayName: string;
@@ -22,8 +34,13 @@ export interface RoomMember {
   /** Ready with the Chog shown; choosing another Chog makes the player not ready. */
   isReady: boolean;
   character: RoomCharacter;
-  /** Always null until ability selection (STORY-033). */
-  ability: string | null;
+  /**
+   * The player's ability: your own choice while waiting (others' stay hidden), then everyone's locked one once the game
+   * has started (DEC-035). Null when there is none to show.
+   */
+  ability: RoomAbility | null;
+  /** Has chosen an ability (or, once started, locked one): all others see before the start. */
+  hasAbility: boolean;
   /** Left the started match: a forfeit (DEC-025). */
   hasLeft: boolean;
   /** It is this member's turn in the active match (DEC-027). */
@@ -54,6 +71,8 @@ export interface Room {
   members: RoomMember[];
   /** What this player may see of the game's own state; null until the game has any. */
   state: unknown;
+  /** What this player may choose from while the room waits; empty for a game without abilities and once started. */
+  abilities: RoomAbility[];
 }
 
 /** Whether `next` is at least as recent as `current`, so it may replace it; snapshots of other rooms never are. */
@@ -74,7 +93,10 @@ export type RoomErrorCode =
   | 'not_enough_players'
   | 'players_not_ready'
   | 'character_unavailable'
-  | 'ownership_unavailable';
+  | 'ownership_unavailable'
+  | 'unknown_ability'
+  | 'ability_required'
+  | 'ability_unavailable';
 
 /** A room error from the server, or `unknown` for anything else (network, 5xx). */
 export interface RoomError {
@@ -116,6 +138,9 @@ const ROOM_ERROR_MESSAGES: Record<RoomError['code'], string> = {
   players_not_ready: 'Every player must be ready to start.',
   character_unavailable: 'A player no longer owns their chosen Chog and must choose again.',
   ownership_unavailable: 'Chog ownership can’t be checked right now. Try again shortly.',
+  unknown_ability: 'That ability can’t be chosen in this game.',
+  ability_required: 'Choose an ability before marking ready.',
+  ability_unavailable: 'A player’s chosen ability is no longer available and they must choose again.',
   rate_limited: 'Too many tries in a short time. Wait a minute and try again.',
   unknown: 'Something went wrong. Try again.',
 };
@@ -151,6 +176,11 @@ export class RoomsApi {
 
   setReady(code: string, ready: boolean): Observable<Room> {
     return this.http.put<Room>(`/api/rooms/${encodeURIComponent(code)}/ready`, { ready });
+  }
+
+  /** Chooses the ability for the game; choosing another one than before makes the player not ready (DEC-035). */
+  selectAbility(code: string, abilityId: string): Observable<Room> {
+    return this.http.put<Room>(`/api/rooms/${encodeURIComponent(code)}/ability`, { abilityId });
   }
 
   start(code: string): Observable<Room> {

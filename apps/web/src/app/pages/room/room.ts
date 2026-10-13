@@ -8,7 +8,9 @@ import { Avatar } from '../../profile/profile-api';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import {
   Room,
+  RoomAbility,
   RoomCharacter,
+  RoomMember,
   RoomError,
   RoomsApi,
   isNewerRoom,
@@ -25,7 +27,8 @@ const NFT_COLOR = 'var(--brand)';
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
  * status, the player's ready toggle, the host's start and leaving (STORY-063). Once started it shows each player's locked
- * Chog, and leaving forfeits the game (STORY-023, DEC-025). It follows the room live (STORY-022, STORY-026): the
+ * Chog, and leaving forfeits the game (STORY-023, DEC-025). In a game with abilities the player chooses one before
+ * marking ready; others only see that a choice was made until the start locks it (STORY-033, DEC-035). It follows the room live (STORY-022, STORY-026): the
  * server pushes a versioned snapshot after every change and the page keeps the newest one it has seen, from the push or
  * a request alike, so an older answer never wins. A lost connection keeps retrying (STORY-027); Refresh is offered
  * while live updates are down.
@@ -63,6 +66,15 @@ export class RoomPage implements OnInit {
   protected readonly message = roomErrorMessage;
 
   protected readonly you = computed(() => this.room()?.members.find((member) => member.isYou) ?? null);
+
+  /** The game has abilities: the player has some to choose from, or someone has one. */
+  protected readonly hasAbilities = computed(() => {
+    const room = this.room();
+    return !!room && (room.abilities.length > 0 || room.members.some((member) => member.hasAbility));
+  });
+
+  /** Ready needs a chosen ability in a game with abilities; the server checks it too. */
+  protected readonly needsAbility = computed(() => this.hasAbilities() && !this.you()?.hasAbility);
 
   protected readonly canStart = computed(() => {
     const room = this.room();
@@ -141,6 +153,21 @@ export class RoomPage implements OnInit {
     }
   }
 
+  protected chooseAbility(ability: RoomAbility): void {
+    const room = this.room();
+    if (room && this.you()?.ability?.id !== ability.id) {
+      this.act(this.api.selectAbility(room.code, ability.id));
+    }
+  }
+
+  /** What a player's card says about their ability. */
+  protected abilityLabel(member: RoomMember): string {
+    if (member.ability) {
+      return member.ability.name;
+    }
+    return member.hasAbility ? 'Ability chosen' : 'Ability not chosen yet';
+  }
+
   protected start(): void {
     const room = this.room();
     if (room) {
@@ -192,7 +219,16 @@ export class RoomPage implements OnInit {
         this.busy.set(false);
         const roomError = toRoomError(error);
         // The lobby changed under us (someone un-readied, joined or started): show it as it is now.
-        if (['players_not_ready', 'character_unavailable', 'not_enough_players', 'room_started', 'room_closed'].includes(roomError.code)) {
+        if ([
+            'players_not_ready',
+            'character_unavailable',
+            'ability_unavailable',
+            'ability_required',
+            'unknown_ability',
+            'not_enough_players',
+            'room_started',
+            'room_closed',
+          ].includes(roomError.code)) {
           this.refreshQuietly();
         }
         this.actionError.set(roomError);
