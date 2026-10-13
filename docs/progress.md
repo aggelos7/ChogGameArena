@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-13 (STORY-031).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-13 (STORY-032).
 
 ## Stories done
 
@@ -38,7 +38,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-028 | #115 | Results and restarts: rules finish a match with standings, ranks stored once on the members with the move to Completed, stats updated in the same transaction (completed matches only, leavers count as played); on startup active matches resume with a full new turn and a bumped version (DEC-030). |
 | STORY-029 | #117 | Randomness and security: `IRandomSource` (Core) reaches the rules in their command and timeout contexts, `SecureRandomSource` in production; seats are drawn in a secure random order at start; tests show forged rolls and player ids are ignored, retries can't reroll, and unauthorized room/turn/ability commands change nothing and draw nothing (DEC-031). |
 | STORY-030 | #119 | Ability contract (Core): `AbilityDefinition`s in a per-game, versioned `AbilityCatalog` validated when built (one handler each, parameters in the handler's ranges); `AbilityEngine` uses an ability by id, checking player, payload, ability, seat target, activation window and the game's conditions before the effect. Handlers see ids and seats only, never characters or traits (DEC-032). |
-| STORY-031 | (this PR) | Shared ability pool (Core): `IAbilityAssignmentStrategy` with `SharedAbilityPoolStrategy`, the only one, fixed in code; `AbilityPool` gives every player, guest or NFT holder, the game's whole catalog whatever their traits, never more than the catalog, and nothing for a game without one. Registered in DI; no API change (DEC-033). |
+| STORY-031 | #121 | Shared ability pool (Core): `IAbilityAssignmentStrategy` with `SharedAbilityPoolStrategy`, the only one, fixed in code; `AbilityPool` gives every player, guest or NFT holder, the game's whole catalog whatever their traits, never more than the catalog, and nothing for a game without one. Registered in DI; no API change (DEC-033). |
+| STORY-032 | (this PR) | Trait-ready boundary (Core): `TraitSet` normalizes traits for matching (trimmed, whitespace collapsed, lower-case, distinct, sorted) and `ITraitAbilityResolver` is the contract for a future trait-based strategy (catalog + traits only, deterministic, whole catalog as fallback). No resolver ships; a test-only strategy swapped in through DI shows the engine, pool and games stay unchanged, and an architecture test keeps traits out of game modules and the engine (DEC-034). |
 
 ## Key architectural decisions
 
@@ -51,6 +52,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Abilities:** MVP uses `SharedAbilityPool` only. The lobby's ability field stays `null` until STORY-033.
   - Contract (DEC-032): `ChogGames.Core.Abilities`. Each game builds an `AbilityCatalog` (game type, version, definitions, one `IAbilityHandler` per ability, an `IAbilityTiming` for its activation windows); `AbilityCatalog.Create` throws on anything inconsistent. `AbilityEngine.Use` takes `{"abilityId", "target"}` (target = seat) and refuses with `not_playing`, `invalid_ability_payload`, `unknown_ability`, `invalid_target`, `ability_not_now` or the handler's own code, before any effect or draw.
   - Pool (DEC-033): `AbilityPool.For(gameType, character)` / `Offers(...)` over `IAbilityAssignmentStrategy`; `SharedAbilityPoolStrategy` (the only one, fixed in code) returns the whole catalog and never reads the character. `AbilityEngine`, the strategy and the pool are DI singletons; a game's abilities arrive by registering its `AbilityCatalog`.
+  - Traits (DEC-034): `TraitSet` (`Core.Nfts`) and `ITraitAbilityResolver` (`Core.Abilities`) are the contract for a future trait-based strategy; nothing implements the resolver. Only a strategy may read a character's traits; `TraitAccessTests` (Architecture.Tests) scans game modules and Core's `Abilities`, `Games`, `Matches` and `Rooms` for trait access.
   - Not wired into `MatchCommandService` yet; no game registers a catalog. Selection, the selected-ability check, usage counting and routing `USE_ABILITY` are STORY-033/034.
 - **Rooms:**
   - Supported games are seeded `GameDefinitions` rows; whether a game is enabled comes from `Games:Items` configuration.
@@ -100,6 +102,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Reconnect tests (`ReconnectTests`) model a browser refresh as a new client with only the session cookie, and drive turn timeouts by calling `TurnTimeoutService` directly.
   - Sync tests (`RoomSyncTests`) use two live hub clients and a fake game with per-player secrets to show convergence, resync and private views.
   - Chance is scripted: `ScriptedRandomSource` (in Core.Tests and Api.Tests) returns queued values, then the highest allowed, which keeps a shuffle's order. `ApiFactory` registers it by default, so seats stay in join order (host first) unless a test scripts otherwise.
+  - Trait boundary tests: `TraitSetTests` (normalization), `TraitResolverBoundaryTests` (a test-only trait strategy over a fake resolver in the unchanged pool) and a DI swap in `AbilityPoolRegistrationTests`; `TraitAccessTests` with sample lines show the source rule reports trait access and ignores comments.
   - Ability tests (`Core.Tests/Abilities`) use `FakeAbilityGame` (a boost and a seat-targeted steal); `AbilityPoolTests` compare guests and NFT holders with different traits, and a fixed fake strategy shows the pool stays inside the catalog; a reflection test shows nothing in the handler-facing contract can reach characters, NFT traits or rooms.
   - Security tests (`MatchSecurityTests`) use a fake dice game: forged rolls and player ids are ignored, retries don't reroll, and every unauthorized command (outsider, other match, not started, not your turn, forfeited, expired, stale, closed; for `ROLL` and `USE_ABILITY`) changes nothing, records nothing, draws nothing and never reaches the rules.
   - Turn tests (`MatchTurnTests`) use a `ManualTimeProvider`, remove `TurnTimeoutWorker` and call `TurnTimeoutService` directly; one test keeps the worker to show it runs by itself.
@@ -156,7 +159,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-032 — Trait-ready metadata boundary** (E05 abilities, STORY-032 to 034).
+1. **STORY-033 — Lobby ability selection and lock** (E05 abilities, STORY-033 and 034).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.

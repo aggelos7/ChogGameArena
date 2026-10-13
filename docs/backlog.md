@@ -481,7 +481,7 @@
 
 #### STORY-032 — Trait-ready metadata boundary
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E05
 - **Implementation:** Define future TraitBased strategy interface and normalized traits; do not implement resolver.
