@@ -5,7 +5,7 @@ import { Router, provideRouter } from '@angular/router';
 import { Subject } from 'rxjs';
 import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { Room, RoomAbility, RoomMember } from '../../rooms/rooms-api';
-import { CATALOGUE } from '../../testing';
+import { CATALOGUE, FORK_BOARD } from '../../testing';
 import { RoomPage } from './room';
 
 /** Stands in for the hub connection: the spec pushes status changes and snapshots. */
@@ -549,6 +549,47 @@ describe('Room page', () => {
       expect(members()).toEqual(['Alice Host Left', 'Bob You']);
       expect(element().querySelector('[data-started]')?.textContent).toBe('The game has started.');
       expect(maybeButton('Leave game')).toBeDefined();
+    });
+
+    it('shows the Chog Life board with every pawn once the game has started, and follows it live', () => {
+      const started: Room = {
+        ...room,
+        status: 'Active',
+        state: FORK_BOARD,
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      };
+      load(started);
+
+      const board = () => element().querySelector('.match [data-board]');
+      expect(board()?.querySelectorAll('[data-tile]').length).toBe(FORK_BOARD.tiles.length);
+      expect(Array.from(board()?.querySelectorAll('[data-tile="0"] [data-pawn]') ?? []).map((p) => p.textContent?.trim())).toEqual(['1', '2']);
+      expect(board()?.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s Alice’s turn.');
+
+      live.events.next({
+        type: 'snapshot',
+        room: {
+          ...started,
+          version: 2,
+          members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+        },
+      });
+      fixture.detectChanges();
+
+      expect(board()?.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s your turn.');
+    });
+
+    it('shows no board while waiting, for another game or for a state it cannot read', () => {
+      load({ ...room, state: FORK_BOARD });
+      expect(element().querySelector('[data-board]')).toBeNull();
+
+      live.events.next({ type: 'snapshot', room: { ...room, version: 2, status: 'Active', gameType: 'chog-race', state: FORK_BOARD } });
+      fixture.detectChanges();
+      expect(element().querySelector('[data-board]')).toBeNull();
+
+      live.events.next({ type: 'snapshot', room: { ...room, version: 3, status: 'Active', state: { tiles: 'nope' } } });
+      fixture.detectChanges();
+      expect(element().querySelector('[data-board]')).toBeNull();
+      expect(element().querySelector('.match')?.textContent).toContain('You’re playing as Mint for this game.');
     });
 
     it('tells a player who left the game that they are out of it', () => {

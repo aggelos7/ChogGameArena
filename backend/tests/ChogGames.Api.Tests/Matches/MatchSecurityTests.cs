@@ -6,6 +6,7 @@ using ChogGames.Core.Matches;
 using ChogGames.Infrastructure.Matches;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ChogGames.Api.Tests.Matches;
 
@@ -54,7 +55,7 @@ public sealed class MatchSecurityTests(MigratedPostgresDatabase database) : ICla
         {
             services.AddSingleton<TimeProvider>(_clock);
             services.AddSingleton<IRandomSource>(_random);
-            services.AddSingleton<IMatchRules>(_rules);
+            services.RemoveAll<IMatchRules>().AddSingleton<IMatchRules>(_rules);
             foreach (var worker in services.Where(d => d.ImplementationType == typeof(TurnTimeoutWorker)).ToList())
             {
                 services.Remove(worker);

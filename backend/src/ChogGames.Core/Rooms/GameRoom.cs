@@ -50,7 +50,10 @@ public sealed class GameRoom
     /// </summary>
     public long Version { get; private set; }
 
-    /// <summary>The game's own match state as a JSON object, owned by its rules; null until their first accepted command.</summary>
+    /// <summary>
+    /// The game's own match state as a JSON object, owned by its rules; null until the start gives one (DEC-038) or,
+    /// failing that, their first accepted command.
+    /// </summary>
     public string? State { get; private set; }
 
     /// <summary>How long each turn of this match lasts, fixed from configuration at the start (DEC-027); null before it.</summary>
@@ -265,6 +268,7 @@ public sealed class GameRoom
     /// <see cref="CheckStart"/> and verified every member's Chog (STORY-018); <paramref name="characters"/> holds a
     /// snapshot for every member. Each member's chosen ability is locked with the snapshot in
     /// <paramref name="abilities"/> (STORY-033, NFT-015, DEC-035); members of a game without abilities have none.
+    /// Once seated, <paramref name="startState"/> gives the game's state at the start, if it has one (STORY-036, DEC-038).
     /// </summary>
     public void Start(
         Guid callerId,
@@ -273,7 +277,8 @@ public sealed class GameRoom
         TimeSpan turnTimeout,
         IRandomSource random,
         DateTimeOffset now,
-        IReadOnlyDictionary<Guid, AbilitySnapshot>? abilities = null)
+        IReadOnlyDictionary<Guid, AbilitySnapshot>? abilities = null,
+        Func<GameRoom, string?>? startState = null)
     {
         abilities ??= new Dictionary<Guid, AbilitySnapshot>();
         if (turnTimeout <= TimeSpan.Zero)
@@ -314,6 +319,7 @@ public sealed class GameRoom
 
         TurnTimeout = turnTimeout;
         BeginTurn(_members.Single(m => m.Seat == 1), now);
+        State = startState?.Invoke(this);
         Version++;
     }
 

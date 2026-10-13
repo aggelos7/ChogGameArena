@@ -8,6 +8,7 @@ using ChogGames.Infrastructure.Matches;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 
 namespace ChogGames.Api.Tests.Matches;
@@ -64,7 +65,7 @@ public sealed class MatchResultTests(MigratedPostgresDatabase database) : IClass
             services =>
             {
                 services.AddSingleton<TimeProvider>(_clock);
-                services.AddSingleton<IMatchRules, FinishingRules>();
+                services.RemoveAll<IMatchRules>().AddSingleton<IMatchRules, FinishingRules>();
                 foreach (var worker in services.Where(d => d.ImplementationType == typeof(TurnTimeoutWorker)).ToList())
                 {
                     services.Remove(worker);

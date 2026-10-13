@@ -19,6 +19,8 @@ import {
   toRoomError,
 } from '../../rooms/rooms-api';
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
+import { LifeBoardView } from '../../games/chog-life/life-board';
+import { toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
@@ -31,12 +33,12 @@ const NFT_COLOR = 'var(--brand)';
  * marking ready; others only see that a choice was made until the start locks it (STORY-033, DEC-035). It follows the room live (STORY-022, STORY-026): the
  * server pushes a versioned snapshot after every change and the page keeps the newest one it has seen, from the push or
  * a request alike, so an older answer never wins. A lost connection keeps retrying (STORY-027); Refresh is offered
- * while live updates are down.
+ * while live updates are down. A started Chog Life game shows its board with every pawn (STORY-036, DEC-038).
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, LoadingState, ErrorState, AvatarBadge],
+  imports: [RouterLink, LoadingState, ErrorState, AvatarBadge, LifeBoardView],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })
@@ -66,6 +68,12 @@ export class RoomPage implements OnInit {
   protected readonly message = roomErrorMessage;
 
   protected readonly you = computed(() => this.room()?.members.find((member) => member.isYou) ?? null);
+
+  /** The Chog Life board in the room's game state, once the game has started; null for other games or no state. */
+  protected readonly lifeBoard = computed(() => {
+    const room = this.room();
+    return room?.gameType === 'chog-life' && room.status === 'Active' ? toLifeBoard(room.state) : null;
+  });
 
   /** The game has abilities: the player has some to choose from, or someone has one. */
   protected readonly hasAbilities = computed(() => {

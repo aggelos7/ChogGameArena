@@ -194,6 +194,9 @@
             } @else {
               <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
             }
+            @if (lifeBoard(); as board) {
+              <app-life-board [board]="board" [members]="current.members" />
+            }
             <div class="leave" data-leave>
               @if (confirmingLeave()) {
                 <p class="warning" role="alert">Leaving forfeits this game, and you can’t come back to it.</p>
