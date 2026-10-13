@@ -579,7 +579,7 @@
 
 #### STORY-039 — Safe vs Degen branch
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Allow choice at designated tile with validated risk and guaranteed alternatives.

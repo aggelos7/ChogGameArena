@@ -16,6 +16,7 @@ public class LifeRulesV1Tests
         Assert.Equal(100, Rules.FinishBonus);
         Assert.Equal(TimeSpan.FromMinutes(20), Rules.TimeCap);
         Assert.Equal(6, Rules.DieFaces);
+        Assert.Equal(LifeLane.Safe, Rules.DefaultLane);
         Assert.Equal((LifeTileType.Start, LifeTileType.Finish), (Rules.Start.Type, Rules.Finish.Type));
     }
 

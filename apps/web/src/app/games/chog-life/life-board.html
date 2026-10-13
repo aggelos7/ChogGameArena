@@ -16,7 +16,13 @@
     }
   </ul>
   <p class="turn-line" role="status" data-turn-line>
-    @if (turnOf(); as current) {
+    @if (chooser(); as current) {
+      @if (current.isYou) {
+        Choose your route.
+      } @else {
+        {{ current.displayName }} is choosing a route…
+      }
+    } @else if (turnOf(); as current) {
       @if (current.isYou) {
         It’s your turn.
       } @else {
@@ -27,7 +33,23 @@
   @if (lastMove(); as move) {
     <p class="last-move" data-last-move>{{ move }}</p>
   }
-  @if (turnOf()?.isYou) {
+  @if (routes().length > 0) {
+    <div class="routes" role="group" aria-label="Choose your route" data-routes>
+      @for (option of routes(); track option.route) {
+        <button
+          type="button"
+          [class]="'route ' + option.name"
+          [disabled]="rolling()"
+          (click)="chooseLane.emit(option.route)"
+          [attr.data-route]="option.route"
+        >
+          <span class="route-name">Take the {{ option.name }} route</span>
+          <span class="route-summary">{{ option.summary }}</span>
+        </button>
+      }
+      <p class="route-hint" data-route-hint>If time runs out, you take the {{ defaultRoute() }} route.</p>
+    </div>
+  } @else if (turnOf()?.isYou && !chooser()) {
     <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
   }
 
@@ -73,6 +95,7 @@
     [attr.data-type]="tile.type"
     [attr.data-lane]="tile.lane"
     [class.last-stop]="isLastStop(tile)"
+    [class.choice]="isChoice(tile)"
   >
     <span class="number" aria-hidden="true">{{ tile.index }}</span>
     <span class="label" aria-hidden="true">{{ label(tile) }}</span>
