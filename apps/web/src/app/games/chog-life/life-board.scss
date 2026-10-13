@@ -38,6 +38,12 @@
   font-weight: 600;
 }
 
+.mon {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
 .tag {
   padding: 0.125rem 0.5rem;
   border-radius: 999px;

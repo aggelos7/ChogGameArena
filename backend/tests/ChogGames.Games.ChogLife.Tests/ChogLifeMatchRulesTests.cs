@@ -8,8 +8,9 @@ using ChogGames.Games.ChogLife.Rules;
 namespace ChogGames.Games.ChogLife.Tests;
 
 /// <summary>
-/// STORY-036, DEC-038: a Chog Life match starts with every pawn on the start tile under the current rules version, and
-/// every player sees that version's board and the pawns of the players still playing. There are no moves yet.
+/// STORY-036 to STORY-038 (DEC-038 to DEC-040): a Chog Life match starts with every pawn on the start tile with the
+/// starting MON under the current rules version, and every player sees that version's board and the pawns, with their
+/// MON, of the players still playing. A roll moves the pawn and resolves the tile it stops on.
 /// </summary>
 public class ChogLifeMatchRulesTests
 {
@@ -148,7 +149,8 @@ public class ChogLifeMatchRulesTests
             startingMon: 100,
             finishBonus: 100,
             timeCap: TimeSpan.FromMinutes(20),
-            dieFaces: 6);
+            dieFaces: 6,
+            events: LifeRulesV1.Rules.Events.Values);
         var both = new ChogLifeMatchRules([LifeRulesV1.Rules, version2]);
 
         var view = View(room, players[0].Id, both);
@@ -198,6 +200,12 @@ public class ChogLifeMatchRulesTests
             room, player.Id, ChogLifeMatchRules.Roll, payload ?? NoPayload, document?.RootElement.Clone(), dice));
         return decision;
     }
+
+    private static int[] Mon(JsonElement state) =>
+        state.GetProperty("pawns").EnumerateArray().Select(pawn => pawn.GetProperty("mon").GetInt32()).ToArray();
+
+    private static string StateWithMon(params (int Seat, int Tile, int Mon)[] pawns) =>
+        JsonSerializer.Serialize(new { rulesVersion = 1, pawns = pawns.Select(p => new { seat = p.Seat, tile = p.Tile, mon = p.Mon }) });
 
     private static string StateWith(params (int Seat, int Tile)[] pawns) =>
         JsonSerializer.Serialize(new { rulesVersion = 1, pawns = pawns.Select(p => new { seat = p.Seat, tile = p.Tile }) });
@@ -267,9 +275,10 @@ public class ChogLifeMatchRulesTests
         // A match started before STORY-036 has no state; its first roll sets every pawn out from the start.
         var (room, players) = Started(2);
 
-        var decision = Roll(room, players[0], null, new Dice(3));
+        var decision = Roll(room, players[0], null, new Dice(3, 0));
 
         Assert.Equal([(1, 3), (2, 0)], Pawns(decision.State!.Value));
+        Assert.Equal([110, 100], Mon(decision.State.Value));
     }
 
     [Theory]
@@ -299,7 +308,7 @@ public class ChogLifeMatchRulesTests
             .Select(p => Rules.ViewFor(new MatchViewContext(room, p.Id, state.RootElement))!.Value.GetProperty("lastMove").GetRawText())
             .Distinct();
 
-        Assert.Equal(["""{"seat":1,"roll":5,"from":0,"to":5,"path":[1,2,3,4,5]}"""], moves);
+        Assert.Equal(["""{"seat":1,"roll":5,"from":0,"to":5,"path":[1,2,3,4,5],"change":-15}"""], moves);
     }
 
     [Fact]
@@ -322,5 +331,120 @@ public class ChogLifeMatchRulesTests
     {
         Assert.Throws<ArgumentException>(() => new ChogLifeMatchRules([]));
         Assert.Equal(GameDefinition.ChogLife, Rules.GameType);
+    }
+
+    [Fact]
+    public void Every_player_starts_with_the_starting_mon_and_everyone_sees_it()
+    {
+        var (room, players) = Started(3);
+
+        using var state = JsonDocument.Parse(room.State!);
+        Assert.Equal([100, 100, 100], Mon(state.RootElement));
+        Assert.All(players, p => Assert.Equal([100, 100, 100], Mon(View(room, p.Id))));
+    }
+
+    [Fact]
+    public void Stopping_on_a_reward_tile_pays_its_amount_without_another_draw()
+    {
+        var (room, players) = Started(2);
+        var dice = new Dice(2);
+
+        var decision = Roll(room, players[0], room.State, dice);
+
+        Assert.Equal([(1, 7)], dice.Draws);
+        Assert.Equal([120, 100], Mon(decision.State!.Value));
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2],"change":20}""", LastMove(decision).GetRawText());
+    }
+
+    [Fact]
+    public void Only_the_tile_where_the_pawn_stops_resolves()
+    {
+        // Rolling 4 passes the +20 reward and the airdrop and stops on a normal tile.
+        var (room, players) = Started(2);
+        var dice = new Dice(4);
+
+        var decision = Roll(room, players[0], room.State, dice);
+
+        Assert.Equal([(1, 7)], dice.Draws);
+        Assert.Equal([100, 100], Mon(decision.State!.Value));
+        Assert.False(LastMove(decision).TryGetProperty("change", out _));
+    }
+
+    [Fact]
+    public void An_event_draws_its_outcome_after_the_die()
+    {
+        var (room, players) = Started(2);
+        var dice = new Dice(3, 95);
+
+        var decision = Roll(room, players[1], room.State, dice);
+
+        Assert.Equal([(1, 7), (0, 100)], dice.Draws);
+        Assert.Equal([100, 150], Mon(decision.State!.Value));
+        Assert.Equal(50, LastMove(decision).GetProperty("change").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(100, 60, -40)]
+    [InlineData(5, 3, -2)]
+    [InlineData(0, 0, 0)]
+    public void A_rug_takes_its_share_and_a_balance_never_goes_below_zero(int before, int after, int change)
+    {
+        var (room, players) = Started(2);
+
+        var decision = Roll(room, players[0], StateWithMon((1, 21, before), (2, 0, 70)), new Dice(3));
+
+        Assert.Equal([(1, 24), (2, 0)], Pawns(decision.State!.Value));
+        Assert.Equal([after, 70], Mon(decision.State.Value));
+        Assert.Equal(change, LastMove(decision).GetProperty("change").GetInt32());
+    }
+
+    [Fact]
+    public void A_loss_bigger_than_the_balance_stops_at_zero()
+    {
+        var (room, players) = Started(2);
+
+        var decision = Roll(room, players[0], StateWithMon((1, 0, 9), (2, 0, 100)), new Dice(5));
+
+        Assert.Equal([0, 100], Mon(decision.State!.Value));
+        Assert.Equal(-9, LastMove(decision).GetProperty("change").GetInt32());
+    }
+
+    [Fact]
+    public void Pawns_from_before_mon_was_tracked_hold_the_starting_mon()
+    {
+        var (room, players) = Started(2);
+        var old = StateWith((1, 0), (2, 4));
+        using var document = JsonDocument.Parse(old);
+
+        var view = Rules.ViewFor(new MatchViewContext(room, players[0].Id, document.RootElement))!.Value;
+        var decision = Roll(room, players[0], old, new Dice(5));
+
+        Assert.Equal([100, 100], Mon(view));
+        Assert.Equal([85, 100], Mon(decision.State!.Value));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(LifeRules.MaxMon + 1)]
+    public void A_roll_with_an_invalid_balance_is_rejected_without_a_draw(int mon)
+    {
+        var (room, players) = Started(2);
+        var dice = new Dice();
+
+        var decision = Roll(room, players[0], StateWithMon((1, 0, mon), (2, 0, 100)), dice);
+
+        Assert.Equal((MatchRuleOutcome.Rejected, "game_state_unavailable"), (decision.Outcome, decision.Reason));
+        Assert.Empty(dice.Draws);
+    }
+
+    [Fact]
+    public void A_pass_at_the_finish_changes_no_mon()
+    {
+        var (room, players) = Started(2);
+
+        var decision = Roll(room, players[0], StateWithMon((1, 35, 140), (2, 0, 100)), new Dice());
+
+        Assert.Equal([140, 100], Mon(decision.State!.Value));
+        Assert.False(LastMove(decision).TryGetProperty("change", out _));
     }
 }

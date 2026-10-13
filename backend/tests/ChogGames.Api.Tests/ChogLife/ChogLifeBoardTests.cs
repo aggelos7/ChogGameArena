@@ -133,7 +133,7 @@ public sealed class ChogLifeBoardTests(MigratedPostgresDatabase database) : ICla
 
             // Stored as jsonb, which orders keys by length.
             Assert.Equal(
-                """{"pawns":[""" + string.Join(",", Enumerable.Range(1, count).Select(s => $$"""{"seat":{{s}},"tile":0}""")) + """],"rulesVersion":1}""",
+                """{"pawns":[""" + string.Join(",", Enumerable.Range(1, count).Select(s => $$"""{"mon":100,"seat":{{s}},"tile":0}""")) + """],"rulesVersion":1}""",
                 (await StoredAsync(room)).State);
             foreach (var player in players)
             {

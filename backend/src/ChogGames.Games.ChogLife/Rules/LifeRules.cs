@@ -1,10 +1,11 @@
 using ChogGames.Core.Games;
+using ChogGames.Core.Matches;
 
 namespace ChogGames.Games.ChogLife.Rules;
 
 /// <summary>
-/// A version of the Chog Life rules: the board, the starting MON, the first-finish bonus, the match's time cap and the
-/// die (STORY-035, LIFE-001, LIFE-002, LIFE-007, ENG-011, DEC-037). Like an ability catalog (DEC-032) it is versioned
+/// A version of the Chog Life rules: the board, the starting MON, the first-finish bonus, the match's time cap, the
+/// die (STORY-035, LIFE-001, LIFE-002, LIFE-007, ENG-011, DEC-037) and what each event does (STORY-038, DEC-040). Like an ability catalog (DEC-032) it is versioned
 /// code in the game module, checked when it is built, so a malformed board stops the API at startup instead of
 /// failing during a match. MON are fictional whole-number game points (DEC-010); nothing here touches a wallet or
 /// the chain.
@@ -23,10 +24,20 @@ public sealed class LifeRules
     public const int MinDieFaces = 2;
     public const int MaxDieFaces = 12;
 
+    /// <summary>The most liquid MON a player can hold; gains above it are lost, so a balance never overflows.</summary>
+    public const int MaxMon = 1_000_000;
+
     /// <summary>The hard limit on any match's duration (ENG-011).</summary>
     public static readonly TimeSpan MaxTimeCap = TimeSpan.FromMinutes(20);
 
-    private LifeRules(int version, IReadOnlyList<LifeTile> tiles, int startingMon, int finishBonus, TimeSpan timeCap, int dieFaces)
+    private LifeRules(
+        int version,
+        IReadOnlyList<LifeTile> tiles,
+        int startingMon,
+        int finishBonus,
+        TimeSpan timeCap,
+        int dieFaces,
+        IReadOnlyDictionary<LifeEventKind, LifeEvent> events)
     {
         Version = version;
         Tiles = tiles;
@@ -34,6 +45,7 @@ public sealed class LifeRules
         FinishBonus = finishBonus;
         TimeCap = timeCap;
         DieFaces = dieFaces;
+        Events = events;
     }
 
     /// <summary>The game these rules are for.</summary>
@@ -61,11 +73,16 @@ public sealed class LifeRules
     /// <summary>A roll is one die from 1 to this many faces.</summary>
     public int DieFaces { get; }
 
+    /// <summary>What an event tile of each kind does; every kind on the board has one.</summary>
+    public IReadOnlyDictionary<LifeEventKind, LifeEvent> Events { get; }
+
     /// <summary>
     /// Rules with these values, or <see cref="ArgumentException"/> naming the first problem: the board must have
     /// <see cref="MinTiles"/> to <see cref="MaxTiles"/> tiles indexed in order, from one start to one finish, every
     /// link pointing forward to an existing tile, every tile reachable, each fork's safe and degen lanes joining the
-    /// main track again at the same tile, and every amount and event kind on the tiles that use one.
+    /// main track again at the same tile, and every amount and event kind on the tiles that use one. Each event kind is
+    /// defined once, every kind on the board is defined, and each event's outcomes have chances of 1–100% adding up to
+    /// 100% and move some MON within range.
     /// </summary>
     public static LifeRules Create(
         int version,
@@ -73,7 +90,8 @@ public sealed class LifeRules
         int startingMon,
         int finishBonus,
         TimeSpan timeCap,
-        int dieFaces)
+        int dieFaces,
+        IEnumerable<LifeEvent> events)
     {
         if (version < 1)
         {
@@ -103,7 +121,9 @@ public sealed class LifeRules
         ArgumentNullException.ThrowIfNull(tiles);
         var board = tiles.ToArray();
         CheckBoard(board);
-        return new LifeRules(version, board, startingMon, finishBonus, timeCap, dieFaces);
+        ArgumentNullException.ThrowIfNull(events);
+        var byKind = CheckEvents(board, events.ToArray());
+        return new LifeRules(version, board, startingMon, finishBonus, timeCap, dieFaces, byKind);
     }
 
     /// <summary>
@@ -137,6 +157,94 @@ public sealed class LifeRules
         }
 
         return path;
+    }
+
+    /// <summary>
+    /// What landing on <paramref name="tile"/> does to a player holding <paramref name="liquid"/> MON (STORY-038,
+    /// DEC-040): the signed MON it moves, or null for a tile that does nothing. Reward and Loss tiles move their amount;
+    /// an event tile draws one of its outcomes from <paramref name="random"/>. Liquid MON stays between 0 and
+    /// <see cref="MaxMon"/>, and the change says what really moved.
+    /// </summary>
+    public int? Resolve(int tile, int liquid, IRandomSource random)
+    {
+        ArgumentNullException.ThrowIfNull(random);
+        if (liquid is < 0 or > MaxMon)
+        {
+            throw new ArgumentOutOfRangeException(nameof(liquid), liquid, $"Liquid MON is 0 to {MaxMon}.");
+        }
+
+        var landed = Tiles[tile];
+        int? change = landed.Type switch
+        {
+            LifeTileType.Reward => landed.Amount,
+            LifeTileType.Loss => -landed.Amount,
+            LifeTileType.Event => Events[landed.Event!.Value].Draw(random).Change(liquid),
+            _ => null,
+        };
+        if (change is not { } wanted)
+        {
+            return null;
+        }
+
+        return (int)Math.Clamp((long)liquid + wanted, 0, MaxMon) - liquid;
+    }
+
+    private static Dictionary<LifeEventKind, LifeEvent> CheckEvents(LifeTile[] board, LifeEvent[] events)
+    {
+        var byKind = new Dictionary<LifeEventKind, LifeEvent>();
+        foreach (var definition in events)
+        {
+            if (definition is null || !Enum.IsDefined(definition.Kind))
+            {
+                throw InvalidEvent("An event is missing or of an unknown kind.");
+            }
+
+            if (!byKind.TryAdd(definition.Kind, definition))
+            {
+                throw InvalidEvent($"The {definition.Kind} event is defined twice.");
+            }
+
+            CheckOutcomes(definition);
+        }
+
+        if (board.FirstOrDefault(tile => tile.Event is { } kind && !byKind.ContainsKey(kind)) is { } undefined)
+        {
+            throw InvalidEvent($"Tile {undefined.Index} is a {undefined.Event} event, which isn't defined.");
+        }
+
+        return byKind;
+    }
+
+    private static void CheckOutcomes(LifeEvent definition)
+    {
+        var kind = definition.Kind;
+        if (definition.Outcomes is not { Count: > 0 } outcomes || outcomes.Contains(null!))
+        {
+            throw InvalidEvent($"The {kind} event needs its outcomes.");
+        }
+
+        foreach (var outcome in outcomes)
+        {
+            if (outcome.Chance is < 1 or > 100 || !Enum.IsDefined(outcome.Effect))
+            {
+                throw InvalidEvent($"Each {kind} outcome needs a chance of 1 to 100% and a known effect.");
+            }
+
+            if (outcome.Amount is < 0 or > MaxTileAmount || outcome.Minimum is < 0 or > MaxTileAmount || outcome.Percent is < 0 or > 100)
+            {
+                throw InvalidEvent($"Each {kind} outcome moves 0 to {MaxTileAmount} MON plus 0 to 100% of liquid MON, with a minimum of 0 to {MaxTileAmount}.");
+            }
+
+            if (outcome is { Amount: 0, Percent: 0, Minimum: 0 })
+            {
+                throw InvalidEvent($"Each {kind} outcome must move some MON.");
+            }
+        }
+
+        if (outcomes.Sum(outcome => outcome.Chance) != 100)
+        {
+            throw InvalidEvent($"The chances of the {kind} event's outcomes must add up to 100%.");
+        }
     }
 
     private static void CheckBoard(LifeTile[] board)
@@ -283,4 +391,6 @@ public sealed class LifeRules
     }
 
     private static ArgumentException Invalid(string message) => new(message, "tiles");
+
+    private static ArgumentException InvalidEvent(string message) => new(message, "events");
 }
