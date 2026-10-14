@@ -1,0 +1,127 @@
+:host {
+  --loss: #8a1c1c;
+  --winner: #116329;
+
+  display: block;
+}
+
+.winner-line {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--winner);
+}
+
+.standings {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+// Place and avatar on the left, name with the final portfolio on the right, then the summary and the statistics.
+.standings li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.5rem;
+  row-gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.standings li.winner {
+  border-color: var(--winner);
+  box-shadow: 0 0 0 1px var(--winner);
+}
+
+.standings li.you {
+  background: var(--surface-muted);
+}
+
+.place {
+  min-width: 2.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.tag {
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: var(--surface-muted);
+}
+
+.portfolio {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.portfolio.negative {
+  color: var(--loss);
+}
+
+.summary {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+// Two columns on a 375px phone, more as the screen allows.
+.stats {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.375rem;
+  margin: 0;
+
+  div {
+    padding: 0.375rem 0.5rem;
+    border-radius: 0.5rem;
+    background: var(--surface-muted);
+  }
+
+  dt {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  dd {
+    margin: 0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .degen {
+    border: 1px solid var(--brand);
+  }
+}
+
+.out-of,
+.detail {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.hint {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}

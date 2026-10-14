@@ -224,6 +224,9 @@
           </section>
         }
       } @else if (current.status === 'Completed' && lifeBoard(); as board) {
+        @if (hasLifeResults()) {
+          <app-life-results [members]="current.members" />
+        }
         <section class="match" aria-labelledby="final-heading" data-final-board>
           <h2 id="final-heading">Final board</h2>
           <app-life-board [board]="board" [members]="current.members" />

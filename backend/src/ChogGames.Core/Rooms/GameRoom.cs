@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Games;
 using ChogGames.Core.Matches;
@@ -579,7 +580,7 @@ public sealed class GameRoom
         MoveTo(RoomStatus.Completed, now);
         foreach (var standing in standings)
         {
-            _members.Single(m => m.PlayerId == standing.PlayerId).RankAs(standing.Rank);
+            _members.Single(m => m.PlayerId == standing.PlayerId).RankAs(standing.Rank, standing.Result?.GetRawText());
         }
 
         // Those who left rank after everyone still playing; players who left at the same moment share a place.
@@ -605,6 +606,11 @@ public sealed class GameRoom
         if (standings.Any(s => s.Rank != 1 + standings.Count(other => other.Rank < s.Rank)))
         {
             throw new InvalidOperationException("The standings must use competition ranks from 1.");
+        }
+
+        if (standings.Any(s => s.Result is { ValueKind: not JsonValueKind.Object }))
+        {
+            throw new InvalidOperationException("A player's result must be a JSON object.");
         }
     }
 
@@ -751,6 +757,12 @@ public sealed class RoomMember
     /// </summary>
     public int? Rank { get; private set; }
 
+    /// <summary>
+    /// The game's record of how the member did in the completed match (STORY-043, DEC-046), a JSON object stored once with
+    /// their <see cref="Rank"/>; null for players who left, games that record none and every other status.
+    /// </summary>
+    public string? Result { get; private set; }
+
     /// <summary>Ranked first in a completed match; tied winners all win.</summary>
     public bool Won => Rank == 1;
 
@@ -822,7 +834,11 @@ public sealed class RoomMember
 
     internal void Act() => MissedTurns = 0;
 
-    internal void RankAs(int rank) => Rank = rank;
+    internal void RankAs(int rank, string? result = null)
+    {
+        Rank = rank;
+        Result = result;
+    }
 }
 
 /// <summary>Room and match lifecycle (ENG-010, DEC-025); <see cref="RoomLifecycle"/> lists the allowed transitions.</summary>

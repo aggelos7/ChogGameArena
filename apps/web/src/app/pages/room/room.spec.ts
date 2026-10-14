@@ -5,7 +5,7 @@ import { Router, provideRouter } from '@angular/router';
 import { Subject } from 'rxjs';
 import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { Room, RoomAbility, RoomMember } from '../../rooms/rooms-api';
-import { CATALOGUE, FORK_BOARD, lifePawn } from '../../testing';
+import { CATALOGUE, FORK_BOARD, lifePawn, lifeResult } from '../../testing';
 import { RoomPage } from './room';
 
 /** Stands in for the hub connection: the spec pushes status changes and snapshots. */
@@ -33,6 +33,7 @@ describe('Room page', () => {
       hasLeft: false,
       isTurn: false,
       rank: null,
+      result: null,
       seat: null,
       ...overrides,
     };
@@ -776,6 +777,36 @@ describe('Room page', () => {
       expect(final?.querySelector('[data-clock]')).toBeNull();
       expect(final?.querySelector('[data-roll]')).toBeNull();
       expect(maybeButton('Leave game')).toBeUndefined();
+    });
+
+    it('shows the results the server stored above the final board once the game is over', () => {
+      load({
+        ...room,
+        status: 'Completed',
+        state: { ...FORK_BOARD, pawns: [lifePawn(1, 9, 150, { bonuses: 100, place: 1 }), lifePawn(2, 6, 120)], ended: 'Finish' },
+        members: [
+          member('Alice', { isHost: true, seat: 1, rank: 1, result: lifeResult(250, { place: 1, degenScore: 80 }) }),
+          member('Bob', { isYou: true, seat: 2, rank: 2, result: lifeResult(120) }),
+        ],
+      });
+
+      const results = element().querySelector('[data-results]');
+      expect(results?.querySelector('[data-winner]')?.textContent).toBe('Alice wins with 250 MON!');
+      expect(Array.from(results?.querySelectorAll('[data-stat="degen-score"]') ?? []).map((s) => s.textContent)).toEqual(['80/100', '0/100']);
+      const final = element().querySelector('[data-final-board]');
+      expect(final && results?.compareDocumentPosition(final)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+
+    it('shows no results for a completed game that has none', () => {
+      load({
+        ...room,
+        status: 'Completed',
+        state: { ...FORK_BOARD, ended: 'TimeUp' },
+        members: [member('Alice', { isHost: true, seat: 1, rank: 1 }), member('Bob', { isYou: true, seat: 2, rank: 1 })],
+      });
+
+      expect(element().querySelector('[data-results]')).toBeNull();
+      expect(element().querySelector('[data-final-board]')).not.toBeNull();
     });
 
     it('shows no board while waiting, for another game or for a state it cannot read', () => {

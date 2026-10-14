@@ -33,6 +33,7 @@ describe('Game lobby page', () => {
         hasLeft: false,
         isTurn: false,
         rank: null,
+        result: null,
         seat: null,
       },
     ],

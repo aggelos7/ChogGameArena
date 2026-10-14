@@ -129,7 +129,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         && (pawn.Stake is null || (pawn.Stake.Amount > 0 && rules.Stakes.ContainsKey(pawn.Stake.Lane)))
         && (pawn.Armed is null || (pawn.Armed.IsValid()
             && (pawn.Armed.Ability != LifeAbilities.EventPreview || (rules.Tiles[pawn.Tile].Type == LifeTileType.Branch && pawn.Lane is null))))
-        && (pawn.Preview is null || IsPreviewValid(pawn, pawn.Preview, rules));
+        && (pawn.Preview is null || IsPreviewValid(pawn, pawn.Preview, rules))
+        && (pawn.Stats is null || pawn.Stats.IsValid());
 
     private static MatchRuleDecision RollFor(
         LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, IRandomSource random, GameRoom match)
@@ -223,7 +224,12 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         }
 
         var atFork = rules.Tiles[move.To].Type == LifeTileType.Branch;
-        var moved = pawn with { Tile = move.To, Lane = null, Stake = stake, Armed = armed, Preview = null };
+        var gained = portfolio.Total - PortfolioOf(pawn).Total;
+        var moved = pawn with
+        {
+            Tile = move.To, Lane = null, Stake = stake, Armed = armed, Preview = null,
+            Stats = Tallied(pawn.Stats, move, gained, rules),
+        };
         return state with
         {
             Pawns = Replace(state, Holding(moved, portfolio)),
@@ -261,21 +267,27 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// <summary>
     /// A rank for every player still playing (LIFE-007, DEC-043): the highest total portfolio first; on a tie, whoever
     /// reached the Finish first, any finished player before those still on the board; then whoever has fewer tiles left
-    /// to the Finish. Players still level share the rank (1, 1, 3).
+    /// to the Finish. Players still level share the rank (1, 1, 3). Each comes with the player's result (STORY-043,
+    /// DEC-046), which the engine stores with the rank.
     /// </summary>
     private static IReadOnlyList<MatchStanding> Standings(LifeMatchState state, LifeRules rules, GameRoom match)
     {
         var finished = state.Finished ?? [];
         var pawns = WithMon(state, rules).Pawns.ToDictionary(pawn => pawn.Seat);
         var scored = PlayerSeats(match)
-            .Select(player => (player.PlayerId, Score: pawns.TryGetValue(player.Seat, out var pawn)
+            .Select(player => (player.PlayerId, player.Seat, Score: pawns.TryGetValue(player.Seat, out var pawn)
                 ? (Total: PortfolioOf(pawn).Total,
                     Place: PlaceOf(finished, pawn.Seat) ?? int.MaxValue,
                     Left: rules.StepsToFinish(pawn.Tile))
                 : (Total: int.MinValue, Place: int.MaxValue, Left: int.MaxValue)))
             .ToArray();
         return scored
-            .Select(player => new MatchStanding(player.PlayerId, 1 + scored.Count(other => Beats(other.Score, player.Score))))
+            .Select(player => new MatchStanding(
+                player.PlayerId,
+                1 + scored.Count(other => Beats(other.Score, player.Score)),
+                pawns.TryGetValue(player.Seat, out var pawn)
+                    ? JsonSerializer.SerializeToElement(ResultOf(pawn, PlaceOf(finished, pawn.Seat), rules), Json)
+                    : null))
             .ToArray();
     }
 
@@ -562,7 +574,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// A seat's pawn: the tile it stands on, the player's liquid MON (null in states from before STORY-038), on a fork
     /// the lane it will leave by (null until chosen), the MON staked on the lane it took until that pays out, and the
     /// player's bonuses and liabilities (null for none), the ability its player armed until it acts and, on a fork after
-    /// an Event Preview, the draws its next roll will use (STORY-042, DEC-044), which only its player may see.
+    /// an Event Preview, the draws its next roll will use (STORY-042, DEC-044), which only its player may see, and its
+    /// player's statistics so far (STORY-043, DEC-046), which only the results show.
     /// </summary>
     private sealed record LifePawn(
         int Seat,
@@ -573,7 +586,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         int? Bonuses = null,
         int? Liabilities = null,
         LifeArmed? Armed = null,
-        IReadOnlyList<int>? Preview = null);
+        IReadOnlyList<int>? Preview = null,
+        LifeStats? Stats = null);
 
     /// <summary>
     /// A pawn as every player sees it, with its player's portfolio: <c>mon</c> is the liquid MON. <c>place</c> is the

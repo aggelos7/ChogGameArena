@@ -128,6 +128,12 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
                 "CK_RoomMembers_Rank",
                 $"\"Rank\" IS NULL OR (\"Rank\" BETWEEN 1 AND {GameDefinition.MaxRoomPlayers} AND \"Seat\" IS NOT NULL)");
 
+            // A result is a JSON object the game recorded for a player still playing when the match was completed, with
+            // their rank (STORY-043, DEC-046).
+            table.HasCheckConstraint(
+                "CK_RoomMembers_Result",
+                "\"Result\" IS NULL OR (jsonb_typeof(\"Result\") = 'object' AND \"Rank\" IS NOT NULL AND \"LeftAt\" IS NULL)");
+
             // A chosen ability is an ability id; a locked one is a JSON object of the chosen ability, taken at the
             // start with the character (DEC-035).
             table.HasCheckConstraint("CK_RoomMembers_AbilityId", "\"AbilityId\" IS NULL OR \"AbilityId\" ~ '^[a-z][a-z0-9_]{0,31}$'");
@@ -152,6 +158,7 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
         builder.Property(m => m.Ability)
             .HasColumnType("jsonb")
             .HasConversion(AbilitySnapshotConversion.Converter, AbilitySnapshotConversion.Comparer);
+        builder.Property(m => m.Result).HasColumnType("jsonb");
         builder.HasIndex(m => m.PlayerId);
         builder.HasIndex(m => new { m.RoomId, m.Seat }).IsUnique().HasFilter("\"Seat\" IS NOT NULL");
         builder.HasOne<Player>().WithMany().HasForeignKey(m => m.PlayerId).OnDelete(DeleteBehavior.Restrict);

@@ -575,6 +575,37 @@ public class GameRoomTests
     }
 
     [Fact]
+    public void A_completed_match_stores_each_players_result_with_their_rank()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var carol = Guest();
+        var room = Started(host, bob, carol);
+        room.Leave(carol.Id, Now.AddMinutes(1));
+        var result = JsonSerializer.SerializeToElement(new { portfolio = 250 });
+
+        room.Complete([new MatchStanding(host.Id, 1, result), new MatchStanding(bob.Id, 2)], Now.AddMinutes(15));
+
+        Assert.Equal(
+            ["""{"portfolio":250}""", null, null],
+            new[] { host, bob, carol }.Select(p => room.Members.Single(m => m.PlayerId == p.Id).Result));
+    }
+
+    [Fact]
+    public void A_result_that_is_not_a_json_object_is_refused_and_nothing_changes()
+    {
+        var host = Guest();
+        var bob = Guest();
+        var room = Started(host, bob);
+        var notAnObject = JsonSerializer.SerializeToElement(new[] { 1 });
+
+        Assert.Throws<InvalidOperationException>(() =>
+            room.Complete([new MatchStanding(host.Id, 1, notAnObject), new MatchStanding(bob.Id, 2)], Now));
+        Assert.Equal(RoomStatus.Active, room.Status);
+        Assert.All(room.Members, m => Assert.Null(m.Result));
+    }
+
+    [Fact]
     public void Only_a_started_match_can_be_completed()
     {
         var room = RoomOf(Guest(), Guest());
