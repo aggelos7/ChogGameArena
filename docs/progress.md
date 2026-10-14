@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-14 (STORY-042).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-14 (STORY-065).
 
 ## Stories done
 
@@ -49,7 +49,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-039 | #138 | Chog Life Safe vs Degen: a `ROLL` that stops on a branch keeps the turn (`choosing` = seat); `CHOOSE_LANE {lane: Safe|Degen}` stores the pawn's `lane` and ends the turn, and the next roll leaves by it (`LifeRules.Path(from, steps, lane)`). Refusals: `invalid_lane`, `choose_lane_first`, `no_choice_pending`. A timeout while choosing takes `LifeRules.DefaultLane` (Safe in v1; `lastMove.byDefault`) and counts a miss. Web: two route buttons with lane summaries, the fork's lanes highlighted, "X is choosing a route…", and the route in the last-move line. No config or migration change (DEC-041). |
 | STORY-040 | #140 | Chog Life portfolio: `LifePortfolio` (liquid, assets, bonuses, liabilities; `Total`; `Settle` repays liabilities first and turns uncovered losses into liabilities, capped at `MaxMon`). Choosing a lane stakes `LifeRules.ForkStake` (50 in v1, or all the liquid MON if less) as the pawn's `stake`, which pays out on the first roll back onto the main track with `LifeRules.Payout` (`Stakes`: Safe 125%; Degen 300% at 30% / 20% at 70%). The view sends every pawn's parts and total plus `forkStake`/`stakeReturns`; `lastMove` gains `staked` and `matured`. Web: the legend shows the total and "Liquid · Assets · Bonus · Debt", the route buttons show what a stake returns, and the last-move line says what was staked and paid back. No config or migration change (DEC-042). |
 | STORY-041 | #142 | Finish and time cap: engine-level `IMatchRules.TimeLimit` (≤ 20 min) fixes `GameRooms.MatchEndsAt` at start (never extended); commands after it are `409 time_up`; `MatchRuleDecision.Finished` marks a player finished (`RoomMembers.FinishedAt`), and turns skip them; `TurnTimeoutService` ends a match whose time is up or whose players have all finished with `IMatchRules.EndMatch` and records results once. Chog Life: arrival gives `place`, the first gets `finishBonus` (100) in bonuses; the match ends when all still playing finished or at the cap (pending choice dropped, stakes at value), ranked by portfolio → finish order → tiles left → shared. Web: countdown, "Finished 1st" tags, arrival text, final board after completion. Migration `AddMatchTimeLimit` (DEC-043, closes DEC-002). |
-| STORY-042 | (this PR) | Chog Life abilities (DEC-044): catalog v1 in `Games.ChogLife/Abilities/LifeAbilities.cs` (`reward_boost`, `loss_protection`, `event_preview`, `event_reroll`; windows `before_roll`/`at_fork`), registered by `AddChogLife()` (`AddChogLifeAbilities()`). Boost, Protection and Reroll are armed before a roll and act on the first tile outcome they fit (`lastMove.boost`/`saved`/`rerolled`); Event Preview is armed at a fork; choosing a lane draws the next move there, shown only to its player (`state.preview`, the event outcome as its rule, never the stake), then they keep it (replayed exactly) or switch blind (`confirming`, `lastMove.switched`). Lucky Reroll's line shows both outcomes. Web: "Use <ability>" on the board, "armed" legend tag, keep/switch buttons. |
+| STORY-042 | #144 | Chog Life abilities (DEC-044): catalog v1 in `Games.ChogLife/Abilities/LifeAbilities.cs` (`reward_boost`, `loss_protection`, `event_preview`, `event_reroll`; windows `before_roll`/`at_fork`), registered by `AddChogLife()` (`AddChogLifeAbilities()`). Boost, Protection and Reroll are armed before a roll and act on the first tile outcome they fit (`lastMove.boost`/`saved`/`rerolled`); Event Preview is armed at a fork; choosing a lane draws the next move there, shown only to its player (`state.preview`, the event outcome as its rule, never the stake), then they keep it (replayed exactly) or switch blind (`confirming`, `lastMove.switched`). Lucky Reroll's line shows both outcomes. Web: "Use <ability>" on the board, "armed" legend tag, keep/switch buttons. |
+| STORY-065 | (this PR) | Web dev server on port 4201 (`apps/web/project.json` serve `port`), so it no longer clashes with other local projects on 4200; the development wallet sign-in domain is `localhost:4201`. |
 
 ## Key architectural decisions
 
@@ -141,7 +142,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - 3 live-chain tests are skipped unless explicitly enabled.
 - **Web:** Vitest with `HttpTestingController`; specs drive the page through its rendered DOM.
 - **Workspace:** `npm run test:workspace` (node:test) covers the skeleton, Compose config and the secret scan. `npm run deps:verify` is the Compose smoke test.
-- **Before each PR:** a Release build with 0 warnings, all suites, web lint/test/build, and a live smoke test through the dev proxy (`:4200`) with curl and cookie jars.
+- **Before each PR:** a Release build with 0 warnings, all suites, web lint/test/build, and a live smoke test through the dev proxy (`:4201`) with curl and cookie jars.
 
 ## Conventions
 
@@ -152,7 +153,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - The product owner merges and then says "proceed".
 - **Decisions:** open product questions are asked before coding, each with a recommended option. The answers become a `DEC-0xx` entry in `docs/decisions.md`.
 - **Story status:** a story is set to `Done` in the backlog only when its acceptance criteria are verified. README sections are updated for API, config and migration changes.
-- **New stories:** appended with the next free number (latest: STORY-064), placed in their epic, with a GitHub issue using the same body format, labelled `story`, `epic:E0x`, `priority:Px` and given the epic milestone.
+- **New stories:** appended with the next free number (latest: STORY-065), placed in their epic, with a GitHub issue using the same body format, labelled `story`, `epic:E0x`, `priority:Px` and given the epic milestone.
 - **Code:** problem-details errors with `code`; endpoint groups use `.RequireAuthorization().RequireRateLimiting(...)`; options are validated with `ValidateOnStart`; results are records with an outcome enum; doc comments cite requirement, story and decision ids.
 
 ## Known issues and tech debt
@@ -198,5 +199,5 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 1. **STORY-043 — Life result and statistics** (E06 Chog Life): ranking, starting/final portfolio, rugs, liquidations, degen score and winner (LIFE-010); server results must match the UI and the match record must survive a reload. Ask the product questions first (which statistics, how the degen score is computed, where they're stored).
 
 Dev environment notes:
-- Start everything with `NX_DAEMON=false npm run start:all`: web on `:4200`, proxying `/api` to the API on `:5248`.
+- Start everything with `NX_DAEMON=false npm run start:all`: web on `:4201`, proxying `/api` to the API on `:5248`.
 - After changing the API, restart it; it doesn't hot-reload.
