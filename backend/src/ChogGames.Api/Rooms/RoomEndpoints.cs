@@ -72,6 +72,10 @@ public static class RoomEndpoints
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>
     /// <param name="TurnNumber">The turn being played, from 1; 0 before the start (DEC-027).</param>
     /// <param name="TurnEndsAt">When the current turn runs out; null unless the match is active.</param>
+    /// <param name="TurnSeconds">
+    /// How long each turn of this match lasts, in seconds, fixed at its start (DEC-027, DEC-045), so clients can show how
+    /// much of the turn is left; null before the start.
+    /// </param>
     /// <param name="MatchEndsAt">
     /// When the match's time is up (STORY-041, ENG-011), kept once it ends; null before the start and for games without
     /// a time limit.
@@ -94,6 +98,7 @@ public static class RoomEndpoints
         int Capacity,
         int TurnNumber,
         DateTimeOffset? TurnEndsAt,
+        int? TurnSeconds,
         DateTimeOffset? MatchEndsAt,
         RoomMemberResponse[] Members,
         JsonElement? State,

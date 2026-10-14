@@ -1,16 +1,19 @@
+using ChogGames.Core.Abilities;
 using ChogGames.Core.Matches;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ChogGames.Api.Tests;
 
 /// <summary>
 /// Hosts the API in-memory with an explicit database connection string and optional extra settings. Chance is scripted
 /// (STORY-029): matches seat players in join order, host first, unless <paramref name="configureServices"/> registers
-/// another <see cref="IRandomSource"/>.
+/// another <see cref="IRandomSource"/>. No game offers abilities (STORY-042): Chog Life's catalog is taken out, so its
+/// players ready without one; tests of abilities register a catalog again, such as with <c>AddChogLifeAbilities()</c>.
 /// </summary>
 public sealed class ApiFactory(
     string connectionString,
@@ -46,7 +49,11 @@ public sealed class ApiFactory(
             }
         });
 
-        builder.ConfigureTestServices(services => services.AddSingleton<IRandomSource>(ScriptedRandomSource.KeepOrder));
+        builder.ConfigureTestServices(services =>
+        {
+            services.AddSingleton<IRandomSource>(ScriptedRandomSource.KeepOrder);
+            services.RemoveAll<AbilityCatalog>();
+        });
         if (configureServices is not null)
         {
             builder.ConfigureTestServices(configureServices);

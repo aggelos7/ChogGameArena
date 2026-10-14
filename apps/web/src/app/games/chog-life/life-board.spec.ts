@@ -9,6 +9,8 @@ import {
   laneTiles,
   lifeRows,
   ordinal,
+  outcomeRule,
+  previewSummary,
   seatColor,
   stakeSummary,
   timeLeft,
@@ -107,6 +109,45 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...finished, pawns: [lifePawn(1, 9, 100, { place: 0 })] })).toBeNull();
     expect(toLifeBoard({ ...finished, lastMove: { ...finished.lastMove, place: 1.5 } })).toBeNull();
     expect(toLifeBoard({ ...finished, lastMove: { ...finished.lastMove, bonus: 'big' } })).toBeNull();
+  });
+
+  it('reads armed abilities, what they did and a preview, and refuses bad ones (STORY-042)', () => {
+    const move = { seat: 1, roll: 3, from: 0, to: 2, path: [1, 2] };
+    const withAbilities = {
+      ...FORK_BOARD,
+      pawns: [lifePawn(1, 2, 100, { armed: 'reward_boost' }), lifePawn(2, 0)],
+      lastMove: { ...move, change: 20, boost: 5 },
+      preview: { lane: 'Degen', roll: 3, to: 5, path: [5], outcome: { chance: 100, effect: 'Loss', amount: 0, percent: 40, minimum: 0 } },
+      confirming: 1,
+    };
+    expect(toLifeBoard(withAbilities)).toEqual(withAbilities);
+    expect(toLifeBoard({ ...withAbilities, lastMove: { ...move, change: -8, saved: 7 } })).not.toBeNull();
+    expect(toLifeBoard({ ...withAbilities, lastMove: { ...move, change: 10, rerolled: -10 } })).not.toBeNull();
+    expect(toLifeBoard({ ...withAbilities, pawns: [lifePawn(1, 2, 100, { armed: 3 as unknown as string })] })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, lastMove: { ...move, boost: -1 } })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, lastMove: { ...move, saved: 'half' } })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, lastMove: { ...move, rerolled: 1.5 } })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, lastMove: { ...move, lane: 'Safe', switched: true } })).not.toBeNull();
+    expect(toLifeBoard({ ...withAbilities, lastMove: { ...move, switched: 'yes' } })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, preview: 'soon' })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, preview: { ...withAbilities.preview, to: 12 } })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, preview: { ...withAbilities.preview, lane: 'Main' } })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, preview: { ...withAbilities.preview, outcome: { effect: 'Moon' } } })).toBeNull();
+    expect(toLifeBoard({ ...withAbilities, confirming: -1 })).toBeNull();
+  });
+
+  it('sums up a previewed move, with an event outcome as its rule', () => {
+    const tiles = FORK_BOARD.tiles;
+    const rug = { chance: 100, effect: 'Loss' as const, amount: 0, percent: 40, minimum: 0 };
+    expect(previewSummary({ lane: 'Degen', roll: 1, to: 5, path: [5], outcome: rug }, tiles)).toBe(
+      'Roll 1, land on tile 5 (Rug pull): lose 40% of your liquid MON',
+    );
+    expect(previewSummary({ lane: 'Safe', roll: 1, to: 3, path: [3] }, tiles)).toBe('Roll 1, land on tile 3 (+10 MON)');
+    expect(previewSummary({ lane: 'Safe', roll: 2, to: 4, path: [3, 4] }, tiles)).toBe('Roll 2, land on tile 4');
+    expect(previewSummary({ lane: 'Safe', roll: 4, to: 9, path: [3, 4, 8, 9] }, tiles)).toBe('Roll 4, reach the finish');
+    expect(outcomeRule({ chance: 100, effect: 'Loss', amount: 0, percent: 25, minimum: 20 })).toBe('lose 25% of your liquid MON, at least 20 MON');
+    expect(outcomeRule({ chance: 60, effect: 'Gain', amount: 10, percent: 0, minimum: 0 })).toBe('gain 10 MON');
+    expect(outcomeRule({ chance: 50, effect: 'Gain', amount: 10, percent: 5, minimum: 0 })).toBe('gain 10 MON plus 5% of your liquid MON');
   });
 
   it('writes places and the time left', () => {
@@ -422,6 +463,154 @@ describe('Chog Life board', () => {
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob rolled 1, landed on tile 1 (+20 MON) and their MON didn’t change.');
     render(moved(0), members);
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1, landed on tile 1 (+20 MON) and your MON didn’t change.');
+  });
+
+  describe('abilities', () => {
+    const ability = (id: string, name: string, usesLeft = 1) => ({
+      id,
+      name,
+      description: `${name} does its thing.`,
+      target: 'None' as const,
+      maxUses: 1,
+      usesLeft,
+    });
+    const boost = ability('reward_boost', 'Reward Boost');
+    const preview = ability('event_preview', 'Event Preview');
+    const atFork: LifeBoard = { ...FORK_BOARD, pawns: [lifePawn(1, 2, 100), lifePawn(2, 0, 100)], choosing: 1, defaultLane: 'Safe' };
+    const used = (): string[] => {
+      const ids: string[] = [];
+      fixture.componentInstance.useAbility.subscribe((id) => ids.push(id));
+      return ids;
+    };
+
+    it('offers your ability beside Roll on your turn and tells the page its id', () => {
+      const ids = used();
+      render(FORK_BOARD, [member('Alice', 1, { isYou: true, isTurn: true, ability: boost }), member('Bob', 2)]);
+
+      const button = page.querySelector<HTMLButtonElement>('[data-use-ability]');
+      expect(button?.textContent).toContain('Use Reward Boost');
+      expect(button?.textContent).toContain('Reward Boost does its thing.');
+      button?.click();
+      expect(ids).toEqual(['reward_boost']);
+      expect(page.querySelector('[data-roll]')).not.toBeNull();
+
+      fixture.componentRef.setInput('rolling', true);
+      fixture.detectChanges();
+      expect(page.querySelector<HTMLButtonElement>('[data-use-ability]')?.disabled).toBe(true);
+    });
+
+    it('does not offer an ability that is used up, armed, not yours to use now or for a finished player', () => {
+      const offered = (board: LifeBoard, members: RoomMember[]) => {
+        render(board, members);
+        return page.querySelector('[data-use-ability]') !== null;
+      };
+      const bob = member('Bob', 2);
+
+      expect(offered(FORK_BOARD, [member('Alice', 1, { isYou: true, isTurn: true, ability: ability('reward_boost', 'Reward Boost', 0) }), bob])).toBe(false);
+      expect(offered(FORK_BOARD, [member('Alice', 1, { isYou: true, ability: boost }), member('Bob', 2, { isTurn: true })])).toBe(false);
+      expect(offered({ ...FORK_BOARD, pawns: [lifePawn(1, 0, 100, { armed: 'reward_boost' }), lifePawn(2, 0)] }, [member('Alice', 1, { isYou: true, isTurn: true, ability: boost }), bob])).toBe(false);
+      expect(offered(atFork, [member('Alice', 1, { isYou: true, isTurn: true, ability: boost }), bob])).toBe(false);
+      expect(offered({ ...FORK_BOARD, pawns: [lifePawn(1, 9, 100, { place: 1 }), lifePawn(2, 0)] }, [member('Alice', 1, { isYou: true, isTurn: true, ability: boost }), bob])).toBe(false);
+      expect(offered(FORK_BOARD, [member('Alice', 1, { isYou: true, isTurn: true, ability: preview }), bob])).toBe(false);
+      expect(offered(FORK_BOARD, [member('Alice', 1, { isYou: true, isTurn: true }), bob])).toBe(false);
+    });
+
+    it('offers Event Preview at a fork before you choose, and says it is on once used', () => {
+      const ids = used();
+      const members = [member('Alice', 1, { isYou: true, isTurn: true, ability: preview }), member('Bob', 2)];
+      render(atFork, members);
+      expect(page.querySelector('[data-preview-armed]')).toBeNull();
+
+      page.querySelector<HTMLButtonElement>('[data-routes] [data-use-ability]')?.click();
+      expect(ids).toEqual(['event_preview']);
+
+      render({ ...atFork, pawns: [lifePawn(1, 2, 100, { armed: 'event_preview' }), lifePawn(2, 0)] }, [
+        member('Alice', 1, { isYou: true, isTurn: true, ability: { ...preview, usesLeft: 0 } }),
+        member('Bob', 2),
+      ]);
+      expect(page.querySelector('[data-use-ability]')).toBeNull();
+      expect(page.querySelector('[data-preview-armed]')?.textContent).toBe('Event Preview is on: choose a route to see your next move there.');
+      expect(page.querySelectorAll('[data-route]').length).toBe(2);
+    });
+
+    const deciding: LifeBoard = {
+      ...atFork,
+      choosing: undefined,
+      confirming: 1,
+      pawns: [lifePawn(1, 2, 50, { lane: 'Degen', stake: { lane: 'Degen', amount: 50 }, assets: 50 }), lifePawn(2, 0)],
+      lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2], lane: 'Degen', staked: 50 },
+      preview: { lane: 'Degen', roll: 1, to: 5, path: [5], outcome: { chance: 100, effect: 'Loss', amount: 0, percent: 40, minimum: 0 } },
+    };
+    const usedUp = { ...preview, usesLeft: 0 };
+
+    it('shows you your next move on the route you chose, then lets you keep it or switch', () => {
+      const chosen: string[] = [];
+      fixture.componentInstance.chooseLane.subscribe((lane) => chosen.push(lane));
+      render(deciding, [member('Alice', 1, { isYou: true, isTurn: true, ability: usedUp }), member('Bob', 2)]);
+
+      expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('Keep your route or switch?');
+      expect(page.querySelector('[data-preview]')?.textContent?.trim()).toBe(
+        'Your next move: Roll 1, land on tile 5 (Rug pull): lose 40% of your liquid MON.',
+      );
+      expect(page.querySelector('[data-keep] .route-name')?.textContent).toBe('Keep the degen route');
+      expect(page.querySelector('[data-switch] .route-name')?.textContent).toBe('Switch to the safe route');
+      expect(page.querySelector('[data-roll]')).toBeNull();
+      expect(page.querySelector('[data-route]')).toBeNull();
+
+      page.querySelector<HTMLButtonElement>('[data-switch]')?.click();
+      page.querySelector<HTMLButtonElement>('[data-keep]')?.click();
+      expect(chosen).toEqual(['Safe', 'Degen']);
+    });
+
+    it('tells everyone else who is deciding, without the preview', () => {
+      render({ ...deciding, preview: undefined }, [member('Alice', 1, { isTurn: true, ability: usedUp }), member('Bob', 2, { isYou: true })]);
+
+      expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('Alice is deciding whether to keep their route…');
+      expect(page.querySelector('[data-keep-or-switch]')).toBeNull();
+    });
+
+    it('keeps showing your previewed move above Roll until you roll', () => {
+      render({ ...deciding, confirming: undefined }, [member('Alice', 1, { isYou: true, isTurn: true, ability: usedUp }), member('Bob', 2)]);
+
+      expect(page.querySelector('[data-preview]')?.textContent?.trim()).toBe('Previewed: Roll 1, land on tile 5 (Rug pull): lose 40% of your liquid MON.');
+      expect(page.querySelector('[data-roll]')).not.toBeNull();
+    });
+
+    it('says when a route was switched after a preview', () => {
+      render({ ...deciding, confirming: undefined, preview: undefined, lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2], lane: 'Safe', staked: 50, switched: true } }, [
+        member('Alice', 1, { isTurn: true }),
+        member('Bob', 2, { isYou: true }),
+      ]);
+
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe(
+        'Alice rolled 2 and moved to tile 2 (Safe or Degen?). Alice switched to the safe route, taking the 50 MON stake along.',
+      );
+    });
+
+    it('marks an armed ability in the legend for everyone', () => {
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0, 100, { armed: 'loss_protection' })] }, [
+        member('Alice', 1, { isYou: true, isTurn: true }),
+        member('Bob', 2, { ability: ability('loss_protection', 'Loss Protection', 0) }),
+      ]);
+
+      expect(Array.from(page.querySelectorAll('[data-armed]')).map((tag) => [tag.closest('li')?.dataset['seat'], tag.textContent?.trim()])).toEqual([
+        ['2', 'Loss Protection armed'],
+      ]);
+    });
+
+    it.each([
+      [{ change: 20, boost: 5 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 20 MON. Your Reward Boost added 5 MON to bonuses.'],
+      [{ change: -8, saved: 7 }, 'You rolled 1, landed on tile 1 (+20 MON) and lost 8 MON. Your Loss Protection saved 7 MON.'],
+      [{ change: 10, rerolled: -10 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 10 MON. Your Lucky Reroll drew the event twice: it kept +10 MON over −10 MON.'],
+      [{ change: 25, rerolled: 10 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 25 MON. Your Lucky Reroll drew the event twice: it kept +25 MON over +10 MON.'],
+    ])('says what an ability did to the move', (effect, text) => {
+      render({ ...FORK_BOARD, lastMove: { seat: 1, roll: 1, from: 0, to: 1, path: [1], ...effect } }, [
+        member('Alice', 1, { isYou: true }),
+        member('Bob', 2, { isTurn: true }),
+      ]);
+
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe(text);
+    });
   });
 
   describe('at the finish', () => {

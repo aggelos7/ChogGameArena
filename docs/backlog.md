@@ -619,7 +619,7 @@
 
 #### STORY-042 — Life abilities
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Implement Reward Boost, Loss Protection, Event Preview, Lucky Reroll.
