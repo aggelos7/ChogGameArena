@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ChogGames.Api.Matches;
+using ChogGames.Games.ChogLife.Rules;
 using ChogGames.Infrastructure.Matches;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -134,13 +135,13 @@ public sealed class ChogLifeBoardTests(MigratedPostgresDatabase database) : ICla
 
             // Stored as jsonb, which orders keys by length.
             Assert.Equal(
-                """{"pawns":[""" + string.Join(",", Enumerable.Range(1, count).Select(s => $$"""{"mon":100,"seat":{{s}},"tile":0}""")) + """],"rulesVersion":1}""",
+                """{"pawns":[""" + string.Join(",", Enumerable.Range(1, count).Select(s => $$"""{"mon":100,"seat":{{s}},"tile":0}""")) + """],"rulesVersion":2}""",
                 (await StoredAsync(room)).State);
             foreach (var player in players)
             {
                 var seen = await ViewAsync(player, room.Code);
                 var board = seen.Board!;
-                Assert.Equal(1, board.RulesVersion);
+                Assert.Equal(LifeRulesV2.Version, board.RulesVersion);
                 Assert.Equal(36, board.Tiles.Length);
                 Assert.Equal(Enumerable.Range(1, count).Select(seat => new PawnDto(seat, 0)), board.Pawns);
                 Assert.Equal(Enumerable.Range(1, count).Select(seat => (int?)seat), seen.Members.Select(m => m.Seat).Order());

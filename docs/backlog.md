@@ -658,10 +658,10 @@
 
 #### STORY-044 — Life balancing and multiplayer QA
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
-- **Implementation:** Run seeded simulation and real 2/4/6-player tests including AFK and reconnect.
+- **Implementation:** Run seeded simulation and real 2/4/6-player tests including AFK and reconnect. Done (DEC-047): `LifeSimulator` plays whole matches through the real engine, rules and abilities on seeded chance; `ChogLifeMultiplayerTests` plays 2/4/6-player matches through the API and hub. Results in `docs/games/chog-life-balancing.md`; rules version 2 halves the finish bonus to 50 MON, and the duration target is revised.
 - **Acceptance criteria:**
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** no stuck turn in automated simulations; duration and outcome distribution documented.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.

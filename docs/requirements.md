@@ -10,7 +10,7 @@
 ## 1. Product vision and scope
 Chog Game Arena is a mobile-first browser-based multiplayer platform for the Chog community on Monad. The first two games are **Chog Life** (portfolio-building life-path board game) and **Chog Race** (competitive board race with action cards). The platform must allow future games and, eventually, alternative community themes without duplicating infrastructure. Game actions are off-chain; wallet ownership checks use Monad RPC. NFT ownership is optional for playing.
 
-**MVP goals:** 2–6 players per room, private room codes and invite links, real-time turns, mobile usability, reconnect, server-authoritative actions, NFT character selection, and one balanced selectable ability per player per match. Target play time: Chog Life 15–20 minutes; Chog Race 10–15 minutes, hard limit 20 minutes for both.
+**MVP goals:** 2–6 players per room, private room codes and invite links, real-time turns, mobile usability, reconnect, server-authoritative actions, NFT character selection, and one balanced selectable ability per player per match. Target play time: Chog Life 15–20 minutes (revised to 2–8 minutes engaged by DEC-047); Chog Race 10–15 minutes, hard limit 20 minutes for both.
 
 **Out of scope for MVP:** on-chain game moves/rewards, tournaments, friends/chat, marketplace, seasons, paid power-ups, multi-wallet aggregation, Kubernetes, microservices, advanced analytics, and cross-game progression.
 
@@ -156,7 +156,7 @@ Example command:
 - **LIFE-006 — Economy:** track liquid MON, investment/asset values, bonuses and liabilities; `portfolio = liquid + assets + bonuses - liabilities`.
 - **LIFE-007 — Finish:** optional first-finish bonus (initial suggestion +100 MON); determine winner by final portfolio after all players finish or hard timeout. Define deterministic tie-breaker.
 - **LIFE-008 — Abilities:** implement the four Chog Life abilities in Section 6, with clear activation windows and server validation.
-- **LIFE-009 — Duration:** tune movement, board length, timers and event frequency for 15–20 minutes.
+- **LIFE-009 — Duration:** tune movement, board length, timers and event frequency for 15–20 minutes. Revised by DEC-047 after balancing (STORY-044): 2–8 minutes when engaged, under the 20-minute cap.
 - **LIFE-010 — Results:** rank, starting/final portfolio, airdrops, rugs survived, liquidations, biggest win, Degen Score; shareable result image may follow MVP.
 - **LIFE-011 — Economy safety:** negative balances, insufficient funds, overlapping multipliers and simultaneous global market events have deterministic rules.
 
