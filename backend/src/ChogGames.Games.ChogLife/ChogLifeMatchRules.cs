@@ -19,7 +19,10 @@ namespace ChogGames.Games.ChogLife;
 /// leaves by that lane. A turn that runs out while that choice is pending takes the rules' default lane; any other turn
 /// that runs out is skipped. The lane taken holds a stake of the player's liquid MON, an asset that pays out when the pawn
 /// rejoins the main track, a loss bigger than the liquid MON held becomes a liability, and every player sees each
-/// player's liquid MON, assets, bonuses, liabilities and total portfolio (STORY-040, DEC-042).
+/// player's liquid MON, assets, bonuses, liabilities and total portfolio (STORY-040, DEC-042). A pawn reaching the Finish
+/// finishes its player's game (STORY-041, DEC-043): the first to arrive gets the finish bonus, and finished players take
+/// no more turns. The match ends when every player still playing has finished, or when its time cap is up, and players
+/// are ranked by portfolio, then by who finished first, then by who is further along.
 /// </summary>
 public sealed class ChogLifeMatchRules : IMatchRules
 {
@@ -53,6 +56,9 @@ public sealed class ChogLifeMatchRules : IMatchRules
 
     public string GameType => GameDefinition.ChogLife;
 
+    /// <summary>The time cap of the rules version new matches start with (ENG-011, DEC-037).</summary>
+    public TimeSpan? TimeLimit => _current.TimeCap;
+
     public JsonElement? StartState(MatchStartContext context) =>
         JsonSerializer.SerializeToElement(StartOf(context.Match, _current), Json);
 
@@ -70,8 +76,9 @@ public sealed class ChogLifeMatchRules : IMatchRules
     /// <c>ROLL</c>: one die from the server's source of chance, never from the payload, which is ignored (DEC-031). The
     /// pawn moves along <see cref="LifeRules.Path"/>, leaving a fork by the lane its player chose there, the tile it
     /// stops on resolves with <see cref="LifeRules.Resolve"/> (an event's draw comes after the die's) and the turn ends,
-    /// unless the pawn stopped on a fork: then the player chooses a lane first (DEC-041). A pawn on the Finish doesn't
-    /// move and draws nothing; its roll just passes the turn until STORY-041 decides what finished players do. A match
+    /// unless the pawn stopped on a fork: then the player chooses a lane first (DEC-041). A pawn that reaches the Finish
+    /// finishes its player's game, and the match ends once every player still playing has (STORY-041, DEC-043). A pawn
+    /// already on the Finish, from a state before STORY-041, doesn't move and draws nothing; it finishes there. A match
     /// started before its state existed (before STORY-036) gets its start state first, and pawns from before STORY-038
     /// hold the starting MON. <c>CHOOSE_LANE</c> records the chosen lane on the pawn and ends the turn.
     /// </summary>
@@ -99,7 +106,7 @@ public sealed class ChogLifeMatchRules : IMatchRules
         var choosing = state.Choosing == pawn.Seat;
         state = state with { Choosing = null };
         return context.Type == Roll
-            ? RollFor(pawn, choosing, state, rules, context.Random)
+            ? RollFor(pawn, choosing, state, rules, context.Random, context.Match)
             : ChooseFor(pawn, choosing, state, rules, context.Payload);
     }
 
@@ -115,7 +122,7 @@ public sealed class ChogLifeMatchRules : IMatchRules
         && (pawn.Stake is null || (pawn.Stake.Amount > 0 && rules.Stakes.ContainsKey(pawn.Stake.Lane)));
 
     private static MatchRuleDecision RollFor(
-        LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, IRandomSource random)
+        LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, IRandomSource random, GameRoom match)
     {
         if (choosing)
         {
@@ -155,15 +162,110 @@ public sealed class ChogLifeMatchRules : IMatchRules
             move = new LifeMove(pawn.Seat, roll, pawn.Tile, path[^1], path, change, Matured: matured);
         }
 
+        var finished = state.Finished ?? [];
+        if (move.To == rules.Finish.Index && !finished.Contains(pawn.Seat))
+        {
+            // Arriving finishes the player's game; only the first to arrive gets the bonus (LIFE-007, DEC-043).
+            var place = finished.Count + 1;
+            var bonus = place == 1 ? rules.FinishBonus : 0;
+            portfolio = portfolio with { Bonuses = (int)Math.Min((long)portfolio.Bonuses + bonus, LifeRules.MaxMon) };
+            finished = [.. finished, pawn.Seat];
+            move = move with { Place = place, Bonus = bonus > 0 ? bonus : null };
+        }
+
         var atFork = rules.Tiles[move.To].Type == LifeTileType.Branch;
         var next = state with
         {
             Pawns = Replace(state, Holding(pawn with { Tile = move.To, Lane = null, Stake = stake }, portfolio)),
             LastMove = move,
             Choosing = atFork ? pawn.Seat : null,
+            Finished = finished.Count > 0 ? finished : null,
         };
-        return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: !atFork);
+        if (move.To != rules.Finish.Index)
+        {
+            return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: !atFork);
+        }
+
+        if (PlayingSeats(match).All(finished.Contains))
+        {
+            var ended = next with { Ended = LifeEnding.Finish };
+            return MatchRuleDecision.Finish(JsonSerializer.SerializeToElement(ended, Json), Standings(ended, rules, match));
+        }
+
+        return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), finished: true);
     }
+
+    /// <summary>
+    /// The match ends (STORY-041, DEC-043): its time cap is up, or every player still playing has finished. A lane
+    /// choice still pending is dropped, and a stake still held counts at what was staked, as an asset. Players are ranked
+    /// by <see cref="Standings"/>. A state this server can't play ranks everyone still playing first, together, so the
+    /// match still ends with one result.
+    /// </summary>
+    public MatchEnding EndMatch(MatchEndContext context)
+    {
+        var stored = context.State is { } json ? Read(json) : StartOf(context.Match, _current);
+        var ending = context.TimeUp ? LifeEnding.TimeUp : LifeEnding.Finish;
+        if (stored is null || !_rulesByVersion.TryGetValue(stored.RulesVersion, out var rules)
+            || !WithMon(stored, rules).Pawns.All(pawn => IsPlayable(pawn, rules))
+            || stored.Pawns.DistinctBy(pawn => pawn.Seat).Count() != stored.Pawns.Count)
+        {
+            var together = PlayerSeats(context.Match).Select(seat => new MatchStanding(seat.PlayerId, 1)).ToArray();
+            var unchanged = context.State is { ValueKind: JsonValueKind.Object } state
+                ? state.Clone()
+                : JsonSerializer.SerializeToElement(new { ended = ending.ToString() });
+            return new MatchEnding(unchanged, together);
+        }
+
+        var ended = stored with { Choosing = null, Ended = ending };
+        return new MatchEnding(JsonSerializer.SerializeToElement(ended, Json), Standings(ended, rules, context.Match));
+    }
+
+    /// <summary>
+    /// A rank for every player still playing (LIFE-007, DEC-043): the highest total portfolio first; on a tie, whoever
+    /// reached the Finish first, any finished player before those still on the board; then whoever has fewer tiles left
+    /// to the Finish. Players still level share the rank (1, 1, 3).
+    /// </summary>
+    private static IReadOnlyList<MatchStanding> Standings(LifeMatchState state, LifeRules rules, GameRoom match)
+    {
+        var finished = state.Finished ?? [];
+        var pawns = WithMon(state, rules).Pawns.ToDictionary(pawn => pawn.Seat);
+        var scored = PlayerSeats(match)
+            .Select(player => (player.PlayerId, Score: pawns.TryGetValue(player.Seat, out var pawn)
+                ? (Total: PortfolioOf(pawn).Total,
+                    Place: PlaceOf(finished, pawn.Seat) ?? int.MaxValue,
+                    Left: rules.StepsToFinish(pawn.Tile))
+                : (Total: int.MinValue, Place: int.MaxValue, Left: int.MaxValue)))
+            .ToArray();
+        return scored
+            .Select(player => new MatchStanding(player.PlayerId, 1 + scored.Count(other => Beats(other.Score, player.Score))))
+            .ToArray();
+    }
+
+    private static bool Beats((int Total, int Place, int Left) a, (int Total, int Place, int Left) b) =>
+        a.Total != b.Total ? a.Total > b.Total
+        : a.Place != b.Place ? a.Place < b.Place
+        : a.Left < b.Left;
+
+    /// <summary>The order in which <paramref name="seat"/> reached the Finish, from 1; null while still on the board.</summary>
+    private static int? PlaceOf(IReadOnlyList<int> finished, int seat)
+    {
+        for (var place = 0; place < finished.Count; place++)
+        {
+            if (finished[place] == seat)
+            {
+                return place + 1;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The seats of the players still playing.</summary>
+    private static IEnumerable<int> PlayingSeats(GameRoom match) => PlayerSeats(match).Select(player => player.Seat);
+
+    private static IEnumerable<(Guid PlayerId, int Seat)> PlayerSeats(GameRoom match) => match.Members
+        .Where(member => member is { HasLeft: false, Seat: not null })
+        .Select(member => (member.PlayerId, member.Seat!.Value));
 
     /// <summary>
     /// Only the two lanes the fork offers are accepted, by name as the board shows them (<c>Safe</c>, <c>Degen</c>);
@@ -272,15 +374,22 @@ public sealed class ChogLifeMatchRules : IMatchRules
             .Where(member => member is { HasLeft: false, Seat: not null })
             .Select(member => member.Seat!.Value)
             .ToHashSet();
+        var finished = state.Finished ?? [];
         var view = new LifeBoardView(
             rules.Version,
             rules.Tiles.Select(ToView).ToArray(),
-            WithMon(state, rules).Pawns.Where(pawn => playing.Contains(pawn.Seat)).OrderBy(pawn => pawn.Seat).Select(ToView).ToArray(),
+            WithMon(state, rules).Pawns
+                .Where(pawn => playing.Contains(pawn.Seat))
+                .OrderBy(pawn => pawn.Seat)
+                .Select(pawn => ToView(pawn, PlaceOf(finished, pawn.Seat)))
+                .ToArray(),
             state.LastMove,
             state.Choosing is { } seat && playing.Contains(seat) ? seat : null,
             rules.DefaultLane,
             rules.ForkStake > 0 ? rules.ForkStake : null,
-            rules.ForkStake > 0 ? [rules.Stakes[LifeLane.Safe], rules.Stakes[LifeLane.Degen]] : null);
+            rules.ForkStake > 0 ? [rules.Stakes[LifeLane.Safe], rules.Stakes[LifeLane.Degen]] : null,
+            rules.FinishBonus > 0 ? rules.FinishBonus : null,
+            state.Ended);
         return JsonSerializer.SerializeToElement(view, Json);
     }
 
@@ -300,7 +409,7 @@ public sealed class ChogLifeMatchRules : IMatchRules
     private static LifeMatchState WithMon(LifeMatchState state, LifeRules rules) =>
         state with { Pawns = state.Pawns.Select(pawn => pawn with { Mon = pawn.Mon ?? rules.StartingMon }).ToArray() };
 
-    private static LifePawnView ToView(LifePawn pawn)
+    private static LifePawnView ToView(LifePawn pawn, int? place)
     {
         var portfolio = PortfolioOf(pawn);
         return new LifePawnView(
@@ -312,7 +421,8 @@ public sealed class ChogLifeMatchRules : IMatchRules
             portfolio.Assets,
             portfolio.Bonuses,
             portfolio.Liabilities,
-            portfolio.Total);
+            portfolio.Total,
+            place);
     }
 
     private static LifeTileView ToView(LifeTile tile) => new(
@@ -327,10 +437,23 @@ public sealed class ChogLifeMatchRules : IMatchRules
 
     /// <summary>
     /// The stored state: the rules version the match started with, where each seat's pawn stands with its liquid MON,
-    /// the latest move and the seat whose roll stopped on a fork and who is still to choose a lane.
+    /// the latest move and the seat whose roll stopped on a fork and who is still to choose a lane, the seats that reached
+    /// the Finish in the order they arrived (null for none) and, once the match is over, what ended it.
     /// </summary>
     private sealed record LifeMatchState(
-        int RulesVersion, IReadOnlyList<LifePawn> Pawns, LifeMove? LastMove = null, int? Choosing = null);
+        int RulesVersion,
+        IReadOnlyList<LifePawn> Pawns,
+        LifeMove? LastMove = null,
+        int? Choosing = null,
+        IReadOnlyList<int>? Finished = null,
+        LifeEnding? Ended = null);
+
+    /// <summary>What ended the match: every player still playing finished, or the time cap was up.</summary>
+    private enum LifeEnding
+    {
+        Finish,
+        TimeUp,
+    }
 
     /// <summary>
     /// A seat's move: the roll (null when a pawn on the Finish passed), the tiles it left and reached, every tile it
@@ -338,7 +461,8 @@ public sealed class ChogLifeMatchRules : IMatchRules
     /// tile that does nothing; a loss the liquid MON couldn't cover counts in full, the rest having become a liability).
     /// A move that stopped on a fork gets the <paramref name="Lane"/> chosen there, <paramref name="ByDefault"/> when the
     /// turn ran out and the rules chose it, and the MON <paramref name="Staked"/> on it. A move that rejoined the main
-    /// track with a stake says what it paid out (<paramref name="Matured"/>).
+    /// track with a stake says what it paid out (<paramref name="Matured"/>). A move that reached the Finish gives the
+    /// player's <paramref name="Place"/> in the order of arrival and the finish <paramref name="Bonus"/> it won, if any.
     /// </summary>
     private sealed record LifeMove(
         int Seat,
@@ -350,7 +474,9 @@ public sealed class ChogLifeMatchRules : IMatchRules
         LifeLane? Lane = null,
         bool? ByDefault = null,
         int? Staked = null,
-        LifeMaturity? Matured = null);
+        LifeMaturity? Matured = null,
+        int? Place = null,
+        int? Bonus = null);
 
     /// <summary>A stake of <paramref name="Stake"/> MON on <paramref name="Lane"/> that paid <paramref name="Payout"/> MON back.</summary>
     private sealed record LifeMaturity(LifeLane Lane, int Stake, int Payout);
@@ -369,7 +495,10 @@ public sealed class ChogLifeMatchRules : IMatchRules
         int? Bonuses = null,
         int? Liabilities = null);
 
-    /// <summary>A pawn as every player sees it, with its player's portfolio: <c>mon</c> is the liquid MON.</summary>
+    /// <summary>
+    /// A pawn as every player sees it, with its player's portfolio: <c>mon</c> is the liquid MON. <c>place</c> is the
+    /// order in which its player reached the Finish, from 1; null while still on the board.
+    /// </summary>
     private sealed record LifePawnView(
         int Seat,
         int Tile,
@@ -379,7 +508,8 @@ public sealed class ChogLifeMatchRules : IMatchRules
         int Assets,
         int Bonuses,
         int Liabilities,
-        int Portfolio);
+        int Portfolio,
+        int? Place);
 
     private sealed record LifeBoardView(
         int RulesVersion,
@@ -389,7 +519,9 @@ public sealed class ChogLifeMatchRules : IMatchRules
         int? Choosing,
         LifeLane DefaultLane,
         int? ForkStake,
-        IReadOnlyList<LifeLaneStake>? StakeReturns);
+        IReadOnlyList<LifeLaneStake>? StakeReturns,
+        int? FinishBonus,
+        LifeEnding? Ended);
 
     private sealed record LifeTileView(
         int Index,

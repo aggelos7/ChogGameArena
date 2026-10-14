@@ -42,6 +42,9 @@ public enum MatchCommandOutcome
     /// <summary>The player's turn ran out; it is about to be timed out.</summary>
     TurnExpired,
 
+    /// <summary>The match's time is up, or every player has finished; it is about to end (STORY-041).</summary>
+    TimeUp,
+
     /// <summary>The match's game has no command of this type.</summary>
     UnknownCommand,
 
@@ -113,6 +116,8 @@ public sealed class MatchCommandService(
                 return new MatchCommandResult(MatchCommandOutcome.NotYourTurn);
             case MatchCommandProblem.TurnExpired:
                 return new MatchCommandResult(MatchCommandOutcome.TurnExpired);
+            case MatchCommandProblem.TimeUp:
+                return new MatchCommandResult(MatchCommandOutcome.TimeUp);
         }
 
         using var state = room.State is null ? null : JsonDocument.Parse(room.State);
@@ -140,7 +145,8 @@ public sealed class MatchCommandService(
             throw new InvalidOperationException($"The {room.GameType} rules accepted {command.Type} without a JSON object state.");
         }
 
-        var action = room.ApplyCommand(player.Id, command, newState.GetRawText(), decision.EndsTurn, now, decision.Standings);
+        var action = room.ApplyCommand(
+            player.Id, command, newState.GetRawText(), decision.EndsTurn, now, decision.Standings, decision.Finished);
         db.MatchActions.Add(action);
         if (room.Status == RoomStatus.Completed)
         {

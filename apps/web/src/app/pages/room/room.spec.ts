@@ -48,6 +48,7 @@ describe('Room page', () => {
     capacity: 6,
     turnNumber: 0,
     turnEndsAt: null,
+    matchEndsAt: null,
     members: [
       member('Alice', { isHost: true }),
       member('Bob', { isYou: true, character: { kind: 'Standard', id: 'mint', name: 'Mint', color: '#1a7f5a' } }),
@@ -673,6 +674,49 @@ describe('Room page', () => {
       fixture.detectChanges();
 
       expect(element().querySelector('[data-error="action"]')?.textContent).toBe('Your turn has run out.');
+    });
+
+    it('counts down to the time cap and explains a command refused because time is up', () => {
+      const started: Room = {
+        ...room,
+        status: 'Active',
+        state: FORK_BOARD,
+        matchEndsAt: new Date(Date.now() + 754_000).toISOString(),
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+      };
+      load(started);
+
+      expect(element().querySelector('[data-clock]')?.textContent?.trim()).toBe('Time left 12:34');
+
+      element().querySelector<HTMLButtonElement>('[data-roll]')?.click();
+      http.expectOne('/api/rooms/K7QF3M/commands').flush({ code: 'time_up' }, { status: 409, statusText: 'Conflict' });
+      http.expectOne('/api/rooms/K7QF3M').flush({ ...started, version: 2 });
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-error="action"]')?.textContent).toBe('Time’s up: the game is ending.');
+    });
+
+    it('keeps the final board under the result once the game is over', () => {
+      load({
+        ...room,
+        status: 'Completed',
+        matchEndsAt: new Date(Date.now() - 1000).toISOString(),
+        state: {
+          ...FORK_BOARD,
+          pawns: [lifePawn(1, 9, 100, { bonuses: 100, place: 1 }), lifePawn(2, 6, 150)],
+          ended: 'TimeUp',
+        },
+        members: [member('Alice', { isHost: true, seat: 1, rank: 1 }), member('Bob', { isYou: true, seat: 2, rank: 2 })],
+      });
+
+      expect(element().querySelector('[data-result]')?.textContent).toContain('you finished 2nd');
+      const final = element().querySelector('[data-final-board]');
+      expect(final?.querySelector('h2')?.textContent).toBe('Final board');
+      expect(final?.querySelector('[data-ending]')?.textContent).toBe('Time’s up! Players are ranked by their final portfolio.');
+      expect(Array.from(final?.querySelectorAll('[data-portfolio]') ?? []).map((p) => p.textContent)).toEqual(['200 MON', '150 MON']);
+      expect(final?.querySelector('[data-clock]')).toBeNull();
+      expect(final?.querySelector('[data-roll]')).toBeNull();
+      expect(maybeButton('Leave game')).toBeUndefined();
     });
 
     it('shows no board while waiting, for another game or for a state it cannot read', () => {

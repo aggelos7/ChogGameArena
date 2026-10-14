@@ -1,9 +1,22 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, computed, input, output } from '@angular/core';
+import { Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
-import { LifeBoard, LifePawn, LifeRoute, LifeTile, laneSummary, laneTiles, lifeRows, seatColor, stakeSummary, tileLabel } from './life-board-model';
+import {
+  LifeBoard,
+  LifePawn,
+  LifeRoute,
+  LifeTile,
+  laneSummary,
+  laneTiles,
+  lifeRows,
+  ordinal,
+  seatColor,
+  stakeSummary,
+  tileLabel,
+  timeLeft,
+} from './life-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -39,6 +52,8 @@ const ROUTE_NAMES: Record<LifeRoute, string> = { Safe: 'safe', Degen: 'degen' };
  * STORY-040, DEC-040, DEC-042). A roll that stops on a fork keeps the turn: the player gets the safe and degen routes
  * with what each lane holds and what staking on it returns, highlighted on the board, and the page sends the choice
  * (STORY-039, DEC-041); everyone else sees who is choosing, and then which route they took and what they staked.
+ * While the match runs it counts down the time left to the server's `endsAt`; the legend marks who has finished and in
+ * which place, and once the match is over it says what ended it, over the final portfolios (STORY-041, DEC-043).
  */
 @Component({
   selector: 'app-life-board',
@@ -49,12 +64,42 @@ const ROUTE_NAMES: Record<LifeRoute, string> = { Safe: 'safe', Degen: 'degen' };
 export class LifeBoardView {
   readonly board = input.required<LifeBoard>();
   readonly members = input.required<RoomMember[]>();
+  /** When the match's time is up (ISO 8601), counted down while it runs; null for no clock. */
+  readonly endsAt = input<string | null>(null);
   /** A roll or a lane choice is on its way to the server. */
   readonly rolling = input(false);
   readonly roll = output<void>();
   readonly chooseLane = output<LifeRoute>();
 
   protected readonly label = tileLabel;
+  protected readonly ordinal = ordinal;
+
+  /** The time now, ticking every second for the clock. */
+  private readonly now = signal(Date.now());
+
+  constructor() {
+    const tick = setInterval(() => this.now.set(Date.now()), 1000);
+    inject(DestroyRef).onDestroy(() => clearInterval(tick));
+  }
+
+  /** The time left as "12:05", while the match runs and has a time limit. */
+  protected readonly clock = computed(() => {
+    const endsAt = this.endsAt();
+    const end = endsAt ? Date.parse(endsAt) : NaN;
+    return Number.isNaN(end) || this.board().ended ? null : timeLeft(end, this.now());
+  });
+
+  /** What ended the match, in words, once it's over. */
+  protected readonly ending = computed(() => {
+    switch (this.board().ended) {
+      case 'TimeUp':
+        return 'Time’s up! Players are ranked by their final portfolio.';
+      case 'Finish':
+        return 'Everyone reached the finish! Players are ranked by their final portfolio.';
+      default:
+        return null;
+    }
+  });
   protected readonly rows = computed(() => lifeRows(this.board().tiles));
 
   /** Players with a pawn on the board, by seat. */
@@ -140,6 +185,10 @@ export class LifeBoardView {
     const where = tile ? `tile ${move.to}${this.label(tile) ? ` (${this.label(tile)})` : ''}` : `tile ${move.to}`;
     if (move.roll === undefined) {
       return `${who} passed at the finish.`;
+    }
+    if (move.place !== undefined) {
+      const bonus = move.bonus ? `, winning the ${move.bonus} MON bonus` : '';
+      return `${who} rolled ${move.roll} and reached the finish in ${ordinal(move.place)} place${bonus}.`;
     }
     const staked = move.staked ? ` and ${member?.isYou ? 'stake' : 'stakes'} ${move.staked} MON` : '';
     const route = !move.lane

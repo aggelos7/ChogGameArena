@@ -28,7 +28,8 @@ public sealed class ChogLifeBoardTests(MigratedPostgresDatabase database) : ICla
 
     private sealed record BoardDto(int RulesVersion, TileDto[] Tiles, PawnDto[] Pawns);
 
-    private sealed record RoomDto(string Code, Guid MatchId, long Version, string GameType, string Status, MemberDto[] Members, JsonElement? State)
+    private sealed record RoomDto(
+        string Code, Guid MatchId, long Version, string GameType, string Status, MemberDto[] Members, JsonElement? State, DateTimeOffset? MatchEndsAt = null)
     {
         public BoardDto? Board => State is { ValueKind: JsonValueKind.Object } state ? state.Deserialize<BoardDto>(Json) : null;
     }
@@ -163,17 +164,17 @@ public sealed class ChogLifeBoardTests(MigratedPostgresDatabase database) : ICla
     }
 
     [PostgresFact]
-    public async Task A_waiting_room_and_a_game_without_rules_show_no_board()
+    public async Task A_waiting_room_and_a_game_without_rules_show_no_board_or_time_limit()
     {
         var players = await GuestsAsync(4);
         try
         {
             var waiting = await WaitingAsync("chog-life", players[0], players[1]);
-            Assert.Null(waiting.State);
+            Assert.Equal(((JsonElement?)null, (DateTimeOffset?)null), (waiting.State, waiting.MatchEndsAt));
 
             var race = await StartedAsync("chog-race", players[2], players[3]);
             Assert.Equal("Active", race.Status);
-            Assert.Null(race.State);
+            Assert.Equal(((JsonElement?)null, (DateTimeOffset?)null), (race.State, race.MatchEndsAt));
             Assert.Null((await StoredAsync(race)).State);
         }
         finally

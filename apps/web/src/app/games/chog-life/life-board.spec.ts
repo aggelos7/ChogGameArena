@@ -2,7 +2,18 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RoomMember } from '../../rooms/rooms-api';
 import { LifeBoardView } from './life-board';
 import { FORK_BOARD, lifePawn } from '../../testing';
-import { LifeBoard, LifeStakeReturns, laneSummary, laneTiles, lifeRows, seatColor, stakeSummary, toLifeBoard } from './life-board-model';
+import {
+  LifeBoard,
+  LifeStakeReturns,
+  laneSummary,
+  laneTiles,
+  lifeRows,
+  ordinal,
+  seatColor,
+  stakeSummary,
+  timeLeft,
+  toLifeBoard,
+} from './life-board-model';
 
 function member(displayName: string, seat: number, overrides: Partial<RoomMember> = {}): RoomMember {
   return {
@@ -79,6 +90,31 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...staked, forkStake: 'fifty' })).toBeNull();
     expect(toLifeBoard({ ...staked, stakeReturns: [{ lane: 'Safe', outcomes: [] }] })).toBeNull();
     expect(toLifeBoard({ ...staked, stakeReturns: [{ lane: 'Safe', outcomes: [{ chance: 100 }] }] })).toBeNull();
+  });
+
+  it('reads finish places, the bonus and what ended the match, and refuses bad ones', () => {
+    const finished = {
+      ...FORK_BOARD,
+      pawns: [lifePawn(1, 9, 100, { bonuses: 100, place: 1 }), lifePawn(2, 4)],
+      lastMove: { seat: 1, roll: 2, from: 8, to: 9, path: [9], place: 1, bonus: 100 },
+      finishBonus: 100,
+      ended: 'Finish',
+    };
+    expect(toLifeBoard(finished)).toEqual(finished);
+    expect(toLifeBoard({ ...finished, ended: 'TimeUp' })).not.toBeNull();
+    expect(toLifeBoard({ ...finished, ended: 'Later' })).toBeNull();
+    expect(toLifeBoard({ ...finished, finishBonus: -1 })).toBeNull();
+    expect(toLifeBoard({ ...finished, pawns: [lifePawn(1, 9, 100, { place: 0 })] })).toBeNull();
+    expect(toLifeBoard({ ...finished, lastMove: { ...finished.lastMove, place: 1.5 } })).toBeNull();
+    expect(toLifeBoard({ ...finished, lastMove: { ...finished.lastMove, bonus: 'big' } })).toBeNull();
+  });
+
+  it('writes places and the time left', () => {
+    expect([1, 2, 3, 4, 6].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '6th']);
+    expect(timeLeft(1_200_000, 0)).toBe('20:00');
+    expect(timeLeft(65_500, 0)).toBe('1:06');
+    expect(timeLeft(5_000, 0)).toBe('0:05');
+    expect(timeLeft(0, 3_000)).toBe('0:00');
   });
 
   it('sums up what a stake on a lane returns', () => {
@@ -386,5 +422,66 @@ describe('Chog Life board', () => {
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob rolled 1, landed on tile 1 (+20 MON) and their MON didn’t change.');
     render(moved(0), members);
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1, landed on tile 1 (+20 MON) and your MON didn’t change.');
+  });
+
+  describe('at the finish', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('counts down the time left every second while the match runs', () => {
+      // A board made under fake timers, so its clock ticks with them.
+      fixture.destroy();
+      vi.useFakeTimers({ now: new Date('2026-10-14T12:00:00Z') });
+      fixture = TestBed.createComponent(LifeBoardView);
+      page = fixture.nativeElement;
+      fixture.componentRef.setInput('endsAt', '2026-10-14T12:20:00Z');
+      render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2)]);
+      expect(page.querySelector('[data-clock]')?.textContent?.trim()).toBe('Time left 20:00');
+
+      vi.advanceTimersByTime(61_000);
+      fixture.detectChanges();
+      expect(page.querySelector('[data-clock]')?.textContent?.trim()).toBe('Time left 18:59');
+    });
+
+    it('shows no clock without a time limit', () => {
+      render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2)]);
+
+      expect(page.querySelector('[data-clock]')).toBeNull();
+    });
+
+    it('marks who finished in which place and says who won the bonus', () => {
+      render(
+        {
+          ...FORK_BOARD,
+          pawns: [lifePawn(1, 9, 100, { bonuses: 100, place: 1 }), lifePawn(2, 9, 80, { place: 2 }), lifePawn(3, 4)],
+          lastMove: { seat: 2, roll: 2, from: 8, to: 9, path: [9], place: 2 },
+          finishBonus: 100,
+        },
+        [member('Alice', 1), member('Bob', 2, { isYou: true }), member('Carol', 3, { isTurn: true })],
+      );
+
+      const finished = Array.from(page.querySelectorAll('[data-list="pawns"] li')).map((li) => li.querySelector('[data-finished]')?.textContent ?? null);
+      expect(finished).toEqual(['Finished 1st', 'Finished 2nd', null]);
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 2 and reached the finish in 2nd place.');
+
+      render(
+        { ...FORK_BOARD, pawns: [lifePawn(1, 9, 100, { bonuses: 100, place: 1 }), lifePawn(2, 4)], lastMove: { seat: 1, roll: 3, from: 8, to: 9, path: [9], place: 1, bonus: 100 } },
+        [member('Alice', 1), member('Bob', 2, { isYou: true, isTurn: true })],
+      );
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe(
+        'Alice rolled 3 and reached the finish in 1st place, winning the 100 MON bonus.',
+      );
+    });
+
+    it.each([
+      ['Finish', 'Everyone reached the finish! Players are ranked by their final portfolio.'],
+      ['TimeUp', 'Time’s up! Players are ranked by their final portfolio.'],
+    ] as const)('says the match ended by %s and stops the clock', (ended, text) => {
+      fixture.componentRef.setInput('endsAt', new Date(Date.now() + 60_000).toISOString());
+      render({ ...FORK_BOARD, ended }, [member('Alice', 1, { rank: 1 }), member('Bob', 2, { isYou: true, rank: 1 })]);
+
+      expect(page.querySelector('[data-ending]')?.textContent).toBe(text);
+      expect(page.querySelector('[data-clock]')).toBeNull();
+      expect(page.querySelector('[data-roll]')).toBeNull();
+    });
   });
 });

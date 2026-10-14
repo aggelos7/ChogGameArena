@@ -608,6 +608,55 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
     }
 
     [PostgresTheory]
+    [InlineData(false, 600)]
+    [InlineData(true, 0)]
+    [InlineData(true, -1)]
+    [InlineData(true, 1201)]
+    public async Task Database_rejects_a_time_limit_without_a_start_or_outside_twenty_minutes(bool started, int seconds)
+    {
+        var (room, _) = await RoomWithHost();
+        if (started)
+        {
+            await SetStatus(room, RoomStatus.Active);
+        }
+
+        await using var db = database.CreateDbContext();
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "GameRooms" SET "MatchEndsAt" = COALESCE("StartedAt", {clock.GetUtcNow()}) + make_interval(secs => {seconds})
+            WHERE "Id" = {room.Id}
+            """));
+
+        Assert.Equal(("23514", "CK_GameRooms_MatchEndsAt"), (error.SqlState, error.ConstraintName));
+    }
+
+    [PostgresFact]
+    public async Task Database_accepts_a_time_limit_of_up_to_twenty_minutes_on_a_started_match()
+    {
+        var (room, _) = await RoomWithHost();
+        await SetStatus(room, RoomStatus.Active);
+        await using var db = database.CreateDbContext();
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "GameRooms" SET "MatchEndsAt" = "StartedAt" + interval '20 minutes' WHERE "Id" = {room.Id}
+            """);
+
+        Assert.Equal(TimeSpan.FromMinutes(20), (await Stored(room)).MatchEndsAt - (await Stored(room)).StartedAt);
+    }
+
+    [PostgresFact]
+    public async Task Database_rejects_a_finish_for_a_member_without_a_seat()
+    {
+        var (room, host) = await RoomWithHost();
+        await using var db = database.CreateDbContext();
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "RoomMembers" SET "FinishedAt" = {clock.GetUtcNow()} WHERE "RoomId" = {room.Id} AND "PlayerId" = {host.Id}
+            """));
+
+        Assert.Equal(("23514", "CK_RoomMembers_FinishedAt"), (error.SqlState, error.ConstraintName));
+    }
+
+    [PostgresTheory]
     [InlineData(0)]
     [InlineData(2)]
     public async Task Database_accepts_ability_uses_up_to_the_locked_max(int uses)

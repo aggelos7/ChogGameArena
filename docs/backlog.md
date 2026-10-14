@@ -606,7 +606,7 @@
 
 #### STORY-041 — Finish and time cap
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Complete on configured finish condition or 20-minute deadline and rank by portfolio.

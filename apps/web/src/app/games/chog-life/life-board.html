@@ -12,6 +12,9 @@
           @if (member.isTurn) {
             <span class="tag turn" data-turn>Turn</span>
           }
+          @if (pawnBySeat().get(member.seat)?.place; as place) {
+            <span class="tag finished" data-finished>Finished {{ ordinal(place) }}</span>
+          }
         </span>
         @if (pawnBySeat().get(member.seat); as pawn) {
           <span class="portfolio" [class.negative]="pawn.portfolio < 0" data-portfolio>{{ pawn.portfolio }} MON</span>
@@ -22,6 +25,12 @@
       </li>
     }
   </ul>
+  @if (clock(); as left) {
+    <p class="clock" data-clock>Time left <strong role="timer">{{ left }}</strong></p>
+  }
+  @if (ending(); as text) {
+    <p class="ending" role="status" data-ending>{{ text }}</p>
+  }
   <p class="turn-line" role="status" data-turn-line>
     @if (chooser(); as current) {
       @if (current.isYou) {

@@ -20,6 +20,7 @@ const room = (status: RoomStatus, code = 'K7QF3M'): Room => ({
   capacity: 6,
   turnNumber: status === 'Active' ? 1 : 0,
   turnEndsAt: null,
+  matchEndsAt: null,
   members: [],
   state: null,
   abilities: [],
