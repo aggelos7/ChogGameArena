@@ -1,8 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RoomMember } from '../../rooms/rooms-api';
 import { LifeBoardView } from './life-board';
-import { FORK_BOARD } from '../../testing';
-import { LifeBoard, laneSummary, laneTiles, lifeRows, seatColor, toLifeBoard } from './life-board-model';
+import { FORK_BOARD, lifePawn } from '../../testing';
+import { LifeBoard, LifeStakeReturns, laneSummary, laneTiles, lifeRows, seatColor, stakeSummary, toLifeBoard } from './life-board-model';
 
 function member(displayName: string, seat: number, overrides: Partial<RoomMember> = {}): RoomMember {
   return {
@@ -34,7 +34,7 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...FORK_BOARD, tiles: [...FORK_BOARD.tiles].reverse() })).toBeNull();
     expect(toLifeBoard({ ...FORK_BOARD, tiles: FORK_BOARD.tiles.map((t) => (t.index === 4 ? { ...t, next: 1 } : t)) })).toBeNull();
     expect(toLifeBoard({ ...FORK_BOARD, tiles: FORK_BOARD.tiles.map((t) => (t.index === 1 ? { ...t, type: 'Teleport' } : t)) })).toBeNull();
-    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 10, mon: 100 }] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [lifePawn(1, 10, 100)] })).toBeNull();
     // A last move must name tiles on the board.
     const moved = { ...FORK_BOARD, lastMove: { seat: 1, roll: 3, from: 0, to: 2, path: [1, 2] } };
     expect(toLifeBoard(moved)).toEqual(moved);
@@ -43,19 +43,53 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, roll: -1 } })).toBeNull();
     // Every pawn carries a whole, non-negative MON balance, and a move's change is a whole number.
     expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0 }] })).toBeNull();
-    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: -5 }] })).toBeNull();
-    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 1.5 }] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [lifePawn(1, 0, -5)] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [lifePawn(1, 0, 1.5)] })).toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, change: -40 } })).not.toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, change: 'lots' } })).toBeNull();
     // A lane choice (STORY-039): only the safe or degen route, a seat choosing and a default route.
-    const choosing = { ...FORK_BOARD, pawns: [{ seat: 1, tile: 2, mon: 100, lane: 'Degen' }], choosing: 1, defaultLane: 'Safe' };
+    const choosing = { ...FORK_BOARD, pawns: [lifePawn(1, 2, 100, { lane: 'Degen' })], choosing: 1, defaultLane: 'Safe' };
     expect(toLifeBoard(choosing)).toEqual(choosing);
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, lane: 'Safe', byDefault: true } })).not.toBeNull();
-    expect(toLifeBoard({ ...choosing, pawns: [{ seat: 1, tile: 2, mon: 100, lane: 'Main' }] })).toBeNull();
+    expect(toLifeBoard({ ...choosing, pawns: [{ ...lifePawn(1, 2, 100), lane: 'Main' }] })).toBeNull();
     expect(toLifeBoard({ ...choosing, choosing: -1 })).toBeNull();
     expect(toLifeBoard({ ...choosing, defaultLane: 'Sideways' })).toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, lane: 'safe' } })).toBeNull();
     expect(toLifeBoard({ ...moved, lastMove: { ...moved.lastMove, byDefault: 'yes' } })).toBeNull();
+    // A portfolio (STORY-040): whole parts, a total that may be negative, a stake on a route and stake returns.
+    const staked = {
+      ...FORK_BOARD,
+      pawns: [lifePawn(1, 3, 0, { lane: 'Safe', stake: { lane: 'Safe', amount: 50 }, assets: 50, liabilities: 60 })],
+      lastMove: { ...moved.lastMove, lane: 'Safe', staked: 50, matured: { lane: 'Degen', stake: 50, payout: 150 } },
+      forkStake: 50,
+      stakeReturns: [{ lane: 'Safe', outcomes: [{ chance: 100, percent: 125 }] }],
+    };
+    expect(toLifeBoard(staked)).toEqual(staked);
+    expect(staked.pawns[0].portfolio).toBe(-10);
+    for (const part of ['assets', 'bonuses', 'liabilities', 'portfolio']) {
+      const missing: Record<string, unknown> = { ...lifePawn(1, 0) };
+      delete missing[part];
+      expect(toLifeBoard({ ...FORK_BOARD, pawns: [missing] })).toBeNull();
+    }
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [lifePawn(1, 0, 100, { liabilities: -1 })] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ ...lifePawn(1, 0), portfolio: 1.5 }] })).toBeNull();
+    expect(toLifeBoard({ ...FORK_BOARD, pawns: [{ ...lifePawn(1, 0), stake: { lane: 'Main', amount: 50 } }] })).toBeNull();
+    expect(toLifeBoard({ ...staked, lastMove: { ...staked.lastMove, staked: -50 } })).toBeNull();
+    expect(toLifeBoard({ ...staked, lastMove: { ...staked.lastMove, matured: { lane: 'Degen', stake: 50 } } })).toBeNull();
+    expect(toLifeBoard({ ...staked, forkStake: 'fifty' })).toBeNull();
+    expect(toLifeBoard({ ...staked, stakeReturns: [{ lane: 'Safe', outcomes: [] }] })).toBeNull();
+    expect(toLifeBoard({ ...staked, stakeReturns: [{ lane: 'Safe', outcomes: [{ chance: 100 }] }] })).toBeNull();
+  });
+
+  it('sums up what a stake on a lane returns', () => {
+    const safe: LifeStakeReturns = { lane: 'Safe', outcomes: [{ chance: 100, percent: 125 }] };
+    const degen: LifeStakeReturns = { lane: 'Degen', outcomes: [{ chance: 30, percent: 300 }, { chance: 70, percent: 20 }] };
+
+    expect(stakeSummary(50, safe)).toBe('Stake 50 MON, get 62 MON back');
+    expect(stakeSummary(50, degen)).toBe('Stake 50 MON, get 150 MON back (30%) or 10 MON (70%)');
+    expect(stakeSummary(7, safe)).toBe('Stake 7 MON, get 8 MON back');
+    expect(stakeSummary(0, safe)).toBe('Nothing to stake');
+    expect(stakeSummary(50, undefined)).toBe('Nothing to stake');
   });
 
   it('sums up what each lane of a fork holds', () => {
@@ -122,7 +156,7 @@ describe('Chog Life board', () => {
 
   it.each([2, 6])('shows all %i pawns, numbered by seat, and whose turn it is', (count) => {
     const members = NAMES.slice(0, count).map((name, i) => member(name, i + 1, { isTurn: i === 1, isYou: i === 0 }));
-    render({ ...FORK_BOARD, pawns: members.map((_, i) => ({ seat: i + 1, tile: 0, mon: 100 })) }, members);
+    render({ ...FORK_BOARD, pawns: members.map((_, i) => lifePawn(i + 1, 0)) }, members);
 
     expect(pawnsOn(0)).toEqual(NAMES.slice(0, count).map((_, i) => String(i + 1)));
     expect(page.querySelectorAll('[data-pawn]').length).toBe(count);
@@ -138,7 +172,7 @@ describe('Chog Life board', () => {
 
   it('puts each pawn on its own tile and tells you when it is your turn', () => {
     render(
-      { ...FORK_BOARD, pawns: [{ seat: 1, tile: 6, mon: 100 }, { seat: 2, tile: 3, mon: 100 }, { seat: 3, tile: 9, mon: 100 }] },
+      { ...FORK_BOARD, pawns: [lifePawn(1, 6, 100), lifePawn(2, 3, 100), lifePawn(3, 9, 100)] },
       [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2), member('Carol', 3)],
     );
 
@@ -147,7 +181,7 @@ describe('Chog Life board', () => {
   });
 
   it('only lists players who still have a pawn', () => {
-    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 3, tile: 0, mon: 100 }] }, [
+    render({ ...FORK_BOARD, pawns: [lifePawn(1, 0, 100), lifePawn(3, 0, 100)] }, [
       member('Alice', 1, { isTurn: true }),
       member('Bob', 2, { hasLeft: true }),
       member('Carol', 3),
@@ -179,12 +213,12 @@ describe('Chog Life board', () => {
 
   it('shows the last move and marks where it ended', () => {
     const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
-    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2, mon: 100 }, { seat: 2, tile: 0, mon: 100 }], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
+    render({ ...FORK_BOARD, pawns: [lifePawn(1, 2, 100), lifePawn(2, 0, 100)], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
 
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 2 and moved to tile 2 (Safe or Degen?).');
     expect(Array.from(page.querySelectorAll('.last-stop')).map((t) => (t as HTMLElement).dataset['tile'])).toEqual(['2']);
 
-    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 2, mon: 100 }, { seat: 2, tile: 9, mon: 100 }], lastMove: { seat: 2, from: 9, to: 9, path: [] } }, members);
+    render({ ...FORK_BOARD, pawns: [lifePawn(1, 2, 100), lifePawn(2, 9, 100)], lastMove: { seat: 2, from: 9, to: 9, path: [] } }, members);
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob passed at the finish.');
     expect(page.querySelector('.last-stop')).toBeNull();
 
@@ -196,8 +230,8 @@ describe('Chog Life board', () => {
     const atFork = (seat: number): LifeBoard => ({
       ...FORK_BOARD,
       pawns: [
-        { seat: 1, tile: 2, mon: 100 },
-        { seat: 2, tile: 0, mon: 100 },
+        lifePawn(1, 2, 100),
+        lifePawn(2, 0, 100),
       ].map((pawn) => (pawn.seat === seat ? { ...pawn, tile: 2 } : pawn)),
       lastMove: { seat, roll: 2, from: 0, to: 2, path: [1, 2] },
       choosing: seat,
@@ -219,6 +253,7 @@ describe('Chog Life board', () => {
       ]);
       expect(page.querySelector('[data-route-hint]')?.textContent).toBe('If time runs out, you take the safe route.');
       expect(highlighted().sort((a, b) => a - b)).toEqual([3, 4, 5, 6, 7]);
+      expect(page.querySelector('[data-route-stake]')).toBeNull();
 
       routes[1].click();
       routes[0].click();
@@ -227,6 +262,27 @@ describe('Chog Life board', () => {
       fixture.componentRef.setInput('rolling', true);
       fixture.detectChanges();
       expect(Array.from(page.querySelectorAll<HTMLButtonElement>('[data-route]')).every((b) => b.disabled)).toBe(true);
+    });
+
+    it('says what staking on each route returns, with all your MON if you hold less than the stake', () => {
+      const withStakes = (mon: number): LifeBoard => ({
+        ...atFork(1),
+        pawns: [lifePawn(1, 2, mon), lifePawn(2, 0)],
+        forkStake: 50,
+        stakeReturns: [
+          { lane: 'Safe', outcomes: [{ chance: 100, percent: 125 }] },
+          { lane: 'Degen', outcomes: [{ chance: 30, percent: 300 }, { chance: 70, percent: 20 }] },
+        ],
+      });
+      const stakes = () => Array.from(page.querySelectorAll('[data-route-stake]')).map((s) => s.textContent?.trim());
+      const members = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)];
+
+      render(withStakes(100), members);
+      expect(stakes()).toEqual(['Stake 50 MON, get 62 MON back', 'Stake 50 MON, get 150 MON back (30%) or 10 MON (70%)']);
+      render(withStakes(20), members);
+      expect(stakes()).toEqual(['Stake 20 MON, get 25 MON back', 'Stake 20 MON, get 60 MON back (30%) or 4 MON (70%)']);
+      render(withStakes(0), members);
+      expect(stakes()).toEqual(['Nothing to stake', 'Nothing to stake']);
     });
 
     it('tells everyone else who is choosing, without the choice buttons', () => {
@@ -250,7 +306,7 @@ describe('Chog Life board', () => {
       const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
       const chosen = (seat: number, byDefault?: boolean): LifeBoard => ({
         ...FORK_BOARD,
-        pawns: [{ seat, tile: 2, mon: 100, lane: byDefault ? 'Safe' : 'Degen' }],
+        pawns: [lifePawn(seat, 2, 100, { lane: byDefault ? 'Safe' : 'Degen' })],
         lastMove: { seat, roll: 2, from: 0, to: 2, path: [1, 2], lane: byDefault ? 'Safe' : 'Degen', byDefault },
       });
 
@@ -266,18 +322,53 @@ describe('Chog Life board', () => {
         'You rolled 2 and moved to tile 2 (Safe or Degen?). Time ran out, so you take the safe route.',
       );
     });
+
+    it('says what was staked on the route and what a stake paid back', () => {
+      const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+      const fork = { seat: 2, roll: 2, from: 0, to: 2, path: [1, 2] };
+      const lastMove = (board: Partial<LifeBoard['lastMove']>, seat = 2) => {
+        render({ ...FORK_BOARD, lastMove: { ...fork, seat, ...board } }, members);
+        return page.querySelector('[data-last-move]')?.textContent?.trim();
+      };
+
+      expect(lastMove({ lane: 'Degen', staked: 50 })).toBe('Bob rolled 2 and moved to tile 2 (Safe or Degen?). Bob chose the degen route and staked 50 MON.');
+      expect(lastMove({ lane: 'Safe', byDefault: true, staked: 20 })).toBe(
+        'Bob rolled 2 and moved to tile 2 (Safe or Degen?). Time ran out, so Bob takes the safe route and stakes 20 MON.',
+      );
+      expect(lastMove({ lane: 'Safe', byDefault: true, staked: 50 }, 1)).toBe(
+        'You rolled 2 and moved to tile 2 (Safe or Degen?). Time ran out, so you take the safe route and stake 50 MON.',
+      );
+      expect(lastMove({ from: 7, to: 8, path: [8], change: -15, matured: { lane: 'Degen', stake: 50, payout: 150 } })).toBe(
+        'Bob rolled 2, landed on tile 8 (−15 MON) and lost 15 MON. Their degen stake of 50 MON paid back 150 MON.',
+      );
+      expect(lastMove({ from: 4, to: 9, path: [8, 9], matured: { lane: 'Safe', stake: 50, payout: 62 } }, 1)).toBe(
+        'You rolled 2 and moved to tile 9 (Finish). Your safe stake of 50 MON paid back 62 MON.',
+      );
+    });
   });
 
-  it('shows every player’s MON in the legend', () => {
-    render({ ...FORK_BOARD, pawns: [{ seat: 1, tile: 1, mon: 120 }, { seat: 2, tile: 0, mon: 0 }] }, [
-      member('Alice', 1, { isYou: true }),
-      member('Bob', 2, { isTurn: true }),
-    ]);
+  it('shows every player’s portfolio in the legend as the server values it', () => {
+    // The total comes from the server, never added up here: Carol's is deliberately not the sum of her parts.
+    render(
+      {
+        ...FORK_BOARD,
+        pawns: [
+          lifePawn(1, 3, 40, { lane: 'Safe', stake: { lane: 'Safe', amount: 50 }, assets: 50 }),
+          lifePawn(2, 0, 0, { liabilities: 6 }),
+          { ...lifePawn(3, 0, 100, { bonuses: 100 }), portfolio: 777 },
+        ],
+      },
+      [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true }), member('Carol', 3)],
+    );
 
-    expect(Array.from(page.querySelectorAll('[data-list="pawns"] li')).map((li) => li.querySelector('[data-mon]')?.textContent?.trim())).toEqual([
-      '120 MON',
-      '0 MON',
+    const rows = Array.from(page.querySelectorAll('[data-list="pawns"] li'));
+    expect(rows.map((li) => li.querySelector('[data-portfolio]')?.textContent?.trim())).toEqual(['90 MON', '-6 MON', '777 MON']);
+    expect(rows.map((li) => li.querySelector('[data-breakdown]')?.textContent?.trim().replace(/\s+/g, ' '))).toEqual([
+      'Liquid 40 · Assets 50 · Bonus 0 · Debt 0',
+      'Liquid 0 · Assets 0 · Bonus 0 · Debt 6',
+      'Liquid 100 · Assets 0 · Bonus 100 · Debt 0',
     ]);
+    expect(rows[1].querySelector('[data-portfolio]')?.classList).toContain('negative');
   });
 
   it('says what the tile did to the mover’s MON', () => {

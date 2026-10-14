@@ -1,5 +1,5 @@
 import { GameSummary } from './games/game-catalog';
-import { LifeBoard } from './games/chog-life/life-board-model';
+import { LifeBoard, LifePawn } from './games/chog-life/life-board-model';
 
 /** Catalogue fixture covering every status. */
 export const CATALOGUE: GameSummary[] = [
@@ -9,6 +9,15 @@ export const CATALOGUE: GameSummary[] = [
 ];
 
 /** A small board shaped like the real one: a fork whose lanes differ in length and join at one main tile. */
+/**
+ * A pawn as the server sends it, with its portfolio (STORY-040, DEC-042): `mon` liquid MON, no assets, bonuses or
+ * liabilities unless given, and the total worked out from them.
+ */
+export function lifePawn(seat: number, tile: number, mon = 100, extra: Partial<LifePawn> = {}): LifePawn {
+  const parts = { assets: 0, bonuses: 0, liabilities: 0, ...extra };
+  return { seat, tile, mon, ...parts, portfolio: mon + parts.assets + parts.bonuses - parts.liabilities };
+}
+
 export const FORK_BOARD: LifeBoard = {
   rulesVersion: 1,
   tiles: [
@@ -23,8 +32,5 @@ export const FORK_BOARD: LifeBoard = {
     { index: 8, type: 'Loss', lane: 'Main', next: 9, amount: 15 },
     { index: 9, type: 'Finish', lane: 'Main' },
   ],
-  pawns: [
-    { seat: 1, tile: 0, mon: 100 },
-    { seat: 2, tile: 0, mon: 100 },
-  ],
+  pawns: [lifePawn(1, 0), lifePawn(2, 0)],
 };

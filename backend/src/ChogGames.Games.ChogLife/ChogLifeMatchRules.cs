@@ -17,7 +17,9 @@ namespace ChogGames.Games.ChogLife;
 /// their MON and an event tile draws one of its outcomes, and every player sees each player's liquid MON. A roll that
 /// stops on a fork keeps the turn until the player sends <c>CHOOSE_LANE</c> (STORY-039, DEC-041); their next roll
 /// leaves by that lane. A turn that runs out while that choice is pending takes the rules' default lane; any other turn
-/// that runs out is skipped.
+/// that runs out is skipped. The lane taken holds a stake of the player's liquid MON, an asset that pays out when the pawn
+/// rejoins the main track, a loss bigger than the liquid MON held becomes a liability, and every player sees each
+/// player's liquid MON, assets, bonuses, liabilities and total portfolio (STORY-040, DEC-042).
 /// </summary>
 public sealed class ChogLifeMatchRules : IMatchRules
 {
@@ -88,11 +90,7 @@ public sealed class ChogLifeMatchRules : IMatchRules
 
         var state = WithMon(stored, rules);
         var seat = context.Match.Members.SingleOrDefault(member => member.PlayerId == context.PlayerId)?.Seat;
-        if (state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn
-            || pawn.Tile < 0
-            || pawn.Tile >= rules.Tiles.Count
-            || pawn.Mon is not (>= 0 and <= LifeRules.MaxMon)
-            || pawn.Lane is not (null or LifeLane.Safe or LifeLane.Degen))
+        if (state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn || !IsPlayable(pawn, rules))
         {
             return MatchRuleDecision.Reject("game_state_unavailable");
         }
@@ -105,6 +103,17 @@ public sealed class ChogLifeMatchRules : IMatchRules
             : ChooseFor(pawn, choosing, state, rules, context.Payload);
     }
 
+    /// <summary>
+    /// The pawn stands on the board with a portfolio in range, a lane it can take and a stake on a lane its rules pay out.
+    /// </summary>
+    private static bool IsPlayable(LifePawn pawn, LifeRules rules) =>
+        pawn.Tile >= 0
+        && pawn.Tile < rules.Tiles.Count
+        && pawn.Mon is not null
+        && PortfolioOf(pawn).IsValid
+        && pawn.Lane is (null or LifeLane.Safe or LifeLane.Degen)
+        && (pawn.Stake is null || (pawn.Stake.Amount > 0 && rules.Stakes.ContainsKey(pawn.Stake.Lane)));
+
     private static MatchRuleDecision RollFor(
         LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, IRandomSource random)
     {
@@ -114,6 +123,8 @@ public sealed class ChogLifeMatchRules : IMatchRules
         }
 
         LifeMove move;
+        var portfolio = PortfolioOf(pawn);
+        var stake = pawn.Stake;
         if (pawn.Tile == rules.Finish.Index)
         {
             move = new LifeMove(pawn.Seat, null, pawn.Tile, pawn.Tile, []);
@@ -122,14 +133,32 @@ public sealed class ChogLifeMatchRules : IMatchRules
         {
             var roll = random.Next(1, rules.DieFaces + 1);
             var path = rules.Path(pawn.Tile, roll, pawn.Lane);
-            var change = rules.Resolve(path[^1], pawn.Mon!.Value, random);
-            move = new LifeMove(pawn.Seat, roll, pawn.Tile, path[^1], path, change);
+
+            // A stake pays out as the pawn rejoins the main track, before the tile it stops on resolves (DEC-042).
+            LifeMaturity? matured = null;
+            if (stake is not null && path.Any(tile => rules.Tiles[tile].Lane == LifeLane.Main))
+            {
+                var payout = rules.Payout(stake, random);
+                portfolio = (portfolio with { Assets = 0 }).Settle(payout);
+                matured = new LifeMaturity(stake.Lane, stake.Amount, payout);
+                stake = null;
+            }
+
+            int? change = null;
+            if (rules.Resolve(path[^1], portfolio.Liquid, random) is { } wanted)
+            {
+                var settled = portfolio.Settle(wanted);
+                change = settled.Total - portfolio.Total;
+                portfolio = settled;
+            }
+
+            move = new LifeMove(pawn.Seat, roll, pawn.Tile, path[^1], path, change, Matured: matured);
         }
 
         var atFork = rules.Tiles[move.To].Type == LifeTileType.Branch;
         var next = state with
         {
-            Pawns = Replace(state, pawn with { Tile = move.To, Mon = pawn.Mon + (move.Change ?? 0), Lane = null }),
+            Pawns = Replace(state, Holding(pawn with { Tile = move.To, Lane = null, Stake = stake }, portfolio)),
             LastMove = move,
             Choosing = atFork ? pawn.Seat : null,
         };
@@ -153,7 +182,7 @@ public sealed class ChogLifeMatchRules : IMatchRules
             return MatchRuleDecision.Reject("invalid_lane");
         }
 
-        var chosen = Choose(state, pawn, lane, byDefault: false);
+        var chosen = Choose(state, pawn, lane, byDefault: false, rules);
         return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(chosen, Json), endsTurn: true);
     }
 
@@ -169,14 +198,37 @@ public sealed class ChogLifeMatchRules : IMatchRules
             }
             : null;
 
-    /// <summary>The pawn keeps its place on the fork with the lane it will leave by, and the last move says which.</summary>
-    private static LifeMatchState Choose(LifeMatchState state, LifePawn pawn, LifeLane lane, bool byDefault) => state with
+    /// <summary>
+    /// The pawn keeps its place on the fork with the lane it will leave by, staking the rules' fork stake of its liquid
+    /// MON on it, or all it holds if less (DEC-042); a pawn already holding a stake stakes nothing more. The last move
+    /// says which lane and what was staked.
+    /// </summary>
+    private static LifeMatchState Choose(
+        LifeMatchState state, LifePawn pawn, LifeLane lane, bool byDefault, LifeRules rules)
     {
-        Pawns = Replace(state, pawn with { Lane = lane }),
-        LastMove = state.LastMove is { } move && move.Seat == pawn.Seat
-            ? move with { Lane = lane, ByDefault = byDefault ? true : null }
-            : state.LastMove,
-        Choosing = null,
+        var staked = pawn.Stake is null ? Math.Min(rules.ForkStake, pawn.Mon!.Value) : 0;
+        var chosen = staked > 0
+            ? pawn with { Lane = lane, Mon = pawn.Mon - staked, Stake = new LifeAsset(lane, staked) }
+            : pawn with { Lane = lane };
+        return state with
+        {
+            Pawns = Replace(state, chosen),
+            LastMove = state.LastMove is { } move && move.Seat == pawn.Seat
+                ? move with { Lane = lane, ByDefault = byDefault ? true : null, Staked = staked > 0 ? staked : null }
+                : state.LastMove,
+            Choosing = null,
+        };
+    }
+
+    private static LifePortfolio PortfolioOf(LifePawn pawn) =>
+        new(pawn.Mon ?? 0, pawn.Stake?.Amount ?? 0, pawn.Bonuses ?? 0, pawn.Liabilities ?? 0);
+
+    /// <summary>The pawn holding <paramref name="portfolio"/>'s liquid MON, bonuses and liabilities; zeros aren't stored.</summary>
+    private static LifePawn Holding(LifePawn pawn, LifePortfolio portfolio) => pawn with
+    {
+        Mon = portfolio.Liquid,
+        Bonuses = portfolio.Bonuses == 0 ? null : portfolio.Bonuses,
+        Liabilities = portfolio.Liabilities == 0 ? null : portfolio.Liabilities,
     };
 
     private static LifePawn[] Replace(LifeMatchState state, LifePawn pawn) =>
@@ -189,24 +241,25 @@ public sealed class ChogLifeMatchRules : IMatchRules
     public JsonElement? TimeOutTurn(MatchTurnContext context)
     {
         if (context.State is not { } json
-            || Read(json) is not { Choosing: { } seat } state
-            || !_rulesByVersion.TryGetValue(state.RulesVersion, out var rules)
+            || Read(json) is not { Choosing: { } seat } stored
+            || !_rulesByVersion.TryGetValue(stored.RulesVersion, out var rules)
             || context.Match.Members.SingleOrDefault(member => member.PlayerId == context.Match.CurrentPlayerId)?.Seat != seat
+            || WithMon(stored, rules) is not { } state
             || state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn
-            || pawn.Tile < 0
-            || pawn.Tile >= rules.Tiles.Count
+            || !IsPlayable(pawn, rules)
             || rules.Tiles[pawn.Tile].Type != LifeTileType.Branch)
         {
             return null;
         }
 
-        return JsonSerializer.SerializeToElement(Choose(state, pawn, rules.DefaultLane, byDefault: true), Json);
+        return JsonSerializer.SerializeToElement(Choose(state, pawn, rules.DefaultLane, byDefault: true, rules), Json);
     }
 
     /// <summary>
-    /// The board and the pawns with each player's liquid MON and the lane chosen at the fork they stand on, who is
-    /// choosing a lane and the lane taken if they don't, the same for every player: Chog Life has no hidden information
-    /// on the board. Pawns of players who left are taken off. A state this server can't read, or of a version it no longer knows, shows nothing.
+    /// The board and the pawns with each player's portfolio (liquid MON, assets, bonuses, liabilities and the total, as
+    /// the server values them, DEC-042) and the lane chosen at the fork they stand on, who is choosing a lane and the
+    /// lane taken if they don't, and what a fork's stake returns on each lane, the same for every player: Chog Life has
+    /// no hidden information on the board. Pawns of players who left are taken off. A state this server can't read, or of a version it no longer knows, shows nothing.
     /// </summary>
     public JsonElement? ViewFor(MatchViewContext context)
     {
@@ -222,10 +275,12 @@ public sealed class ChogLifeMatchRules : IMatchRules
         var view = new LifeBoardView(
             rules.Version,
             rules.Tiles.Select(ToView).ToArray(),
-            WithMon(state, rules).Pawns.Where(pawn => playing.Contains(pawn.Seat)).OrderBy(pawn => pawn.Seat).ToArray(),
+            WithMon(state, rules).Pawns.Where(pawn => playing.Contains(pawn.Seat)).OrderBy(pawn => pawn.Seat).Select(ToView).ToArray(),
             state.LastMove,
             state.Choosing is { } seat && playing.Contains(seat) ? seat : null,
-            rules.DefaultLane);
+            rules.DefaultLane,
+            rules.ForkStake > 0 ? rules.ForkStake : null,
+            rules.ForkStake > 0 ? [rules.Stakes[LifeLane.Safe], rules.Stakes[LifeLane.Degen]] : null);
         return JsonSerializer.SerializeToElement(view, Json);
     }
 
@@ -244,6 +299,21 @@ public sealed class ChogLifeMatchRules : IMatchRules
     /// <summary>Pawns stored before STORY-038 have no MON yet; they hold the starting MON.</summary>
     private static LifeMatchState WithMon(LifeMatchState state, LifeRules rules) =>
         state with { Pawns = state.Pawns.Select(pawn => pawn with { Mon = pawn.Mon ?? rules.StartingMon }).ToArray() };
+
+    private static LifePawnView ToView(LifePawn pawn)
+    {
+        var portfolio = PortfolioOf(pawn);
+        return new LifePawnView(
+            pawn.Seat,
+            pawn.Tile,
+            portfolio.Liquid,
+            pawn.Lane,
+            pawn.Stake,
+            portfolio.Assets,
+            portfolio.Bonuses,
+            portfolio.Liabilities,
+            portfolio.Total);
+    }
 
     private static LifeTileView ToView(LifeTile tile) => new(
         tile.Index,
@@ -265,8 +335,10 @@ public sealed class ChogLifeMatchRules : IMatchRules
     /// <summary>
     /// A seat's move: the roll (null when a pawn on the Finish passed), the tiles it left and reached, every tile it
     /// passed on the way, ending with <paramref name="To"/>, and the signed MON the tile it stopped on moved (null for a
-    /// tile that does nothing). A move that stopped on a fork gets the <paramref name="Lane"/> chosen there, and
-    /// <paramref name="ByDefault"/> when the turn ran out and the rules chose it.
+    /// tile that does nothing; a loss the liquid MON couldn't cover counts in full, the rest having become a liability).
+    /// A move that stopped on a fork gets the <paramref name="Lane"/> chosen there, <paramref name="ByDefault"/> when the
+    /// turn ran out and the rules chose it, and the MON <paramref name="Staked"/> on it. A move that rejoined the main
+    /// track with a stake says what it paid out (<paramref name="Matured"/>).
     /// </summary>
     private sealed record LifeMove(
         int Seat,
@@ -276,21 +348,48 @@ public sealed class ChogLifeMatchRules : IMatchRules
         IReadOnlyList<int> Path,
         int? Change = null,
         LifeLane? Lane = null,
-        bool? ByDefault = null);
+        bool? ByDefault = null,
+        int? Staked = null,
+        LifeMaturity? Matured = null);
+
+    /// <summary>A stake of <paramref name="Stake"/> MON on <paramref name="Lane"/> that paid <paramref name="Payout"/> MON back.</summary>
+    private sealed record LifeMaturity(LifeLane Lane, int Stake, int Payout);
 
     /// <summary>
-    /// A seat's pawn: the tile it stands on, the player's liquid MON (null in states from before STORY-038) and, on a
-    /// fork, the lane it will leave by (null until chosen).
+    /// A seat's pawn: the tile it stands on, the player's liquid MON (null in states from before STORY-038), on a fork
+    /// the lane it will leave by (null until chosen), the MON staked on the lane it took until that pays out, and the
+    /// player's bonuses and liabilities (null for none).
     /// </summary>
-    private sealed record LifePawn(int Seat, int Tile, int? Mon, LifeLane? Lane = null);
+    private sealed record LifePawn(
+        int Seat,
+        int Tile,
+        int? Mon,
+        LifeLane? Lane = null,
+        LifeAsset? Stake = null,
+        int? Bonuses = null,
+        int? Liabilities = null);
+
+    /// <summary>A pawn as every player sees it, with its player's portfolio: <c>mon</c> is the liquid MON.</summary>
+    private sealed record LifePawnView(
+        int Seat,
+        int Tile,
+        int Mon,
+        LifeLane? Lane,
+        LifeAsset? Stake,
+        int Assets,
+        int Bonuses,
+        int Liabilities,
+        int Portfolio);
 
     private sealed record LifeBoardView(
         int RulesVersion,
         IReadOnlyList<LifeTileView> Tiles,
-        IReadOnlyList<LifePawn> Pawns,
+        IReadOnlyList<LifePawnView> Pawns,
         LifeMove? LastMove,
         int? Choosing,
-        LifeLane DefaultLane);
+        LifeLane DefaultLane,
+        int? ForkStake,
+        IReadOnlyList<LifeLaneStake>? StakeReturns);
 
     private sealed record LifeTileView(
         int Index,

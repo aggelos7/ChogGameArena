@@ -7,7 +7,8 @@ namespace ChogGames.Games.ChogLife.Rules;
 /// <summary>
 /// Chog Life rules version 1 (STORY-035, DEC-037): 36 tiles on a main track with two Safe/Degen forks, 100 MON to
 /// start, +100 MON for the first player to finish, a 20-minute cap, one six-sided die, the event outcomes of
-/// STORY-038 (DEC-040) and the safe lane for a player who doesn't choose at a fork (STORY-039, DEC-041).
+/// STORY-038 (DEC-040), the safe lane for a player who doesn't choose at a fork (STORY-039, DEC-041) and a 50 MON stake
+/// on the lane taken at a fork (STORY-040, DEC-042).
 /// These are proposed defaults to be balanced in STORY-044 (requirements §15); any change means version 2.
 /// </summary>
 public static class LifeRulesV1
@@ -23,11 +24,13 @@ public static class LifeRulesV1
         timeCap: TimeSpan.FromMinutes(20),
         dieFaces: 6,
         events: Events(),
-        defaultLane: LifeLane.Safe);
+        defaultLane: LifeLane.Safe,
+        forkStake: 50,
+        stakes: Stakes());
 
     /// <summary>
     /// Airdrops always pay, a market moves 10% of liquid MON either way, a rug takes 40% and a liquidation 25%, at least
-    /// 20 MON. Losses never take more than the player has.
+    /// 20 MON. A loss bigger than the liquid MON held leaves the rest as a liability (DEC-042).
     /// </summary>
     private static IEnumerable<LifeEvent> Events() =>
     [
@@ -35,6 +38,16 @@ public static class LifeRulesV1
         new(LifeEventKind.Market, [GainPercent(50, 10, minimum: 5), LosePercent(50, 10, minimum: 5)]),
         new(LifeEventKind.Rug, [LosePercent(100, 40)]),
         new(LifeEventKind.Liquidation, [LosePercent(100, 25, minimum: 20)]),
+    ];
+
+    /// <summary>
+    /// The lane taken at a fork holds a 50 MON stake (STORY-040, DEC-042): the safe lane pays it back with 25%, the
+    /// degen lane triples it at 30% and keeps only a fifth of it (−80%) at 70% (LIFE-005).
+    /// </summary>
+    private static IEnumerable<LifeLaneStake> Stakes() =>
+    [
+        new(Safe, [new LifeStakeOutcome(100, 125)]),
+        new(Degen, [new LifeStakeOutcome(30, 300), new LifeStakeOutcome(70, 20)]),
     ];
 
     // S-1..8-[B9] safe 10-13 / degen 14-17 -> 18..24-[B25] safe 26-28 / degen 29-31 -> 32..34-F35
