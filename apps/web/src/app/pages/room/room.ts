@@ -20,7 +20,7 @@ import {
 } from '../../rooms/rooms-api';
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { LifeBoardView } from '../../games/chog-life/life-board';
-import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, toLifeBoard } from '../../games/chog-life/life-board-model';
+import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
@@ -70,10 +70,13 @@ export class RoomPage implements OnInit {
 
   protected readonly you = computed(() => this.room()?.members.find((member) => member.isYou) ?? null);
 
-  /** The Chog Life board in the room's game state, once the game has started; null for other games or no state. */
+  /**
+   * The Chog Life board in the room's game state, once the game has started and after it was completed, with the final
+   * portfolios (STORY-041); null for other games, no state or a game that ended early.
+   */
   protected readonly lifeBoard = computed(() => {
     const room = this.room();
-    return room?.gameType === 'chog-life' && room.status === 'Active' ? toLifeBoard(room.state) : null;
+    return room?.gameType === 'chog-life' && (room.status === 'Active' || room.status === 'Completed') ? toLifeBoard(room.state) : null;
   });
 
   /** The game has abilities: the player has some to choose from, or someone has one. */
@@ -249,9 +252,7 @@ export class RoomPage implements OnInit {
   }
 
   /** A final place as shown: 1st, 2nd, 3rd, 4th… (rooms hold at most six players). */
-  protected place(rank: number): string {
-    return `${rank}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[rank] ?? 'th'}`;
-  }
+  protected readonly place = ordinal;
 
   protected badge(character: RoomCharacter): Avatar {
     return { id: character.id, name: character.name, color: character.color ?? NFT_COLOR };

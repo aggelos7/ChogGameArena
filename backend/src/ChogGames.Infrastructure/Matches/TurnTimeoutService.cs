@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace ChogGames.Infrastructure.Matches;
 
-/// <param name="Code">The room whose turn timed out.</param>
+/// <param name="Code">The room whose turn timed out, or whose match ended.</param>
 /// <param name="ForfeitedPlayerId">The player who forfeited by missing too many turns in a row, if any.</param>
 public sealed record TimedOutTurn(string Code, Guid? ForfeitedPlayerId);
 
@@ -18,7 +18,9 @@ public sealed record TimedOutTurn(string Code, Guid? ForfeitedPlayerId);
 /// the room's row lock and checked again after locking, so a turn times out exactly once however many sweeps run, and a
 /// command that wins the lock first is not overridden. The game's <see cref="IMatchRules"/> give the safe default; a game
 /// without rules just skips the turn. Deadlines are stored, so turns that ran out while the server was down time out on
-/// the first sweep after it starts, and the next turn gets a full timeout from then.
+/// the first sweep after it starts, and the next turn gets a full timeout from then. The same sweep ends matches whose time
+/// is up or whose players have all finished (STORY-041, ENG-011), with the standings their rules give, and records the
+/// results in the same transaction, once; a match past its time limit is ended rather than having its turn timed out.
 /// </summary>
 public sealed class TurnTimeoutService(
     ChogGamesDbContext db,
@@ -38,7 +40,7 @@ public sealed class TurnTimeoutService(
     {
         var now = timeProvider.GetUtcNow();
         var codes = await db.GameRooms.AsNoTracking()
-            .Where(r => r.Status == RoomStatus.Active && r.TurnEndsAt <= now)
+            .Where(r => r.Status == RoomStatus.Active && (r.TurnEndsAt <= now || r.MatchEndsAt <= now))
             .OrderBy(r => r.TurnEndsAt)
             .Select(r => r.Code)
             .Take(BatchSize)
@@ -78,6 +80,13 @@ public sealed class TurnTimeoutService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var room = await db.LockRoomAsync(roomCode, cancellationToken);
 
+        if (room is not null && room.IsDueToEnd(now))
+        {
+            await EndAsync(room, now, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return new TimedOutTurn(room.Code, null);
+        }
+
         // Another sweep, a command ending the turn or a forfeit may have got there first.
         if (room is null || !room.IsTurnOverdue(now))
         {
@@ -104,5 +113,22 @@ public sealed class TurnTimeoutService(
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new TimedOutTurn(room.Code, forfeited ? playerId : null);
+    }
+
+    /// <summary>The game's rules rank the players still playing, and the match is completed with its results recorded.</summary>
+    private async Task EndAsync(GameRoom room, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        using var current = room.State is null ? null : JsonDocument.Parse(room.State);
+        var timeUp = now >= room.MatchEndsAt;
+        var ending = _rulesByGame.GetValueOrDefault(room.GameType)?.EndMatch(new MatchEndContext(room, current?.RootElement, timeUp))
+            ?? throw new InvalidOperationException($"The {room.GameType} rules can't end a match.");
+        if (ending.State.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"The {room.GameType} rules ended a match without a JSON object state.");
+        }
+
+        room.End(ending.State.GetRawText(), ending.Standings, now);
+        await db.RecordStatsAsync(room, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 }

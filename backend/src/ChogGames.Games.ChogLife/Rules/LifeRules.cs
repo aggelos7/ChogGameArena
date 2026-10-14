@@ -1,5 +1,6 @@
 using ChogGames.Core.Games;
 using ChogGames.Core.Matches;
+using ChogGames.Core.Rooms;
 
 namespace ChogGames.Games.ChogLife.Rules;
 
@@ -33,7 +34,9 @@ public sealed class LifeRules
     public const int MaxStakePercent = 1_000;
 
     /// <summary>The hard limit on any match's duration (ENG-011).</summary>
-    public static readonly TimeSpan MaxTimeCap = TimeSpan.FromMinutes(20);
+    public static readonly TimeSpan MaxTimeCap = GameRoom.MaxMatchDuration;
+
+    private readonly int[] _stepsToFinish;
 
     private LifeRules(
         int version,
@@ -57,6 +60,16 @@ public sealed class LifeRules
         DefaultLane = defaultLane;
         ForkStake = forkStake;
         Stakes = stakes;
+
+        // Links only point forward, so each tile's distance follows from the tiles after it.
+        _stepsToFinish = new int[tiles.Count];
+        for (var index = tiles.Count - 2; index >= 0; index--)
+        {
+            var tile = tiles[index];
+            _stepsToFinish[index] = 1 + new[] { tile.Next, tile.SafeNext, tile.DegenNext }
+                .Where(next => next is not null)
+                .Min(next => _stepsToFinish[next!.Value]);
+        }
     }
 
     /// <summary>The game these rules are for.</summary>
@@ -78,7 +91,7 @@ public sealed class LifeRules
     /// <summary>The MON only the first player to reach the finish gets (LIFE-007).</summary>
     public int FinishBonus { get; }
 
-    /// <summary>The longest a match may last (ENG-011); enforced with STORY-041.</summary>
+    /// <summary>The longest a match may last (ENG-011); the match ends when it's up (STORY-041).</summary>
     public TimeSpan TimeCap { get; }
 
     /// <summary>A roll is one die from 1 to this many faces.</summary>
@@ -202,6 +215,14 @@ public sealed class LifeRules
 
         return path;
     }
+
+    /// <summary>
+    /// How many tiles a pawn on <paramref name="tile"/> still has to move to reach the Finish by its shortest route; 0 on
+    /// the Finish. It measures how far along a player is, for the tie-breaker (STORY-041).
+    /// </summary>
+    public int StepsToFinish(int tile) => tile >= 0 && tile < Tiles.Count
+        ? _stepsToFinish[tile]
+        : throw new ArgumentOutOfRangeException(nameof(tile), tile, "The pawn isn't on the board.");
 
     private static int? NextFrom(LifeTile tile, LifeLane lane) => tile.Type != LifeTileType.Branch
         ? tile.Next

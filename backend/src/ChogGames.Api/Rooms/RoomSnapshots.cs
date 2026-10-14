@@ -80,6 +80,7 @@ public sealed class RoomSnapshots(
             room.Capacity,
             room.TurnNumber,
             room.TurnEndsAt,
+            room.MatchEndsAt,
             members,
             view,
             AbilityOptions(room, players, viewerId));

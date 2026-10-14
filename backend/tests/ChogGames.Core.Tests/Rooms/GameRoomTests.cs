@@ -1102,4 +1102,142 @@ public class GameRoomTests
         Assert.Equal(versions, (waiting.Version, completed.Version));
         Assert.Equal((DateTimeOffset?)null, completed.TurnEndsAt);
     }
+
+    private static readonly TimeSpan Limit = TimeSpan.FromMinutes(20);
+
+    /// <summary>A started match of <paramref name="players"/> with the maximum time limit (STORY-041).</summary>
+    private static GameRoom StartedWithLimit(params Player[] players)
+    {
+        var room = RoomOf(players[0], players[1..]);
+        foreach (var player in players)
+        {
+            room.MarkReady(player);
+        }
+
+        room.Start(players[0].Id, players, Snapshots(players), Turn, ScriptedRandomSource.KeepOrder, StartedAt, timeLimit: Limit);
+        return room;
+    }
+
+    private static MatchAction Finish(GameRoom room, Player player, DateTimeOffset at) =>
+        room.ApplyCommand(player.Id, Command(room), "{}", endsTurn: false, at, finished: true);
+
+    [Fact]
+    public void A_time_limit_sets_when_the_match_ends_and_none_sets_nothing()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+
+        Assert.Equal(StartedAt + Limit, StartedWithLimit(alice, bob).MatchEndsAt);
+        Assert.Null(Started(Choosing("classic"), Choosing("mint")).MatchEndsAt);
+        Assert.Null(RoomOf(Guest(), Guest()).MatchEndsAt);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(1201)]
+    public void A_time_limit_of_no_time_or_over_twenty_minutes_is_refused(int seconds)
+    {
+        var (host, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = RoomOf(host, bob);
+        room.MarkReady(host);
+        room.MarkReady(bob);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => room.Start(
+            host.Id, [host, bob], Snapshots(host, bob), Turn, ScriptedRandomSource.KeepOrder, Now, timeLimit: TimeSpan.FromSeconds(seconds)));
+        Assert.Equal((RoomStatus.Waiting, 0), (room.Status, room.TurnNumber));
+    }
+
+    [Fact]
+    public void Once_the_time_is_up_nobody_may_act_and_the_match_is_due_to_end()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = StartedWithLimit(alice, bob);
+        var end = room.MatchEndsAt!.Value;
+
+        Assert.False(room.IsDueToEnd(end.AddTicks(-1)));
+        Assert.Equal(MatchCommandProblem.TurnExpired, room.CheckCommand(alice.Id, Command(room), end.AddTicks(-1)));
+        Assert.True(room.IsDueToEnd(end));
+        Assert.Equal(MatchCommandProblem.TimeUp, room.CheckCommand(alice.Id, Command(room), end));
+        Assert.Equal(MatchCommandProblem.TimeUp, room.CheckCommand(bob.Id, Command(room), end));
+        Assert.Throws<InvalidOperationException>(() => Act(room, alice, end));
+    }
+
+    [Fact]
+    public void A_player_who_finished_is_skipped_in_the_turn_order()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = StartedWithLimit(alice, bob, carol);
+
+        Act(room, alice, StartedAt.AddSeconds(1));
+        Finish(room, bob, StartedAt.AddSeconds(2));
+        Assert.Equal(StartedAt.AddSeconds(2), room.Members.Single(m => m.PlayerId == bob.Id).FinishedAt);
+        Assert.Equal(carol.Id, room.CurrentPlayerId);
+
+        Act(room, carol, StartedAt.AddSeconds(3));
+        Assert.Equal(alice.Id, room.CurrentPlayerId);
+        Act(room, alice, StartedAt.AddSeconds(4));
+        Assert.Equal((carol.Id, 5), (room.CurrentPlayerId, room.TurnNumber));
+        Assert.False(room.IsDueToEnd(StartedAt.AddSeconds(4)));
+    }
+
+    [Fact]
+    public void When_the_last_player_on_the_board_leaves_the_finished_players_match_is_due_to_end()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = StartedWithLimit(alice, bob, carol);
+        Finish(room, alice, StartedAt.AddSeconds(1));
+        Finish(room, bob, StartedAt.AddSeconds(2));
+        var at = StartedAt.AddSeconds(3);
+
+        room.Leave(carol.Id, at);
+
+        Assert.Equal(RoomStatus.Active, room.Status);
+        Assert.True(room.IsDueToEnd(at));
+        Assert.Equal((alice.Id, at), (room.CurrentPlayerId, room.TurnEndsAt));
+        Assert.Equal(MatchCommandProblem.TimeUp, room.CheckCommand(alice.Id, Command(room), at));
+    }
+
+    [Fact]
+    public void Ending_a_due_match_stores_the_final_state_and_ranks_once()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = StartedWithLimit(alice, bob, carol);
+        room.Leave(carol.Id, StartedAt.AddMinutes(2));
+        var (version, end) = (room.Version, room.MatchEndsAt!.Value);
+
+        room.End("""{"ended":"TimeUp"}""", Ranks((alice, 2), (bob, 1)), end);
+
+        Assert.Equal((RoomStatus.Completed, version + 1, end), (room.Status, room.Version, room.EndedAt));
+        Assert.Equal(("""{"ended":"TimeUp"}""", 2, 1, 3), (room.State, RankOf(room, alice), RankOf(room, bob), RankOf(room, carol)));
+        Assert.Equal(((Guid?)null, (DateTimeOffset?)null, end), (room.CurrentPlayerId, room.TurnEndsAt, room.MatchEndsAt));
+        Assert.Throws<InvalidOperationException>(() => room.End("{}", Ranks((alice, 1), (bob, 1)), end));
+    }
+
+    [Fact]
+    public void A_match_that_is_not_due_or_gets_bad_standings_does_not_end()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = StartedWithLimit(alice, bob);
+        var (version, end) = (room.Version, room.MatchEndsAt!.Value);
+
+        Assert.Throws<InvalidOperationException>(() => room.End("{}", Ranks((alice, 1), (bob, 2)), end.AddTicks(-1)));
+        Assert.Throws<InvalidOperationException>(() => room.End("{}", Ranks((alice, 1)), end));
+        Assert.Throws<InvalidOperationException>(() => room.End("{}", Ranks((alice, 2), (bob, 2)), end));
+
+        Assert.Equal((RoomStatus.Active, version, (string?)null), (room.Status, room.Version, room.State));
+        Assert.All(room.Members, m => Assert.Null(m.Rank));
+    }
+
+    [Fact]
+    public void A_restart_gives_a_full_turn_but_never_more_time_to_the_match()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = StartedWithLimit(alice, bob);
+        var end = room.MatchEndsAt;
+
+        room.ResumeAfterRestart(StartedAt.AddMinutes(30));
+
+        Assert.Equal(end, room.MatchEndsAt);
+        Assert.True(room.IsDueToEnd(StartedAt.AddMinutes(30)));
+    }
 }

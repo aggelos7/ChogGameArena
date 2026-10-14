@@ -41,6 +41,8 @@ export interface LifePawn {
   bonuses: number;
   liabilities: number;
   portfolio: number;
+  /** The order its player reached the Finish in, from 1 (STORY-041, DEC-043); absent while still on the board. */
+  place?: number;
 }
 
 /** A stake that paid out as its pawn rejoined the main track. */
@@ -64,7 +66,8 @@ export interface LifeStakeReturns {
 
 /**
  * A seat's latest move (STORY-037, DEC-039): the server's roll, the tiles left and reached, and every tile passed on the
- * way, ending with `to`. A pawn already on the Finish passes without a roll. `change` is the MON the tile it stopped on
+ * way, ending with `to`. A pawn already on the Finish passes without a roll. A move that reached the Finish gives the
+ * player's `place` and the finish `bonus` it won, if any (STORY-041, DEC-043). `change` is the MON the tile it stopped on
  * moved (STORY-038, DEC-040), absent for a tile that does nothing. A move that stopped on a fork gets the `lane` chosen
  * there, with `byDefault` when the turn ran out and the rules chose it (STORY-039, DEC-041), and the MON `staked` on it;
  * a move that rejoined the main track with a stake says what it paid out in `matured` (STORY-040, DEC-042).
@@ -80,7 +83,12 @@ export interface LifeMove {
   byDefault?: boolean;
   staked?: number;
   matured?: LifeMaturity;
+  place?: number;
+  bonus?: number;
 }
+
+/** What ended the match: every player still playing reached the Finish, or its time was up (STORY-041, DEC-043). */
+export type LifeEnding = 'Finish' | 'TimeUp';
 
 /** The Chog Life view in a room snapshot's `state` (STORY-036, DEC-038). */
 export interface LifeBoard {
@@ -97,6 +105,10 @@ export interface LifeBoard {
   forkStake?: number;
   /** What a stake returns on each lane. */
   stakeReturns?: LifeStakeReturns[];
+  /** The bonus only the first player to reach the Finish gets; absent when there's none. */
+  finishBonus?: number;
+  /** What ended the match, once it's over. */
+  ended?: LifeEnding;
 }
 
 /** The command that rolls the die and moves your pawn on your turn. */
@@ -117,9 +129,11 @@ export type LifeRow =
 const TILE_TYPES: readonly string[] = ['Start', 'Normal', 'Reward', 'Loss', 'Event', 'Branch', 'Finish'];
 const LANES: readonly string[] = ['Main', 'Safe', 'Degen'];
 const ROUTES: readonly unknown[] = ['Safe', 'Degen'];
+const ENDINGS: readonly unknown[] = ['Finish', 'TimeUp'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const isIndex = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const isPlace = (value: unknown): boolean => isIndex(value) && value >= 1;
 const isStake = (value: unknown): boolean => isRecord(value) && ROUTES.includes(value['lane']) && isIndex(value['amount']);
 const isStakeReturns = (value: unknown): boolean =>
   isRecord(value) &&
@@ -154,7 +168,8 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       isIndex(pawn['liabilities']) &&
       Number.isInteger(pawn['portfolio']) &&
       (pawn['lane'] === undefined || ROUTES.includes(pawn['lane'])) &&
-      (pawn['stake'] === undefined || isStake(pawn['stake'])),
+      (pawn['stake'] === undefined || isStake(pawn['stake'])) &&
+      (pawn['place'] === undefined || isPlace(pawn['place'])),
   );
   const move = state['lastMove'];
   const validMove =
@@ -169,6 +184,8 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       (move['lane'] === undefined || ROUTES.includes(move['lane'])) &&
       (move['byDefault'] === undefined || typeof move['byDefault'] === 'boolean') &&
       (move['staked'] === undefined || isIndex(move['staked'])) &&
+      (move['place'] === undefined || isPlace(move['place'])) &&
+      (move['bonus'] === undefined || isIndex(move['bonus'])) &&
       (move['matured'] === undefined ||
         (isRecord(move['matured']) && ROUTES.includes(move['matured']['lane']) && isIndex(move['matured']['stake']) && isIndex(move['matured']['payout']))) &&
       Array.isArray(move['path']) &&
@@ -179,7 +196,8 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
   const validStakes =
     (state['forkStake'] === undefined || isIndex(state['forkStake'])) &&
     (returns === undefined || (Array.isArray(returns) && returns.every(isStakeReturns)));
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validChoice || !validStakes) {
+  const validEnd = (state['finishBonus'] === undefined || isIndex(state['finishBonus'])) && (state['ended'] === undefined || ENDINGS.includes(state['ended']));
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validChoice || !validStakes || !validEnd) {
     return null;
   }
   return state as unknown as LifeBoard;
@@ -258,6 +276,17 @@ export function stakeSummary(stake: number, returns: LifeStakeReturns | undefine
   }
   const [first, ...rest] = returns.outcomes.map((outcome, i) => `${payouts[i]}${i === 0 ? ' back' : ''} (${outcome.chance}%)`);
   return `Stake ${stake} MON, get ${first} or ${rest.join(' or ')}`;
+}
+
+/** A place as shown: 1st, 2nd, 3rd, 4th… (matches hold at most six players). */
+export function ordinal(place: number): string {
+  return `${place}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[place] ?? 'th'}`;
+}
+
+/** The time left until `endsAt` from `now` (both in milliseconds) as minutes and seconds, "12:05"; never below "0:00". */
+export function timeLeft(endsAt: number, now: number): string {
+  const seconds = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
 /** What a tile says on the board. */

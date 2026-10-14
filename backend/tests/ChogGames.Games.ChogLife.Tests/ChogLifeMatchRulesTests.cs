@@ -13,7 +13,9 @@ namespace ChogGames.Games.ChogLife.Tests;
 /// MON, of the players still playing. A roll moves the pawn and resolves the tile it stops on; a roll that stops on a
 /// fork keeps the turn until the player chooses a lane, and a turn that runs out first takes the default lane. The lane
 /// taken holds a stake that pays out when the pawn rejoins the main track, a loss beyond the liquid MON held becomes a
-/// liability, and every player sees each player's portfolio (STORY-040, DEC-042).
+/// liability, and every player sees each player's portfolio (STORY-040, DEC-042). Reaching the Finish finishes a
+/// player's game, the first to arrive gets the bonus, and the match ends when everyone still playing has finished or
+/// its time is up, ranked by portfolio, then finish order, then progress (STORY-041, DEC-043).
 /// </summary>
 public class ChogLifeMatchRulesTests
 {
@@ -488,7 +490,7 @@ public class ChogLifeMatchRulesTests
     }
 
     [Fact]
-    public void A_roll_past_the_finish_stops_on_it_and_a_finished_pawn_passes_without_a_roll()
+    public void A_roll_past_the_finish_stops_on_it_and_a_finished_pawn_passes_without_a_roll_or_bonus()
     {
         var (room, players) = Started(2);
 
@@ -498,8 +500,9 @@ public class ChogLifeMatchRulesTests
         var dice = new Dice();
         var passed = Roll(room, players[1], finished.State.Value.GetRawText(), dice);
 
-        Assert.Equal((MatchRuleOutcome.Accepted, true), (passed.Outcome, passed.EndsTurn));
+        Assert.Equal((MatchRuleOutcome.Accepted, true, true), (passed.Outcome, passed.EndsTurn, passed.Finished));
         Assert.Empty(dice.Draws);
+        Assert.Equal(100, Pawn(passed, 1).GetProperty("bonuses").GetInt32());
         Assert.Equal([(1, 0), (2, 35)], Pawns(passed.State!.Value));
         Assert.Equal("""{"seat":2,"from":35,"to":35,"path":[]}""", LastMove(passed).GetRawText());
     }
@@ -861,5 +864,180 @@ public class ChogLifeMatchRulesTests
         Assert.Equal("game_state_unavailable", Choose(room, players[0], choosing, new { lane = "Safe" }).Reason);
         Assert.Null(TimeOut(room, choosing));
         Assert.Empty(dice.Draws);
+    }
+
+    private static string StateOf(params string[] pawns) => $$"""{"rulesVersion":1,"pawns":[{{string.Join(",", pawns)}}]""";
+
+    private static MatchEnding End(GameRoom room, string? state, bool timeUp = true)
+    {
+        using var document = state is null ? null : JsonDocument.Parse(state);
+        return Rules.EndMatch(new MatchEndContext(room, document?.RootElement.Clone(), timeUp));
+    }
+
+    private static int[] Ranks(IReadOnlyList<MatchStanding> standings, Player[] players) =>
+        players.Select(player => standings.SingleOrDefault(s => s.PlayerId == player.Id)?.Rank ?? 0).ToArray();
+
+    [Fact]
+    public void The_time_limit_is_the_current_rules_time_cap() =>
+        Assert.Equal(TimeSpan.FromMinutes(20), Rules.TimeLimit);
+
+    [Fact]
+    public void The_first_to_reach_the_finish_gets_the_bonus_and_takes_no_more_turns()
+    {
+        var (room, players) = Started(3);
+        var dice = new Dice(6);
+
+        var arrived = Roll(room, players[1], StateWithMon((1, 0, 100), (2, 33, 80), (3, 0, 100)), dice);
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true, true), (arrived.Outcome, arrived.EndsTurn, arrived.Finished));
+        Assert.Null(arrived.Standings);
+        Assert.Equal([(1, 7)], dice.Draws);
+        Assert.Equal("""{"seat":2,"tile":35,"mon":80,"bonuses":100}""", Pawn(arrived, 1).GetRawText());
+        Assert.Equal("""{"seat":2,"roll":6,"from":33,"to":35,"path":[34,35],"place":1,"bonus":100}""", LastMove(arrived).GetRawText());
+        Assert.Equal("[2]", arrived.State!.Value.GetProperty("finished").GetRawText());
+    }
+
+    [Fact]
+    public void Later_arrivals_get_their_place_without_a_bonus()
+    {
+        var (room, players) = Started(3);
+        var state = StateOf("""{"seat":1,"tile":34,"mon":100}""", """{"seat":2,"tile":35,"mon":80,"bonuses":100}""", """{"seat":3,"tile":0,"mon":100}""") + ""","finished":[2]}""";
+
+        var arrived = Roll(room, players[0], state, new Dice(1));
+
+        Assert.Equal((true, (IReadOnlyList<MatchStanding>?)null), (arrived.Finished, arrived.Standings));
+        Assert.Equal("""{"seat":1,"tile":35,"mon":100}""", Pawn(arrived).GetRawText());
+        Assert.Equal("""{"seat":1,"roll":1,"from":34,"to":35,"path":[35],"place":2}""", LastMove(arrived).GetRawText());
+        Assert.Equal("[2,1]", arrived.State!.Value.GetProperty("finished").GetRawText());
+    }
+
+    [Fact]
+    public void The_bonus_repays_no_debt_and_stays_within_the_cap()
+    {
+        var (room, players) = Started(2);
+
+        var arrived = Roll(room, players[0], StateOf("""{"seat":1,"tile":34,"mon":0,"liabilities":30,"bonuses":999950}""", """{"seat":2,"tile":0,"mon":100}""") + "}", new Dice(1));
+
+        Assert.Equal("""{"seat":1,"tile":35,"mon":0,"bonuses":1000000,"liabilities":30}""", Pawn(arrived).GetRawText());
+    }
+
+    [Fact]
+    public void The_last_player_to_finish_ends_the_match_ranked_by_portfolio()
+    {
+        var (room, players) = Started(3);
+        var state = StateOf(
+            """{"seat":1,"tile":35,"mon":90,"bonuses":100}""",
+            """{"seat":2,"tile":35,"mon":250}""",
+            """{"seat":3,"tile":33,"mon":120,"liabilities":20}""") + ""","finished":[1,2]}""";
+
+        var ended = Roll(room, players[2], state, new Dice(4));
+
+        Assert.Equal(MatchRuleOutcome.Accepted, ended.Outcome);
+        Assert.Equal([2, 1, 3], Ranks(ended.Standings!, players));
+        Assert.Equal("Finish", ended.State!.Value.GetProperty("ended").GetString());
+        Assert.Equal("[1,2,3]", ended.State.Value.GetProperty("finished").GetRawText());
+        Assert.Equal(3, LastMove(ended).GetProperty("place").GetInt32());
+    }
+
+    [Fact]
+    public void Players_who_left_are_left_out_and_the_rest_finishing_ends_the_match()
+    {
+        var (room, players) = Started(3);
+        room.Leave(players[2].Id, Now.AddMinutes(2));
+        var state = StateOf("""{"seat":1,"tile":35,"mon":100,"bonuses":100}""", """{"seat":2,"tile":34,"mon":300}""", """{"seat":3,"tile":0,"mon":100}""") + ""","finished":[1]}""";
+
+        var ended = Roll(room, players[1], state, new Dice(1));
+
+        Assert.NotNull(ended.Standings);
+        Assert.Equal([2, 1, 0], Ranks(ended.Standings, players));
+    }
+
+    [Fact]
+    public void Equal_portfolios_are_ranked_by_finish_order_then_by_tiles_left_then_shared()
+    {
+        var (room, players) = Started(6);
+        var state = StateOf(
+            """{"seat":1,"tile":20,"mon":150}""",
+            """{"seat":2,"tile":35,"mon":50,"bonuses":100}""",
+            """{"seat":3,"tile":35,"mon":150}""",
+            """{"seat":4,"tile":10,"mon":150}""",
+            """{"seat":5,"tile":14,"mon":150}""",
+            """{"seat":6,"tile":34,"mon":151}""") + ""","finished":[2,3]}""";
+
+        var ending = End(room, state);
+
+        // Seat 6 has most; seats 2 and 3 tie at 150 and finished in that order; seats 4 and 5 are as far along each lane.
+        Assert.Equal([4, 2, 3, 5, 5, 1], Ranks(ending.Standings, players));
+    }
+
+    [Fact]
+    public void Time_up_drops_a_pending_choice_and_counts_a_stake_at_what_was_staked()
+    {
+        var (room, players) = Started(2);
+        var state = StateOf(
+            """{"seat":1,"tile":9,"mon":60}""",
+            """{"seat":2,"tile":12,"mon":40,"stake":{"lane":"Safe","amount":50}}""") + ""","choosing":1}""";
+
+        var ending = End(room, state);
+
+        Assert.Equal([2, 1], Ranks(ending.Standings, players));
+        Assert.False(ending.State.TryGetProperty("choosing", out _));
+        Assert.Equal("TimeUp", ending.State.GetProperty("ended").GetString());
+        var view = Rules.ViewFor(new MatchViewContext(room, players[0].Id, ending.State))!.Value;
+        Assert.Equal("TimeUp", view.GetProperty("ended").GetString());
+        Assert.Equal(90, view.GetProperty("pawns")[1].GetProperty("portfolio").GetInt32());
+    }
+
+    [Fact]
+    public void A_negative_portfolio_ranks_below_zero()
+    {
+        var (room, players) = Started(2);
+
+        var ending = End(room, StateOf("""{"seat":1,"tile":30,"mon":0,"liabilities":5}""", """{"seat":2,"tile":3,"mon":0}""") + "}");
+
+        Assert.Equal([2, 1], Ranks(ending.Standings, players));
+    }
+
+    [Fact]
+    public void Ending_a_match_without_a_state_ranks_everyone_level_from_the_start()
+    {
+        var (room, players) = Started(3);
+
+        var ending = End(room, null);
+
+        Assert.Equal([1, 1, 1], Ranks(ending.Standings, players));
+        Assert.Equal("TimeUp", ending.State.GetProperty("ended").GetString());
+    }
+
+    [Theory]
+    [InlineData("""{"rulesVersion":99,"pawns":[]}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":99,"mon":10}]}""")]
+    [InlineData("""{"pawns":"nope"}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":3,"mon":10},{"seat":1,"tile":4,"mon":10}]}""")]
+    public void A_state_this_server_cannot_play_still_ends_with_everyone_ranked_together(string state)
+    {
+        var (room, players) = Started(2);
+
+        var ending = End(room, state, timeUp: false);
+
+        Assert.Equal([1, 1], Ranks(ending.Standings, players));
+        Assert.Equal(JsonValueKind.Object, ending.State.ValueKind);
+    }
+
+    [Fact]
+    public void Every_player_sees_finish_places_and_the_bonus()
+    {
+        var (room, players) = Started(3);
+        var state = StateOf("""{"seat":1,"tile":35,"mon":100}""", """{"seat":2,"tile":35,"mon":80,"bonuses":100}""", """{"seat":3,"tile":4,"mon":100}""") + ""","finished":[2,1]}""";
+        using var document = JsonDocument.Parse(state);
+
+        var views = players.Select(p => Rules.ViewFor(new MatchViewContext(room, p.Id, document.RootElement))!.Value).ToArray();
+
+        Assert.Single(views.Select(v => v.GetRawText()).Distinct());
+        Assert.Equal(
+            [2, 1, 0],
+            views[0].GetProperty("pawns").EnumerateArray().Select(p => p.TryGetProperty("place", out var place) ? place.GetInt32() : 0));
+        Assert.Equal(100, views[0].GetProperty("finishBonus").GetInt32());
+        Assert.False(views[0].TryGetProperty("ended", out _));
     }
 }

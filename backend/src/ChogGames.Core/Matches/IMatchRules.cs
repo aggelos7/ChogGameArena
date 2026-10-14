@@ -26,6 +26,21 @@ public interface IMatchRules
     /// </summary>
     JsonElement? StartState(MatchStartContext context) => null;
 
+    /// <summary>
+    /// The longest a match of this game may last from its start (STORY-041, ENG-011), at most
+    /// <see cref="GameRoom.MaxMatchDuration"/>; null, the default, sets no limit. A match whose time is up is ended by the
+    /// engine with <see cref="EndMatch"/>, so rules with a limit must implement it.
+    /// </summary>
+    TimeSpan? TimeLimit => null;
+
+    /// <summary>
+    /// Ends the active match now (STORY-041): its time limit was reached, or every player still playing has finished
+    /// (<see cref="MatchRuleDecision.Finished"/>) and nobody is left to take a turn. Returns the final state and a rank for
+    /// every player still playing, as <see cref="MatchRuleDecision.Finish"/> does. Null, the default, means these rules
+    /// can't end a match by themselves; then they must set no <see cref="TimeLimit"/> and never mark a player finished.
+    /// </summary>
+    MatchEnding? EndMatch(MatchEndContext context) => null;
+
     MatchRuleDecision Apply(MatchCommandContext context);
 
     /// <summary>
@@ -50,6 +65,15 @@ public sealed record MatchViewContext(GameRoom Match, Guid PlayerId, JsonElement
 /// <param name="Match">The match just started, read only: active, with every member seated.</param>
 /// <param name="Random">The server's source of chance, for a start that needs a draw.</param>
 public sealed record MatchStartContext(GameRoom Match, IRandomSource Random);
+
+/// <param name="Match">The active match, read only, whose time is up or whose players have all finished.</param>
+/// <param name="State">The game's state, or null while it has none.</param>
+/// <param name="TimeUp">Whether the match reached its time limit; otherwise every player still playing has finished.</param>
+public sealed record MatchEndContext(GameRoom Match, JsonElement? State, bool TimeUp);
+
+/// <param name="State">The game's final state, a JSON object.</param>
+/// <param name="Standings">A rank for every player still playing, as for <see cref="MatchRuleDecision.Finish"/>.</param>
+public sealed record MatchEnding(JsonElement State, IReadOnlyList<MatchStanding> Standings);
 
 /// <param name="Match">The active match, read only; <see cref="GameRoom.CurrentPlayerId"/> is the player whose turn ran out.</param>
 /// <param name="State">The game's state, or null while it has none: no start state and no accepted command yet.</param>
@@ -82,14 +106,21 @@ public enum MatchRuleOutcome
 /// For <c>Accepted</c>: the command finished the match (STORY-028, DEC-030), with a rank for every player still playing;
 /// the engine completes it, ranks those who left after them and records the results once.
 /// </param>
+/// <param name="Finished">
+/// For <c>Accepted</c>: the acting player has finished the game, such as reaching the last tile (STORY-041); they stay
+/// in the match but get no more turns. When nobody still playing is left to take a turn the engine ends the match with
+/// <see cref="IMatchRules.EndMatch"/>.
+/// </param>
 public sealed record MatchRuleDecision(
     MatchRuleOutcome Outcome,
     JsonElement? State = null,
     string? Reason = null,
     bool EndsTurn = false,
-    IReadOnlyList<MatchStanding>? Standings = null)
+    IReadOnlyList<MatchStanding>? Standings = null,
+    bool Finished = false)
 {
-    public static MatchRuleDecision Accept(JsonElement state, bool endsTurn = false) => new(MatchRuleOutcome.Accepted, state, EndsTurn: endsTurn);
+    public static MatchRuleDecision Accept(JsonElement state, bool endsTurn = false, bool finished = false) =>
+        new(MatchRuleOutcome.Accepted, state, EndsTurn: endsTurn || finished, Finished: finished);
 
     /// <summary>The command ended the match with <paramref name="standings"/> for the players still playing.</summary>
     public static MatchRuleDecision Finish(JsonElement state, IReadOnlyList<MatchStanding> standings) =>

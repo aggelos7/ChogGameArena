@@ -202,6 +202,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("HostPlayerId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("MatchEndsAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("MinPlayers")
                         .HasColumnType("integer");
 
@@ -240,6 +243,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("\"Status\" = 'Waiting'");
 
+                    b.HasIndex("MatchEndsAt")
+                        .HasFilter("\"Status\" = 'Active' AND \"MatchEndsAt\" IS NOT NULL");
+
                     b.HasIndex("TurnEndsAt")
                         .HasFilter("\"TurnEndsAt\" IS NOT NULL");
 
@@ -252,6 +258,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_GameRooms_CurrentTurn", "(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> 'Active') AND (\"TurnEndsAt\" IS NULL) = (\"CurrentPlayerId\" IS NULL)");
 
                             t.HasCheckConstraint("CK_GameRooms_EndedAt", "(\"EndedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Active'))");
+
+                            t.HasCheckConstraint("CK_GameRooms_MatchEndsAt", "\"MatchEndsAt\" IS NULL OR (\"StartedAt\" IS NOT NULL AND \"MatchEndsAt\" > \"StartedAt\" AND \"MatchEndsAt\" <= \"StartedAt\" + interval '20 minutes')");
 
                             t.HasCheckConstraint("CK_GameRooms_MinPlayers", "\"MinPlayers\" >= 2 AND \"MinPlayers\" <= \"Capacity\"");
 
@@ -289,6 +297,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Character")
                         .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset>("JoinedAt")
                         .HasColumnType("timestamp with time zone");
@@ -330,6 +341,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_RoomMembers_AbilityUses", "\"AbilityUses\" >= 0 AND \"AbilityUses\" <= COALESCE((\"Ability\" ->> 'maxUses')::integer, 0)");
 
                             t.HasCheckConstraint("CK_RoomMembers_Character", "\"Character\" IS NULL OR jsonb_typeof(\"Character\") = 'object'");
+
+                            t.HasCheckConstraint("CK_RoomMembers_FinishedAt", "\"FinishedAt\" IS NULL OR \"Seat\" IS NOT NULL");
 
                             t.HasCheckConstraint("CK_RoomMembers_MissedTurns", "\"MissedTurns\" >= 0");
 

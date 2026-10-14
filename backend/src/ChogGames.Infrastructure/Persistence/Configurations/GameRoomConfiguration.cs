@@ -67,6 +67,12 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
             table.HasCheckConstraint(
                 "CK_GameRooms_CurrentTurn",
                 $"(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> '{nameof(RoomStatus.Active)}') AND (\"TurnEndsAt\" IS NULL) = (\"CurrentPlayerId\" IS NULL)");
+
+            // Only a started match has a time limit, of some time and at most the maximum match duration (STORY-041, ENG-011).
+            table.HasCheckConstraint(
+                "CK_GameRooms_MatchEndsAt",
+                $"\"MatchEndsAt\" IS NULL OR (\"StartedAt\" IS NOT NULL AND \"MatchEndsAt\" > \"StartedAt\" "
+                + $"AND \"MatchEndsAt\" <= \"StartedAt\" + interval '{(int)GameRoom.MaxMatchDuration.TotalMinutes} minutes')");
         });
         builder.HasKey(r => r.Id);
         builder.Property(r => r.Id).ValueGeneratedNever();
@@ -81,6 +87,9 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
 
         // Overdue turns are looked for every second (DEC-027).
         builder.HasIndex(r => r.TurnEndsAt).HasFilter("\"TurnEndsAt\" IS NOT NULL");
+
+        // So are matches whose time is up (STORY-041).
+        builder.HasIndex(r => r.MatchEndsAt).HasFilter($"\"Status\" = '{nameof(RoomStatus.Active)}' AND \"MatchEndsAt\" IS NOT NULL");
 
         // One open room per host (DEC-020).
         builder.HasIndex(r => r.HostPlayerId).IsUnique().HasFilter($"\"Status\" = '{nameof(RoomStatus.Waiting)}'");
@@ -110,6 +119,9 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
             table.HasCheckConstraint(
                 "CK_RoomMembers_Seat", $"\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND {GameDefinition.MaxRoomPlayers}");
             table.HasCheckConstraint("CK_RoomMembers_MissedTurns", "\"MissedTurns\" >= 0");
+
+            // Only a seated match player can finish the game (STORY-041).
+            table.HasCheckConstraint("CK_RoomMembers_FinishedAt", "\"FinishedAt\" IS NULL OR \"Seat\" IS NOT NULL");
 
             // Only a seated match player gets a final place, from 1 (DEC-030).
             table.HasCheckConstraint(
