@@ -14,10 +14,14 @@ namespace ChogGames.Core.Rooms;
 /// on the match through versioned, idempotent commands (STORY-024, DEC-026). The engine owns the turn (STORY-025, DEC-027):
 /// players take turns in seat order, only the current player may act, and a turn that runs out is timed out once. Every
 /// change is committed as it happens, so a restart resumes the match (STORY-028, DEC-030); a completed match keeps its
-/// final standings on the members.
+/// final standings on the members. A game may give its matches a time limit and mark players finished, who then get no
+/// more turns; the engine ends a match whose time is up or whose players have all finished (STORY-041, ENG-011).
 /// </summary>
 public sealed class GameRoom
 {
+    /// <summary>The longest any match may last (ENG-011).</summary>
+    public static readonly TimeSpan MaxMatchDuration = TimeSpan.FromMinutes(20);
+
     private readonly List<RoomMember> _members = [];
 
     public Guid Id { get; private set; }
@@ -68,6 +72,12 @@ public sealed class GameRoom
     /// <summary>When the current turn runs out (ENG-007); set exactly while the match is Active.</summary>
     public DateTimeOffset? TurnEndsAt { get; private set; }
 
+    /// <summary>
+    /// When the match's time is up (STORY-041, ENG-011): its start plus the game's time limit, fixed at the start and
+    /// never extended, not even by a restart; null for a game without a limit. Kept once the match ends.
+    /// </summary>
+    public DateTimeOffset? MatchEndsAt { get; private set; }
+
     public IReadOnlyList<RoomMember> Members => _members;
 
     private GameRoom()
@@ -105,6 +115,13 @@ public sealed class GameRoom
 
     /// <summary>The current turn ran out and has not been timed out yet.</summary>
     public bool IsTurnOverdue(DateTimeOffset now) => Status == RoomStatus.Active && now >= TurnEndsAt;
+
+    /// <summary>
+    /// The active match must end now (STORY-041): its time is up, or every player still playing has finished, so nobody
+    /// is left to take a turn. The engine ends it with the game's standings.
+    /// </summary>
+    public bool IsDueToEnd(DateTimeOffset now) =>
+        Status == RoomStatus.Active && (now >= MatchEndsAt || _members.All(m => m.HasLeft || m.HasFinished));
 
     /// <summary>
     /// Adds <paramref name="player"/> to a waiting room with a free seat. The caller has checked that the player is
@@ -269,6 +286,8 @@ public sealed class GameRoom
     /// snapshot for every member. Each member's chosen ability is locked with the snapshot in
     /// <paramref name="abilities"/> (STORY-033, NFT-015, DEC-035); members of a game without abilities have none.
     /// Once seated, <paramref name="startState"/> gives the game's state at the start, if it has one (STORY-036, DEC-038).
+    /// A game's <paramref name="timeLimit"/>, at most <see cref="MaxMatchDuration"/>, sets when the match's time is up
+    /// (STORY-041, ENG-011).
     /// </summary>
     public void Start(
         Guid callerId,
@@ -278,12 +297,18 @@ public sealed class GameRoom
         IRandomSource random,
         DateTimeOffset now,
         IReadOnlyDictionary<Guid, AbilitySnapshot>? abilities = null,
-        Func<GameRoom, string?>? startState = null)
+        Func<GameRoom, string?>? startState = null,
+        TimeSpan? timeLimit = null)
     {
         abilities ??= new Dictionary<Guid, AbilitySnapshot>();
         if (turnTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(turnTimeout), turnTimeout, "A turn must last some time.");
+        }
+
+        if (timeLimit <= TimeSpan.Zero || timeLimit > MaxMatchDuration)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeLimit), timeLimit, $"A match lasts some time, at most {MaxMatchDuration}.");
         }
 
         if (CheckStart(callerId, players) is { } problem)
@@ -318,6 +343,7 @@ public sealed class GameRoom
         }
 
         TurnTimeout = turnTimeout;
+        MatchEndsAt = now + timeLimit;
         BeginTurn(_members.Single(m => m.Seat == 1), now);
         State = startState?.Invoke(this);
         Version++;
@@ -330,6 +356,24 @@ public sealed class GameRoom
     /// </summary>
     public void Complete(IReadOnlyCollection<MatchStanding> standings, DateTimeOffset now)
     {
+        Finish(standings, now);
+        Version++;
+    }
+
+    /// <summary>
+    /// The engine ends the match (STORY-041) because <see cref="IsDueToEnd"/>: the game's rules gave its final
+    /// <paramref name="state"/> and <paramref name="standings"/> for the players still playing, which are stored as for
+    /// <see cref="Complete"/>. Nothing changes if the standings are refused.
+    /// </summary>
+    public void End(string state, IReadOnlyCollection<MatchStanding> standings, DateTimeOffset now)
+    {
+        if (!IsDueToEnd(now))
+        {
+            throw new InvalidOperationException("Only an active match whose time is up or whose players have all finished can end.");
+        }
+
+        CheckStandings(standings);
+        State = state;
         Finish(standings, now);
         Version++;
     }
@@ -387,7 +431,7 @@ public sealed class GameRoom
     /// <summary>
     /// Why <paramref name="playerId"/> can't act on this match with <paramref name="command"/> now, or null if they can
     /// (STORY-024, DEC-026): only the current player acts, before their turn runs out (STORY-025, DEC-027). The caller has
-    /// checked that the player is a member.
+    /// checked that the player is a member. Once the match is due to end nobody acts any more (STORY-041).
     /// </summary>
     public MatchCommandProblem? CheckCommand(Guid playerId, MatchCommand command, DateTimeOffset now)
     {
@@ -416,6 +460,11 @@ public sealed class GameRoom
             return MatchCommandProblem.StaleVersion;
         }
 
+        if (IsDueToEnd(now))
+        {
+            return MatchCommandProblem.TimeUp;
+        }
+
         if (playerId != CurrentPlayerId)
         {
             return MatchCommandProblem.NotYourTurn;
@@ -428,7 +477,8 @@ public sealed class GameRoom
     /// Applies a command the game's rules accepted: stores their new <paramref name="state"/>, ends the turn when the
     /// rules say so, bumps the version and returns the record that makes a retry of the same action return this result
     /// (DEC-026, DEC-027). Acting resets the player's missed turns. A command that finished the match comes with the
-    /// <paramref name="standings"/> its rules decided, and the match is completed with them (STORY-028, DEC-030).
+    /// <paramref name="standings"/> its rules decided, and the match is completed with them (STORY-028, DEC-030). A
+    /// command that <paramref name="finished"/> the player's game ends their turn, and they get no more (STORY-041).
     /// </summary>
     public MatchAction ApplyCommand(
         Guid playerId,
@@ -436,7 +486,8 @@ public sealed class GameRoom
         string state,
         bool endsTurn,
         DateTimeOffset now,
-        IReadOnlyCollection<MatchStanding>? standings = null)
+        IReadOnlyCollection<MatchStanding>? standings = null,
+        bool finished = false)
     {
         if (CheckCommand(playerId, command, now) is { } problem)
         {
@@ -453,6 +504,11 @@ public sealed class GameRoom
         if (standings is not null)
         {
             Finish(standings, now);
+        }
+        else if (finished)
+        {
+            CurrentMember().FinishGame(now);
+            NextTurn(now);
         }
         else if (endsTurn)
         {
@@ -554,12 +610,24 @@ public sealed class GameRoom
 
     private RoomMember CurrentMember() => _members.Single(m => m.PlayerId == CurrentPlayerId);
 
-    /// <summary>The next player still playing after the current one, in seat order, starts a new turn.</summary>
+    /// <summary>
+    /// The next player still playing who hasn't finished, after the current one in seat order, starts a new turn. When
+    /// every player still playing has finished, the turn goes to the first of them and is already over, so nobody can act
+    /// and the engine ends the match on its next check (STORY-041).
+    /// </summary>
     private void NextTurn(DateTimeOffset now)
     {
         var seat = CurrentMember().Seat;
         var playing = _members.Where(m => !m.HasLeft).OrderBy(m => m.Seat).ToList();
-        BeginTurn(playing.FirstOrDefault(m => m.Seat > seat) ?? playing[0], now);
+        var waiting = playing.Where(m => !m.HasFinished).ToList();
+        if (waiting.Count == 0)
+        {
+            BeginTurn(playing[0], now);
+            TurnEndsAt = now;
+            return;
+        }
+
+        BeginTurn(waiting.FirstOrDefault(m => m.Seat > seat) ?? waiting[0], now);
     }
 
     private void BeginTurn(RoomMember player, DateTimeOffset now)
@@ -603,6 +671,9 @@ public enum MatchCommandProblem
 
     /// <summary>The player's turn ran out; it is about to be timed out.</summary>
     TurnExpired,
+
+    /// <summary>The match's time is up, or every player has finished; it is about to end (STORY-041).</summary>
+    TimeUp,
 }
 
 public enum RoomStartProblem
@@ -665,6 +736,14 @@ public sealed class RoomMember
 
     /// <summary>Turns in a row that ran out on the member; acting resets it (DEC-027).</summary>
     public int MissedTurns { get; private set; }
+
+    /// <summary>
+    /// When the player finished the game, such as reaching the last tile (STORY-041); they take no more turns but play on
+    /// until the match ends. Null while they still play their turns.
+    /// </summary>
+    public DateTimeOffset? FinishedAt { get; private set; }
+
+    public bool HasFinished => FinishedAt is not null;
 
     /// <summary>
     /// The member's final place, from 1 for the winners, set once when the match is completed (STORY-028, DEC-030);
@@ -738,6 +817,8 @@ public sealed class RoomMember
 
     /// <summary>Returns the turns now missed in a row.</summary>
     internal int MissTurn() => ++MissedTurns;
+
+    internal void FinishGame(DateTimeOffset now) => FinishedAt ??= now;
 
     internal void Act() => MissedTurns = 0;
 

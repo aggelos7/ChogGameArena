@@ -118,4 +118,23 @@ public class LifeRulesPathTests
             }
         }
     }
+
+    [Theory]
+    [InlineData(35, 0)]
+    [InlineData(34, 1)]
+    [InlineData(18, 14)]
+    [InlineData(10, 18)]
+    [InlineData(14, 18)]
+    [InlineData(13, 15)]
+    [InlineData(17, 15)]
+    [InlineData(9, 19)]
+    [InlineData(0, 28)]
+    public void Steps_to_the_finish_count_the_shortest_route_and_both_lanes_alike(int tile, int steps) =>
+        Assert.Equal(steps, LifeRulesV1.Rules.StepsToFinish(tile));
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(36)]
+    public void Steps_to_the_finish_from_off_the_board_are_refused(int tile) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => LifeRulesV1.Rules.StepsToFinish(tile));
 }

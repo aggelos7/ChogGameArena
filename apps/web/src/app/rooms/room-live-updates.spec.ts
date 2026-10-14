@@ -20,6 +20,7 @@ const snapshot = (code: string, version: number): Room => ({
   capacity: 6,
   turnNumber: 0,
   turnEndsAt: null,
+  matchEndsAt: null,
   members: [],
   state: null,
   abilities: [],

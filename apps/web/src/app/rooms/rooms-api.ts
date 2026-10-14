@@ -72,6 +72,11 @@ export interface Room {
   turnNumber: number;
   /** When the current turn runs out (ISO 8601); null unless the match is active. */
   turnEndsAt: string | null;
+  /**
+   * When the match's time is up (ISO 8601, STORY-041, ENG-011), kept once it ends; null before the start and for games
+   * without a time limit.
+   */
+  matchEndsAt: string | null;
   members: RoomMember[];
   /** What this player may see of the game's own state; null until the game has any. */
   state: unknown;
@@ -112,6 +117,7 @@ export type RoomErrorCode =
   | 'ability_unavailable'
   | 'not_your_turn'
   | 'turn_expired'
+  | 'time_up'
   | 'stale_version'
   | 'match_not_started'
   | 'not_in_match'
@@ -164,6 +170,7 @@ const ROOM_ERROR_MESSAGES: Record<RoomError['code'], string> = {
   ability_unavailable: 'A player’s chosen ability is no longer available and they must choose again.',
   not_your_turn: 'It isn’t your turn.',
   turn_expired: 'Your turn has run out.',
+  time_up: 'Time’s up: the game is ending.',
   stale_version: 'The game moved on before your move arrived. Here’s where it is now.',
   match_not_started: 'The game hasn’t started yet.',
   not_in_match: 'You have left this game.',

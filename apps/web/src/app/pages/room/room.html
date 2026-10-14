@@ -195,7 +195,14 @@
               <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
             }
             @if (lifeBoard(); as board) {
-              <app-life-board [board]="board" [members]="current.members" [rolling]="busy()" (roll)="roll()" (chooseLane)="chooseLane($event)" />
+              <app-life-board
+                [board]="board"
+                [members]="current.members"
+                [endsAt]="current.matchEndsAt"
+                [rolling]="busy()"
+                (roll)="roll()"
+                (chooseLane)="chooseLane($event)"
+              />
             }
             <div class="leave" data-leave>
               @if (confirmingLeave()) {
@@ -212,6 +219,11 @@
             }
           </section>
         }
+      } @else if (current.status === 'Completed' && lifeBoard(); as board) {
+        <section class="match" aria-labelledby="final-heading" data-final-board>
+          <h2 id="final-heading">Final board</h2>
+          <app-life-board [board]="board" [members]="current.members" />
+        </section>
       }
     }
   }
