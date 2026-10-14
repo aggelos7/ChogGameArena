@@ -432,7 +432,10 @@ public sealed class MatchResultTests(MigratedPostgresDatabase database) : IClass
     [InlineData("""UPDATE "RoomMembers" SET "Rank" = 0""", "CK_RoomMembers_Rank")]
     [InlineData("""UPDATE "RoomMembers" SET "Rank" = 7""", "CK_RoomMembers_Rank")]
     [InlineData("""UPDATE "RoomMembers" SET "Rank" = 1 WHERE "Seat" IS NULL""", "CK_RoomMembers_Rank")]
-    public async Task Database_rejects_invalid_ranks(string sql, string constraint)
+    [InlineData("""UPDATE "RoomMembers" SET "Result" = '{{}}' WHERE "Seat" IS NOT NULL""", "CK_RoomMembers_Result")]
+    [InlineData("""UPDATE "RoomMembers" SET "Rank" = 1, "Result" = '[]' WHERE "Seat" IS NOT NULL""", "CK_RoomMembers_Result")]
+    [InlineData("""UPDATE "RoomMembers" SET "Rank" = 1, "Result" = '{{}}', "LeftAt" = now() WHERE "Seat" IS NOT NULL""", "CK_RoomMembers_Result")]
+    public async Task Database_rejects_invalid_ranks_and_results(string sql, string constraint)
     {
         var alice = await GuestAsync("Alice");
         var bob = await GuestAsync("Bob");

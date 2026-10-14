@@ -51,6 +51,11 @@ export interface RoomMember {
   rank: number | null;
   /** Place in the turn order from 1, given at the start; how abilities name their target (DEC-036). Null before it. */
   seat: number | null;
+  /**
+   * The game's record of how the member did in a completed match, stored with their rank and the same for everyone
+   * (STORY-043, DEC-046); its shape is the game's own. Null for players who left and in every other status.
+   */
+  result: unknown;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */

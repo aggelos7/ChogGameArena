@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ChogGames.Api.Matches;
 using ChogGames.Core.Matches;
 using ChogGames.Infrastructure.Matches;
@@ -14,7 +15,8 @@ namespace ChogGames.Api.Tests.ChogLife;
 /// STORY-041, DEC-043: a Chog Life match ends when every player still playing has reached the Finish, or when its
 /// 20-minute cap is up, with one result: players are ranked by portfolio, then finish order, then progress, the results
 /// are recorded once, and every player sees the same final board. The first to arrive gets the finish bonus, finished
-/// players are skipped in the turn order, and nobody can act once the time is up.
+/// players are skipped in the turn order, and nobody can act once the time is up. Each player still playing gets their
+/// result (STORY-043, DEC-046), stored with their rank and the same for every player on every reload.
 /// </summary>
 public sealed class ChogLifeFinishTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -257,6 +259,64 @@ public sealed class ChogLifeFinishTests(MigratedPostgresDatabase database) : ICl
         Assert.Empty(await SweepAsync());
     }
 
+    private static string?[] Results(JsonElement room) =>
+        room.GetProperty("members").EnumerateArray()
+            .OrderBy(m => m.GetProperty("seat").GetInt32())
+            .Select(m => m.GetProperty("result") is { ValueKind: JsonValueKind.Object } result ? result.GetRawText() : null)
+            .ToArray();
+
+    [PostgresFact]
+    public async Task Every_player_gets_the_same_stored_results_on_every_reload()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var outsider = await GuestAsync("Dave");
+        var code = await StartedAsync(alice, bob);
+        await SetStateAsync(code, """
+            {"rulesVersion":1,"pawns":[
+              {"seat":1,"tile":34,"mon":150,"stats":{"rugs":1,"degenRoutes":2,"degenWins":1,"biggestWin":100}},
+              {"seat":2,"tile":21,"mon":120}]}
+            """);
+
+        // Alice reaches the Finish first (+100 bonus); Bob lands on the airdrop at 22 for 50 MON, then finishes.
+        _dice.Enqueue(1);
+        await RollAsync(alice, await ViewAsync(alice, code));
+        _dice.Enqueue(1, 95);
+        await RollAsync(bob, await ViewAsync(bob, code));
+        await SetStateAsync(code, (await StoredStateAsync(code))!.Replace("\"tile\":22", "\"tile\":34"));
+        _dice.Enqueue(1);
+        await RollAsync(bob, await ViewAsync(bob, code));
+
+        string[] expected =
+        [
+            """{"startingPortfolio":100,"portfolio":250,"liquid":150,"assets":0,"bonuses":100,"liabilities":0,"place":1,"airdrops":0,"airdropMon":0,"rugsSurvived":1,"liquidations":0,"biggestWin":100,"degenRoutes":2,"degenWins":1,"degenScore":80,"degenScoreVersion":1}""",
+            """{"startingPortfolio":100,"portfolio":170,"liquid":170,"assets":0,"bonuses":0,"liabilities":0,"place":2,"airdrops":1,"airdropMon":50,"rugsSurvived":0,"liquidations":0,"biggestWin":50,"degenRoutes":0,"degenWins":0,"degenScore":0,"degenScoreVersion":1}""",
+        ];
+        var reloaded = new Guest(_factory.CreateClient(), alice.Cookie);
+        reloaded.Client.DefaultRequestHeaders.Add("Cookie", alice.Cookie);
+        _disposables.Add(new DisposableClient(reloaded.Client));
+        foreach (var seen in new[] { await ViewAsync(alice, code), await ViewAsync(bob, code), await ViewAsync(reloaded, code) })
+        {
+            Assert.Equal("Completed", seen.GetProperty("status").GetString());
+            Assert.Equal([1, 2], Ranks(seen));
+            Assert.All(
+                expected.Zip(Results(seen)),
+                pair => Assert.True(JsonNode.DeepEquals(JsonNode.Parse(pair.First), JsonNode.Parse(pair.Second!)), pair.Second));
+        }
+
+        // Stored with the ranks, so a player's total Degen Score is one query away.
+        await using (var db = database.CreateDbContext())
+        {
+            var totals = await db.Database
+                .SqlQueryRaw<int>("""SELECT COALESCE(SUM(("Result" ->> 'degenScore')::int), 0) AS "Value" FROM "RoomMembers" WHERE "Result" IS NOT NULL""")
+                .SingleAsync();
+            Assert.Equal(80, totals);
+        }
+
+        var refused = await SendAsync(outsider, HttpMethod.Get, $"/api/rooms/{code}", expected: HttpStatusCode.NotFound);
+        Assert.Equal("room_not_found", refused.GetProperty("code").GetString());
+    }
+
     [PostgresFact]
     public async Task When_the_last_player_on_the_board_leaves_the_finished_players_are_ranked()
     {
@@ -278,6 +338,7 @@ public sealed class ChogLifeFinishTests(MigratedPostgresDatabase database) : ICl
         var ended = await ViewAsync(alice, code);
         Assert.Equal(("Completed", "Finish"), (ended.GetProperty("status").GetString(), ended.GetProperty("state").GetProperty("ended").GetString()));
         Assert.Equal([2, 1, 3], Ranks(ended));
+        Assert.Equal([true, true, false], Results(ended).Select(result => result is not null));
         Assert.Equal([(1, 0), (1, 1), (1, 0)], await StatsAsync("Alice", "Bob", "Carol"));
     }
 

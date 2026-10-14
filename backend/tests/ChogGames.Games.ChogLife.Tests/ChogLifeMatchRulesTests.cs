@@ -741,7 +741,7 @@ public class ChogLifeMatchRulesTests
         var decision = Roll(room, players[0], state, dice);
 
         Assert.Equal([(1, 7)], dice.Draws);
-        Assert.Equal("""{"seat":1,"tile":18,"mon":112}""", Pawn(decision).GetRawText());
+        Assert.Equal("""{"seat":1,"tile":18,"mon":112,"stats":{"biggestWin":12}}""", Pawn(decision).GetRawText());
         Assert.Equal(
             """{"seat":1,"roll":1,"from":13,"to":18,"path":[18],"matured":{"lane":"Safe","stake":50,"payout":62}}""",
             LastMove(decision).GetRawText());
@@ -778,8 +778,8 @@ public class ChogLifeMatchRulesTests
             """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"mon":0,"liabilities":6},{"seat":2,"tile":0,"mon":100}]}""",
             new Dice(2));
 
-        Assert.Equal("""{"seat":1,"tile":18,"mon":32}""", Pawn(paidOut).GetRawText());
-        Assert.Equal("""{"seat":1,"tile":2,"mon":14}""", Pawn(rewarded).GetRawText());
+        Assert.Equal("""{"seat":1,"tile":18,"mon":32,"stats":{"biggestWin":12}}""", Pawn(paidOut).GetRawText());
+        Assert.Equal("""{"seat":1,"tile":2,"mon":14,"stats":{"biggestWin":20}}""", Pawn(rewarded).GetRawText());
         Assert.Equal(20, LastMove(rewarded).GetProperty("change").GetInt32());
     }
 
@@ -793,7 +793,7 @@ public class ChogLifeMatchRulesTests
             """{"rulesVersion":1,"pawns":[{"seat":1,"tile":14,"mon":0,"liabilities":6},{"seat":2,"tile":0,"mon":100}]}""",
             new Dice(2));
 
-        Assert.Equal("""{"seat":1,"tile":16,"mon":0,"liabilities":26}""", Pawn(decision).GetRawText());
+        Assert.Equal("""{"seat":1,"tile":16,"mon":0,"liabilities":26,"stats":{"liquidations":1}}""", Pawn(decision).GetRawText());
         Assert.Equal(-20, LastMove(decision).GetProperty("change").GetInt32());
     }
 
@@ -892,7 +892,7 @@ public class ChogLifeMatchRulesTests
         Assert.Equal((MatchRuleOutcome.Accepted, true, true), (arrived.Outcome, arrived.EndsTurn, arrived.Finished));
         Assert.Null(arrived.Standings);
         Assert.Equal([(1, 7)], dice.Draws);
-        Assert.Equal("""{"seat":2,"tile":35,"mon":80,"bonuses":100}""", Pawn(arrived, 1).GetRawText());
+        Assert.Equal("""{"seat":2,"tile":35,"mon":80,"bonuses":100,"stats":{"biggestWin":100}}""", Pawn(arrived, 1).GetRawText());
         Assert.Equal("""{"seat":2,"roll":6,"from":33,"to":35,"path":[34,35],"place":1,"bonus":100}""", LastMove(arrived).GetRawText());
         Assert.Equal("[2]", arrived.State!.Value.GetProperty("finished").GetRawText());
     }
@@ -918,7 +918,7 @@ public class ChogLifeMatchRulesTests
 
         var arrived = Roll(room, players[0], StateOf("""{"seat":1,"tile":34,"mon":0,"liabilities":30,"bonuses":999950}""", """{"seat":2,"tile":0,"mon":100}""") + "}", new Dice(1));
 
-        Assert.Equal("""{"seat":1,"tile":35,"mon":0,"bonuses":1000000,"liabilities":30}""", Pawn(arrived).GetRawText());
+        Assert.Equal("""{"seat":1,"tile":35,"mon":0,"bonuses":1000000,"liabilities":30,"stats":{"biggestWin":50}}""", Pawn(arrived).GetRawText());
     }
 
     [Fact]

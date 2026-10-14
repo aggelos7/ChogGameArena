@@ -462,11 +462,10 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
     [InlineData("Matches:TurnTimeout", "00:10:01", "Matches:TurnTimeout must be between")]
     [InlineData("Matches:MaxMissedTurns", "0", "Matches:MaxMissedTurns must be between 1 and 20")]
     [InlineData("Matches:TimeoutCheckInterval", "00:00:00", "Matches:TimeoutCheckInterval must be between")]
-    public async Task Invalid_turn_settings_stop_startup(string key, string value, string expectedMessage)
+    public void Invalid_turn_settings_stop_startup(string key, string value, string expectedMessage)
     {
-        await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, new Dictionary<string, string?> { [key] = value });
+        var error = StartupValidation.Failure(new Dictionary<string, string?> { [key] = value });
 
-        var error = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
         Assert.Contains(expectedMessage, error.Message);
     }
 

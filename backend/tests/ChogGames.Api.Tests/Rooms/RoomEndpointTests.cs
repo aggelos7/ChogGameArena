@@ -308,12 +308,14 @@ public sealed class RoomEndpointTests(MigratedPostgresDatabase database) : IClas
     [Theory]
     [InlineData("0")]
     [InlineData("1001")]
-    public async Task Invalid_rate_limit_setting_fails_at_startup(string value)
+    public void Invalid_rate_limit_setting_fails_at_startup(string value)
     {
-        await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, new Dictionary<string, string?> { ["Rooms:RequestsPerMinutePerPlayer"] = value });
+        var error = StartupValidation.Failure(new Dictionary<string, string?> { ["Rooms:RequestsPerMinutePerPlayer"] = value });
 
-        var error = Assert.ThrowsAny<Exception>(() => factory.Services);
-
-        Assert.Contains("Rooms:RequestsPerMinutePerPlayer", error.ToString());
+        Assert.Contains("Rooms:RequestsPerMinutePerPlayer", error.Message);
     }
+
+    [Fact]
+    public void Valid_settings_pass_startup_validation() =>
+        StartupValidation.Validate(new Dictionary<string, string?> { ["Rooms:RequestsPerMinutePerPlayer"] = "1000" });
 }

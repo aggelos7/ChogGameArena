@@ -645,7 +645,7 @@
 
 #### STORY-043 — Life result and statistics
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Show ranking, starting/final portfolio, rugs, liquidations, degen score and winner.

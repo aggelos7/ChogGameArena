@@ -30,6 +30,7 @@ function member(displayName: string, seat: number, overrides: Partial<RoomMember
     hasLeft: false,
     isTurn: false,
     rank: null,
+    result: null,
     seat,
     ...overrides,
   };
