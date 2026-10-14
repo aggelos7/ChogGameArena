@@ -34,7 +34,7 @@ This file adds the working rules that have proven themselves in this repo.
   - Check for drift with `dotnet ef migrations has-pending-model-changes`.
 - **Web:** `NX_DAEMON=false npx nx run-many --targets=lint,test,build --projects=web --output-style=static`.
 - **Workspace:** `npm run test:workspace`, and `npm run deps:verify` when dependencies or Compose change.
-- **Dev servers:** run `NX_DAEMON=false npm run start:all` in the background. The web app is on `:4200` and proxies `/api` to `:5248`. Restart after API changes, then smoke-test through `:4200` with curl cookie jars.
+- **Dev servers:** run `NX_DAEMON=false npm run start:all` in the background. The web app is on `:4201` and proxies `/api` to `:5248`. Restart after API changes, then smoke-test through `:4201` with curl cookie jars.
 - **Installing packages:** use `npx npm@11 install …`, because npm 10.9 crashes. Use `npm ci` for plain installs.
 
 ## Code rules learned here

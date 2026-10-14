@@ -41,7 +41,7 @@ npm run test:workspace  # run workspace skeleton checks (node:test)
 ### Frontend
 
 ```bash
-npm start               # dev server on http://localhost:4200 (same as npx nx serve web); /api is proxied to http://localhost:5248
+npm start               # dev server on http://localhost:4201 (same as npx nx serve web); /api is proxied to http://localhost:5248
 npm run start:all       # API (Development) and web dev server together
 npx nx build web        # production build to dist/apps/web
 npx nx test web         # unit tests (Vitest via @angular/build:unit-test)
@@ -176,7 +176,7 @@ On success the session cookie is replaced; the old cookie stops working. Each ch
 
 | Setting (`WalletAuth:`) | Default | |
 |---|---|---|
-| `Domain` | *(required)* | host[:port] users see the web app at; `localhost:4200` in `appsettings.Development.json` |
+| `Domain` | *(required)* | host[:port] users see the web app at; `localhost:4201` in `appsettings.Development.json` |
 | `Uri` | *(required)* | web app origin, e.g. `https://app.example.com` (`http` only for localhost); must match `Domain` |
 | `ChallengeLifetime` | `00:05:00` | 1-15 minutes |
 | `RequestsPerMinutePerClient` | `20` | challenge + verify requests per client IP per minute |
@@ -337,7 +337,7 @@ Live room updates (STORY-022, STORY-026, ENG-005, DEC-024, DEC-028): a SignalR h
 - **Who gets updates:** only players still playing in the room when the update is sent. A player who forfeits a started match (also by missing turns) gets one last snapshot showing them out; a member who leaves a waiting room gets nothing more. Either way all their connections are unsubscribed and can't subscribe again.
 - **Limits:** opening a connection counts as a room request; hub calls have their own per-player budget of the same size (`rate_limited` hub error).
 - **Scale:** subscriptions are tracked in memory, so this is for a single API instance (a backplane comes with scale-out, ADR-010).
-- **Dev proxy:** `apps/web/proxy.conf.json` proxies `/api` with `ws: true`, so the hub works through `:4200`.
+- **Dev proxy:** `apps/web/proxy.conf.json` proxies `/api` with `ws: true`, so the hub works through `:4201`.
 
 | Setting (`Rooms:`) | Default | |
 |---|---|---|

@@ -130,6 +130,19 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
 
 
+#### STORY-065 — Web dev server on port 4201
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E01
+- **Implementation:** Serve the web app in development on port 4201 instead of Angular's default 4200, which other local projects use. Set the port on the `web` serve target, keep the API on 5248 behind the `/api` proxy, and move the development wallet sign-in domain (`WalletAuth:Domain`/`Uri` in `appsettings.Development.json`) to `localhost:4201` so EIP-4361 messages match the page. Update README, CLAUDE.md and progress notes.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** `npm start` and `npm run start:all` serve the web app on `http://localhost:4201`, `/api` is proxied to the API on 5248, nothing of this project listens on 4200, and a development wallet challenge names `localhost:4201`.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. No change to production configuration, the API port or CI.
+
+
 ## E02 — Suite and player identity
 
 
