@@ -6,7 +6,8 @@ namespace ChogGames.Games.ChogLife.Rules;
 /// <summary>
 /// A version of the Chog Life rules: the board, the starting MON, the first-finish bonus, the match's time cap, the
 /// die (STORY-035, LIFE-001, LIFE-002, LIFE-007, ENG-011, DEC-037), what each event does (STORY-038, DEC-040) and the
-/// lane a player who doesn't choose at a fork takes (STORY-039, DEC-041). Like an ability catalog (DEC-032) it is versioned
+/// lane a player who doesn't choose at a fork takes (STORY-039, DEC-041) and what MON staked on a fork's lane returns
+/// (STORY-040, DEC-042). Like an ability catalog (DEC-032) it is versioned
 /// code in the game module, checked when it is built, so a malformed board stops the API at startup instead of
 /// failing during a match. MON are fictional whole-number game points (DEC-010); nothing here touches a wallet or
 /// the chain.
@@ -28,6 +29,9 @@ public sealed class LifeRules
     /// <summary>The most liquid MON a player can hold; gains above it are lost, so a balance never overflows.</summary>
     public const int MaxMon = 1_000_000;
 
+    /// <summary>The most a stake may pay back, in percent of the stake (10x).</summary>
+    public const int MaxStakePercent = 1_000;
+
     /// <summary>The hard limit on any match's duration (ENG-011).</summary>
     public static readonly TimeSpan MaxTimeCap = TimeSpan.FromMinutes(20);
 
@@ -39,7 +43,9 @@ public sealed class LifeRules
         TimeSpan timeCap,
         int dieFaces,
         IReadOnlyDictionary<LifeEventKind, LifeEvent> events,
-        LifeLane defaultLane)
+        LifeLane defaultLane,
+        int forkStake,
+        IReadOnlyDictionary<LifeLane, LifeLaneStake> stakes)
     {
         Version = version;
         Tiles = tiles;
@@ -49,6 +55,8 @@ public sealed class LifeRules
         DieFaces = dieFaces;
         Events = events;
         DefaultLane = defaultLane;
+        ForkStake = forkStake;
+        Stakes = stakes;
     }
 
     /// <summary>The game these rules are for.</summary>
@@ -86,12 +94,23 @@ public sealed class LifeRules
     public LifeLane DefaultLane { get; }
 
     /// <summary>
+    /// The MON a player stakes on the lane they take at a fork, or all their liquid MON if they hold less (LIFE-005,
+    /// STORY-040, DEC-042); 0 when this version has no stakes.
+    /// </summary>
+    public int ForkStake { get; }
+
+    /// <summary>What a stake on each lane returns, Safe and Degen; empty when <see cref="ForkStake"/> is 0.</summary>
+    public IReadOnlyDictionary<LifeLane, LifeLaneStake> Stakes { get; }
+
+    /// <summary>
     /// Rules with these values, or <see cref="ArgumentException"/> naming the first problem: the board must have
     /// <see cref="MinTiles"/> to <see cref="MaxTiles"/> tiles indexed in order, from one start to one finish, every
     /// link pointing forward to an existing tile, every tile reachable, each fork's safe and degen lanes joining the
     /// main track again at the same tile, and every amount and event kind on the tiles that use one. Each event kind is
     /// defined once, every kind on the board is defined, and each event's outcomes have chances of 1–100% adding up to
-    /// 100% and move some MON within range. The default lane is Safe or Degen.
+    /// 100% and move some MON within range. The default lane is Safe or Degen. A fork stake of 1 to
+    /// <see cref="MaxTileAmount"/> MON needs the returns of the Safe and Degen lanes, each defined once, with chances of
+    /// 1–100% adding up to 100% and paying back 0 to <see cref="MaxStakePercent"/>% of the stake.
     /// </summary>
     public static LifeRules Create(
         int version,
@@ -101,7 +120,9 @@ public sealed class LifeRules
         TimeSpan timeCap,
         int dieFaces,
         IEnumerable<LifeEvent> events,
-        LifeLane defaultLane = LifeLane.Safe)
+        LifeLane defaultLane = LifeLane.Safe,
+        int forkStake = 0,
+        IEnumerable<LifeLaneStake>? stakes = null)
     {
         if (version < 1)
         {
@@ -138,7 +159,8 @@ public sealed class LifeRules
         CheckBoard(board);
         ArgumentNullException.ThrowIfNull(events);
         var byKind = CheckEvents(board, events.ToArray());
-        return new LifeRules(version, board, startingMon, finishBonus, timeCap, dieFaces, byKind, defaultLane);
+        var byLane = CheckStakes(forkStake, stakes?.ToArray());
+        return new LifeRules(version, board, startingMon, finishBonus, timeCap, dieFaces, byKind, defaultLane, forkStake, byLane);
     }
 
     /// <summary>
@@ -188,8 +210,8 @@ public sealed class LifeRules
     /// <summary>
     /// What landing on <paramref name="tile"/> does to a player holding <paramref name="liquid"/> MON (STORY-038,
     /// DEC-040): the signed MON it moves, or null for a tile that does nothing. Reward and Loss tiles move their amount;
-    /// an event tile draws one of its outcomes from <paramref name="random"/>. Liquid MON stays between 0 and
-    /// <see cref="MaxMon"/>, and the change says what really moved.
+    /// an event tile draws one of its outcomes from <paramref name="random"/>. A loss may be bigger than the liquid MON
+    /// held: <see cref="LifePortfolio.Settle"/> turns the rest into a liability (STORY-040, DEC-042).
     /// </summary>
     public int? Resolve(int tile, int liquid, IRandomSource random)
     {
@@ -200,19 +222,88 @@ public sealed class LifeRules
         }
 
         var landed = Tiles[tile];
-        int? change = landed.Type switch
+        return landed.Type switch
         {
             LifeTileType.Reward => landed.Amount,
             LifeTileType.Loss => -landed.Amount,
             LifeTileType.Event => Events[landed.Event!.Value].Draw(random).Change(liquid),
             _ => null,
         };
-        if (change is not { } wanted)
+    }
+
+    /// <summary>
+    /// What a stake of <paramref name="asset"/> pays back when the pawn rejoins the main track (STORY-040, DEC-042): one
+    /// of its lane's outcomes, drawn from <paramref name="random"/> unless there is only one.
+    /// </summary>
+    public int Payout(LifeAsset asset, IRandomSource random)
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        ArgumentNullException.ThrowIfNull(random);
+        if (!Stakes.TryGetValue(asset.Lane, out var stake))
         {
-            return null;
+            throw new ArgumentOutOfRangeException(nameof(asset), asset.Lane, "These rules have no stake on that lane.");
         }
 
-        return (int)Math.Clamp((long)liquid + wanted, 0, MaxMon) - liquid;
+        if (asset.Amount is < 1 or > MaxMon)
+        {
+            throw new ArgumentOutOfRangeException(nameof(asset), asset.Amount, $"A stake is 1 to {MaxMon} MON.");
+        }
+
+        return stake.Draw(random).Payout(asset.Amount);
+    }
+
+    private static Dictionary<LifeLane, LifeLaneStake> CheckStakes(int forkStake, LifeLaneStake[]? stakes)
+    {
+        if (forkStake is < 0 or > MaxTileAmount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(forkStake), forkStake, $"The fork stake is 0 to {MaxTileAmount} MON.");
+        }
+
+        var byLane = new Dictionary<LifeLane, LifeLaneStake>();
+        if (forkStake == 0 && stakes is null)
+        {
+            return byLane;
+        }
+
+        if (stakes is null)
+        {
+            throw InvalidStake("A fork stake needs the returns of the Safe and Degen lanes.");
+        }
+
+        foreach (var stake in stakes)
+        {
+            if (stake is null || stake.Lane is not (LifeLane.Safe or LifeLane.Degen))
+            {
+                throw InvalidStake("A stake's returns are for the Safe or the Degen lane.");
+            }
+
+            if (!byLane.TryAdd(stake.Lane, stake))
+            {
+                throw InvalidStake($"The {stake.Lane} lane's returns are defined twice.");
+            }
+
+            if (stake.Outcomes is not { Count: > 0 } outcomes || outcomes.Contains(null!))
+            {
+                throw InvalidStake($"The {stake.Lane} lane's stake needs its outcomes.");
+            }
+
+            if (outcomes.Any(outcome => outcome.Chance is < 1 or > 100 || outcome.Percent is < 0 or > MaxStakePercent))
+            {
+                throw InvalidStake($"Each {stake.Lane} outcome needs a chance of 1 to 100% and pays back 0 to {MaxStakePercent}% of the stake.");
+            }
+
+            if (outcomes.Sum(outcome => outcome.Chance) != 100)
+            {
+                throw InvalidStake($"The chances of the {stake.Lane} lane's outcomes must add up to 100%.");
+            }
+        }
+
+        if (byLane.Count != 2)
+        {
+            throw InvalidStake("A fork stake needs the returns of both the Safe and the Degen lane.");
+        }
+
+        return byLane;
     }
 
     private static Dictionary<LifeEventKind, LifeEvent> CheckEvents(LifeTile[] board, LifeEvent[] events)
@@ -419,4 +510,6 @@ public sealed class LifeRules
     private static ArgumentException Invalid(string message) => new(message, "tiles");
 
     private static ArgumentException InvalidEvent(string message) => new(message, "events");
+
+    private static ArgumentException InvalidStake(string message) => new(message, "stakes");
 }

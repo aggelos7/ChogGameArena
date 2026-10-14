@@ -4,13 +4,20 @@
       <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
         <span class="pawn" [style.background]="color(member.seat)" aria-hidden="true">{{ member.seat }}</span>
         <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="1.75" />
-        <span class="name">{{ member.displayName }}</span>
-        <span class="mon" data-mon>{{ monBySeat().get(member.seat) }} MON</span>
-        @if (member.isYou) {
-          <span class="tag">You</span>
-        }
-        @if (member.isTurn) {
-          <span class="tag turn" data-turn>Turn</span>
+        <span class="who">
+          <span class="name">{{ member.displayName }}</span>
+          @if (member.isYou) {
+            <span class="tag">You</span>
+          }
+          @if (member.isTurn) {
+            <span class="tag turn" data-turn>Turn</span>
+          }
+        </span>
+        @if (pawnBySeat().get(member.seat); as pawn) {
+          <span class="portfolio" [class.negative]="pawn.portfolio < 0" data-portfolio>{{ pawn.portfolio }} MON</span>
+          <span class="breakdown" data-breakdown>
+            Liquid {{ pawn.mon }} · Assets {{ pawn.assets }} · Bonus {{ pawn.bonuses }} · Debt {{ pawn.liabilities }}
+          </span>
         }
       </li>
     }
@@ -45,6 +52,9 @@
         >
           <span class="route-name">Take the {{ option.name }} route</span>
           <span class="route-summary">{{ option.summary }}</span>
+          @if (option.stake) {
+            <span class="route-stake" data-route-stake>{{ option.stake }}</span>
+          }
         </button>
       }
       <p class="route-hint" data-route-hint>If time runs out, you take the {{ defaultRoute() }} route.</p>

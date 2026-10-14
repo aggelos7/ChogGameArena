@@ -227,7 +227,7 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         Assert.Equal(room.GetProperty("version").GetInt64() + 1, result.GetProperty("version").GetInt64());
         Assert.Equal([(1, 7)], _dice.Draws.Skip(drawsBefore));
         const string move = """{"seat":1,"roll":4,"from":0,"to":4,"path":[1,2,3,4]}""";
-        const string pawns = """[{"seat":1,"tile":4,"mon":100},{"seat":2,"tile":0,"mon":100}]""";
+        const string pawns = """[{"seat":1,"tile":4,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100},{"seat":2,"tile":0,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""";
         foreach (var seen in new[] { await aliceLive.NextAsync(), await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) })
         {
             Assert.Equal(result.GetProperty("version").GetInt64(), seen.GetProperty("version").GetInt64());
@@ -246,7 +246,7 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         await AtForkAsync(alice, bob, code);
 
         var room = await ViewAsync(bob, code);
-        Assert.Equal("""[{"seat":1,"tile":9,"mon":110},{"seat":2,"tile":1,"mon":100}]""", Pawns(room));
+        Assert.Equal("""[{"seat":1,"tile":9,"mon":110,"assets":0,"bonuses":0,"liabilities":0,"portfolio":110},{"seat":2,"tile":1,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""", Pawns(room));
         Assert.Equal("""{"seat":1,"roll":5,"from":6,"to":9,"path":[7,8,9]}""", LastMove(room));
         Assert.Equal(1, TurnSeat(room));
         Assert.Equal(1, Choosing(room));
@@ -267,8 +267,8 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         var result = await ChooseAsync(alice, room, new { lane = "Degen" });
 
         Assert.Equal(drawsBefore, _dice.Draws.Count);
-        const string move = """{"seat":1,"roll":5,"from":6,"to":9,"path":[7,8,9],"lane":"Degen"}""";
-        const string pawns = """[{"seat":1,"tile":9,"mon":110,"lane":"Degen"},{"seat":2,"tile":1,"mon":100}]""";
+        const string move = """{"seat":1,"roll":5,"from":6,"to":9,"path":[7,8,9],"lane":"Degen","staked":50}""";
+        const string pawns = """[{"seat":1,"tile":9,"mon":60,"lane":"Degen","stake":{"lane":"Degen","amount":50},"assets":50,"bonuses":0,"liabilities":0,"portfolio":110},{"seat":2,"tile":1,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""";
         foreach (var seen in new[] { await aliceLive.NextAsync(), await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) })
         {
             Assert.Equal(result.GetProperty("version").GetInt64(), seen.GetProperty("version").GetInt64());
@@ -283,8 +283,8 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         await RollAsync(alice, await ViewAsync(alice, code));
 
         var after = await ViewAsync(bob, code);
-        Assert.Equal("""{"seat":1,"roll":1,"from":9,"to":14,"path":[14],"change":-44}""", LastMove(after));
-        Assert.Equal("""[{"seat":1,"tile":14,"mon":66},{"seat":2,"tile":4,"mon":100}]""", Pawns(after));
+        Assert.Equal("""{"seat":1,"roll":1,"from":9,"to":14,"path":[14],"change":-24}""", LastMove(after));
+        Assert.Equal("""[{"seat":1,"tile":14,"mon":36,"stake":{"lane":"Degen","amount":50},"assets":50,"bonuses":0,"liabilities":0,"portfolio":86},{"seat":2,"tile":4,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""", Pawns(after));
     }
 
     [PostgresFact]
@@ -337,8 +337,8 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         }
 
         var room = await ViewAsync(bob, code);
-        Assert.Equal("""{"seat":1,"roll":5,"from":6,"to":9,"path":[7,8,9],"lane":"Safe","byDefault":true}""", LastMove(room));
-        Assert.Equal("""[{"seat":1,"tile":9,"mon":110,"lane":"Safe"},{"seat":2,"tile":1,"mon":100}]""", Pawns(room));
+        Assert.Equal("""{"seat":1,"roll":5,"from":6,"to":9,"path":[7,8,9],"lane":"Safe","byDefault":true,"staked":50}""", LastMove(room));
+        Assert.Equal("""[{"seat":1,"tile":9,"mon":60,"lane":"Safe","stake":{"lane":"Safe","amount":50},"assets":50,"bonuses":0,"liabilities":0,"portfolio":110},{"seat":2,"tile":1,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""", Pawns(room));
         Assert.Null(Choosing(room));
         Assert.Equal(2, TurnSeat(room));
         await using (var db = database.CreateDbContext())
@@ -392,7 +392,7 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
         Assert.Equal(drawsAfter, _dice.Draws.Count);
         var seen = await ViewAsync(bob, code);
         Assert.Equal("""{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2],"change":20}""", LastMove(seen));
-        Assert.Equal("""[{"seat":1,"tile":2,"mon":120},{"seat":2,"tile":0,"mon":100}]""", Pawns(seen));
+        Assert.Equal("""[{"seat":1,"tile":2,"mon":120,"assets":0,"bonuses":0,"liabilities":0,"portfolio":120},{"seat":2,"tile":0,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""", Pawns(seen));
     }
 
     [PostgresFact]
@@ -411,7 +411,7 @@ public sealed class ChogLifeMovementTests(MigratedPostgresDatabase database) : I
 
         Assert.Equal([(1, 7), (0, 100)], _dice.Draws.Skip(drawsBefore));
         const string move = """{"seat":1,"roll":3,"from":0,"to":3,"path":[1,2,3],"change":50}""";
-        const string pawns = """[{"seat":1,"tile":3,"mon":150},{"seat":2,"tile":0,"mon":100}]""";
+        const string pawns = """[{"seat":1,"tile":3,"mon":150,"assets":0,"bonuses":0,"liabilities":0,"portfolio":150},{"seat":2,"tile":0,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""";
         foreach (var seen in new[] { await aliceLive.NextAsync(), await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) })
         {
             Assert.Equal(result.GetProperty("version").GetInt64(), seen.GetProperty("version").GetInt64());

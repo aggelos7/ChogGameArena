@@ -3,7 +3,7 @@ import { Component, computed, input, output } from '@angular/core';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
-import { LifeBoard, LifeRoute, LifeTile, laneSummary, laneTiles, lifeRows, seatColor, tileLabel } from './life-board-model';
+import { LifeBoard, LifePawn, LifeRoute, LifeTile, laneSummary, laneTiles, lifeRows, seatColor, stakeSummary, tileLabel } from './life-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -19,11 +19,12 @@ interface DrawnPawn {
   lane?: LifeRoute;
 }
 
-/** A route offered at a fork, with what its tiles hold. */
+/** A route offered at a fork, with what its tiles hold and what staking on it returns. */
 interface RouteOption {
   route: LifeRoute;
   name: string;
   summary: string;
+  stake: string | null;
 }
 
 const ROUTE_NAMES: Record<LifeRoute, string> = { Safe: 'safe', Degen: 'degen' };
@@ -34,9 +35,10 @@ const ROUTE_NAMES: Record<LifeRoute, string> = { Safe: 'safe', Degen: 'degen' };
  * names each player and whose turn it is. It only draws what the server sent; it has no moves of its own. On your turn it
  * offers Roll, which the page sends to the server (STORY-037, DEC-039); the server's roll and move come back in the next
  * snapshot, shown as the last move with its destination marked and what the tile did to their MON. The legend shows
- * every player's liquid MON (STORY-038, DEC-040). A roll that stops on a fork keeps the turn: the player gets the safe
- * and degen routes with what each lane holds, highlighted on the board, and the page sends the choice (STORY-039,
- * DEC-041); everyone else sees who is choosing, and then which route they took.
+ * every player's portfolio as the server values it: the total, then liquid MON, assets, bonuses and debt (STORY-038,
+ * STORY-040, DEC-040, DEC-042). A roll that stops on a fork keeps the turn: the player gets the safe and degen routes
+ * with what each lane holds and what staking on it returns, highlighted on the board, and the page sends the choice
+ * (STORY-039, DEC-041); everyone else sees who is choosing, and then which route they took and what they staked.
  */
 @Component({
   selector: 'app-life-board',
@@ -96,16 +98,21 @@ export class LifeBoardView {
     return this.board().pawns.find((pawn) => pawn.seat === seat)?.tile ?? null;
   });
 
-  /** The two routes on offer, with what each lane holds; only for the player choosing. */
+  /** The two routes on offer, with what each lane holds and what staking on it returns; only for the player choosing. */
   protected readonly routes = computed<RouteOption[]>(() => {
     const fork = this.fork();
-    if (!this.chooser()?.isYou || fork === null) {
+    const board = this.board();
+    const you = board.pawns.find((pawn) => pawn.seat === this.chooser()?.seat);
+    if (!this.chooser()?.isYou || fork === null || !you) {
       return [];
     }
+    // The server stakes the fork stake, or all the liquid MON held if less, unless a stake is already held (DEC-042).
+    const stake = board.forkStake && !you.stake ? Math.min(board.forkStake, you.mon) : 0;
     return (['Safe', 'Degen'] as const).map((route) => ({
       route,
       name: ROUTE_NAMES[route],
-      summary: laneSummary(laneTiles(this.board().tiles, fork, route)),
+      summary: laneSummary(laneTiles(board.tiles, fork, route)),
+      stake: board.forkStake ? stakeSummary(stake, board.stakeReturns?.find((returns) => returns.lane === route)) : null,
     }));
   });
 
@@ -118,8 +125,8 @@ export class LifeBoardView {
     return new Set(fork === null ? [] : [...laneTiles(tiles, fork, 'Safe'), ...laneTiles(tiles, fork, 'Degen')].map((tile) => tile.index));
   });
 
-  /** Each player's liquid MON, by seat. */
-  protected readonly monBySeat = computed(() => new Map(this.board().pawns.map((pawn) => [pawn.seat, pawn.mon])));
+  /** Each player's pawn with their portfolio, by seat. */
+  protected readonly pawnBySeat = computed(() => new Map<number, LifePawn>(this.board().pawns.map((pawn) => [pawn.seat, pawn])));
 
   /** What the latest move was, in words: who rolled what, where they went and what the tile did to their MON. */
   protected readonly lastMove = computed(() => {
@@ -134,13 +141,17 @@ export class LifeBoardView {
     if (move.roll === undefined) {
       return `${who} passed at the finish.`;
     }
+    const staked = move.staked ? ` and ${member?.isYou ? 'stake' : 'stakes'} ${move.staked} MON` : '';
     const route = !move.lane
       ? ''
       : move.byDefault
-        ? ` Time ran out, so ${member?.isYou ? 'you take' : `${who} takes`} the ${ROUTE_NAMES[move.lane]} route.`
-        : ` ${who} chose the ${ROUTE_NAMES[move.lane]} route.`;
+        ? ` Time ran out, so ${member?.isYou ? 'you take' : `${who} takes`} the ${ROUTE_NAMES[move.lane]} route${staked}.`
+        : ` ${who} chose the ${ROUTE_NAMES[move.lane]} route${move.staked ? ` and staked ${move.staked} MON` : ''}.`;
+    const matured = move.matured
+      ? ` ${member?.isYou ? 'Your' : 'Their'} ${ROUTE_NAMES[move.matured.lane]} stake of ${move.matured.stake} MON paid back ${move.matured.payout} MON.`
+      : '';
     if (move.change === undefined) {
-      return `${who} rolled ${move.roll} and moved to ${where}.${route}`;
+      return `${who} rolled ${move.roll} and moved to ${where}.${matured}${route}`;
     }
     const outcome =
       move.change > 0
@@ -148,7 +159,7 @@ export class LifeBoardView {
         : move.change < 0
           ? `lost ${-move.change} MON`
           : `${member?.isYou ? 'your' : 'their'} MON didn’t change`;
-    return `${who} rolled ${move.roll}, landed on ${where} and ${outcome}.${route}`;
+    return `${who} rolled ${move.roll}, landed on ${where} and ${outcome}.${matured}${route}`;
   });
 
   protected isChoice(tile: LifeTile): boolean {

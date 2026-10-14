@@ -19,22 +19,55 @@ export interface LifeTile {
   event?: LifeEventKind;
 }
 
+/** MON staked on the lane taken at a fork, held as an asset until the pawn rejoins the main track (STORY-040, DEC-042). */
+export interface LifeStake {
+  lane: LifeRoute;
+  amount: number;
+}
+
 /**
- * A player's pawn, by their seat (the room's `seat`), with their liquid MON (STORY-038); player ids never reach the
- * client. On a fork, `lane` is the route its player chose to leave by (STORY-039, DEC-041).
+ * A player's pawn, by their seat (the room's `seat`), with their portfolio as the server values it (STORY-040,
+ * DEC-042): liquid `mon` (STORY-038), `assets`, `bonuses`, `liabilities` and the total `portfolio`
+ * (liquid + assets + bonuses − liabilities, which may be negative). Player ids never reach the client. On a fork,
+ * `lane` is the route its player chose to leave by (STORY-039, DEC-041); `stake` is what they staked on it.
  */
 export interface LifePawn {
   seat: number;
   tile: number;
   mon: number;
   lane?: LifeRoute;
+  stake?: LifeStake;
+  assets: number;
+  bonuses: number;
+  liabilities: number;
+  portfolio: number;
+}
+
+/** A stake that paid out as its pawn rejoined the main track. */
+export interface LifeMaturity {
+  lane: LifeRoute;
+  stake: number;
+  payout: number;
+}
+
+/** One possible return of a lane's stake: its chance and the share of the stake paid back, both in percent. */
+export interface LifeStakeOutcome {
+  chance: number;
+  percent: number;
+}
+
+/** What a stake on a lane returns. */
+export interface LifeStakeReturns {
+  lane: LifeRoute;
+  outcomes: LifeStakeOutcome[];
 }
 
 /**
  * A seat's latest move (STORY-037, DEC-039): the server's roll, the tiles left and reached, and every tile passed on the
  * way, ending with `to`. A pawn already on the Finish passes without a roll. `change` is the MON the tile it stopped on
  * moved (STORY-038, DEC-040), absent for a tile that does nothing. A move that stopped on a fork gets the `lane` chosen
- * there, with `byDefault` when the turn ran out and the rules chose it (STORY-039, DEC-041).
+ * there, with `byDefault` when the turn ran out and the rules chose it (STORY-039, DEC-041), and the MON `staked` on it;
+ * a move that rejoined the main track with a stake says what it paid out in `matured` (STORY-040, DEC-042).
  */
 export interface LifeMove {
   seat: number;
@@ -45,6 +78,8 @@ export interface LifeMove {
   change?: number;
   lane?: LifeRoute;
   byDefault?: boolean;
+  staked?: number;
+  matured?: LifeMaturity;
 }
 
 /** The Chog Life view in a room snapshot's `state` (STORY-036, DEC-038). */
@@ -58,6 +93,10 @@ export interface LifeBoard {
   choosing?: number;
   /** The lane taken when the turn runs out before the choice. */
   defaultLane?: LifeRoute;
+  /** The MON staked on the lane taken at a fork, or all the liquid MON held if less; absent when there's no stake. */
+  forkStake?: number;
+  /** What a stake returns on each lane. */
+  stakeReturns?: LifeStakeReturns[];
 }
 
 /** The command that rolls the die and moves your pawn on your turn. */
@@ -81,6 +120,13 @@ const ROUTES: readonly unknown[] = ['Safe', 'Degen'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const isIndex = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const isStake = (value: unknown): boolean => isRecord(value) && ROUTES.includes(value['lane']) && isIndex(value['amount']);
+const isStakeReturns = (value: unknown): boolean =>
+  isRecord(value) &&
+  ROUTES.includes(value['lane']) &&
+  Array.isArray(value['outcomes']) &&
+  value['outcomes'].length > 0 &&
+  value['outcomes'].every((outcome) => isRecord(outcome) && isIndex(outcome['chance']) && isIndex(outcome['percent']));
 
 /** The board in `state`, or null when the state isn't a Chog Life board this client understands. */
 export function toLifeBoard(state: unknown): LifeBoard | null {
@@ -103,7 +149,12 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       isIndex(pawn['tile']) &&
       pawn['tile'] < tiles.length &&
       isIndex(pawn['mon']) &&
-      (pawn['lane'] === undefined || ROUTES.includes(pawn['lane'])),
+      isIndex(pawn['assets']) &&
+      isIndex(pawn['bonuses']) &&
+      isIndex(pawn['liabilities']) &&
+      Number.isInteger(pawn['portfolio']) &&
+      (pawn['lane'] === undefined || ROUTES.includes(pawn['lane'])) &&
+      (pawn['stake'] === undefined || isStake(pawn['stake'])),
   );
   const move = state['lastMove'];
   const validMove =
@@ -117,11 +168,18 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       (move['change'] === undefined || Number.isInteger(move['change'])) &&
       (move['lane'] === undefined || ROUTES.includes(move['lane'])) &&
       (move['byDefault'] === undefined || typeof move['byDefault'] === 'boolean') &&
+      (move['staked'] === undefined || isIndex(move['staked'])) &&
+      (move['matured'] === undefined ||
+        (isRecord(move['matured']) && ROUTES.includes(move['matured']['lane']) && isIndex(move['matured']['stake']) && isIndex(move['matured']['payout']))) &&
       Array.isArray(move['path']) &&
       move['path'].every((tile) => isIndex(tile) && tile < tiles.length));
   const validChoice =
     (state['choosing'] === undefined || isIndex(state['choosing'])) && (state['defaultLane'] === undefined || ROUTES.includes(state['defaultLane']));
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validChoice) {
+  const returns = state['stakeReturns'];
+  const validStakes =
+    (state['forkStake'] === undefined || isIndex(state['forkStake'])) &&
+    (returns === undefined || (Array.isArray(returns) && returns.every(isStakeReturns)));
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validChoice || !validStakes) {
     return null;
   }
   return state as unknown as LifeBoard;
@@ -184,6 +242,22 @@ export function laneTiles(tiles: LifeTile[], branch: number, route: LifeRoute): 
 export function laneSummary(tiles: LifeTile[]): string {
   const parts = tiles.filter((tile) => tile.type === 'Reward' || tile.type === 'Loss' || tile.type === 'Event').map(tileLabel);
   return parts.length > 0 ? parts.join(', ') : 'Nothing happens';
+}
+
+/**
+ * What staking `stake` MON on a lane returns, from its outcomes: "Stake 50 MON, get 62 MON back" or, with several
+ * outcomes, "Stake 50 MON, get 150 MON back (30%) or 10 MON (70%)". Without MON to stake, it says so.
+ */
+export function stakeSummary(stake: number, returns: LifeStakeReturns | undefined): string {
+  if (!returns || stake <= 0) {
+    return 'Nothing to stake';
+  }
+  const payouts = returns.outcomes.map((outcome) => `${Math.floor((stake * outcome.percent) / 100)} MON`);
+  if (payouts.length === 1) {
+    return `Stake ${stake} MON, get ${payouts[0]} back`;
+  }
+  const [first, ...rest] = returns.outcomes.map((outcome, i) => `${payouts[i]}${i === 0 ? ' back' : ''} (${outcome.chance}%)`);
+  return `Stake ${stake} MON, get ${first} or ${rest.join(' or ')}`;
 }
 
 /** What a tile says on the board. */
