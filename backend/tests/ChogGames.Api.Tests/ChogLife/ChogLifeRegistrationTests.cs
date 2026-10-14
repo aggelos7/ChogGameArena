@@ -10,19 +10,18 @@ namespace ChogGames.Api.Tests.ChogLife;
 
 /// <summary>
 /// STORY-035, DEC-037: the API serves the current, checked Chog Life rules. STORY-042, DEC-044: it offers Chog Life's
-/// abilities, acting on the same rules the match engine plays.
+/// abilities, acting on the same rules the match engine plays. STORY-044, DEC-047: version 1 stays registered for the
+/// matches that started with it, and new matches start with version 2.
 /// </summary>
 public class ChogLifeRegistrationTests
 {
     [Fact]
-    public async Task The_api_registers_the_current_rules()
+    public async Task The_api_registers_every_rules_version_and_starts_matches_with_the_latest()
     {
         await using var factory = new ApiFactory(ApiFactory.UnusedDatabase);
 
-        var rules = factory.Services.GetRequiredService<LifeRules>();
-
-        Assert.Same(LifeRulesV1.Rules, rules);
-        Assert.Equal(LifeRulesV1.Version, rules.Version);
+        Assert.Equal([LifeRulesV1.Rules, LifeRulesV2.Rules], factory.Services.GetServices<LifeRules>());
+        Assert.Same(LifeRulesV2.Rules, factory.Services.GetRequiredService<LifeRules>());
     }
 
     [Fact]
