@@ -4,7 +4,7 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
 
 ## Pending
 
-- DEC-002: Chog Life exact movement/finish/tie-break rules — Pending game design before final balancing. Board, starting MON, finish bonus, time cap and die decided in DEC-037; movement over forks, the finish trigger and the tie-breaker are still open (STORY-037, STORY-041).
+- DEC-002: Chog Life exact movement/finish/tie-break rules — Pending game design before final balancing. Board, starting MON, finish bonus, time cap and die decided in DEC-037; movement in DEC-039; the fork choice in DEC-041; the finish trigger and the tie-breaker are still open (STORY-041).
 - DEC-003: Chog Race reaction windows and card resolution ordering — Pending before card engine.
 - DEC-004: Guest-to-wallet profile linking and account merge behavior — Pending before linking. Sign-in binding decided in DEC-015; merging two existing histories is still open.
 - DEC-005: Game branding/assets and permissions — Pending before public launch.
@@ -166,3 +166,10 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Floor and cap (LIFE-011):** liquid MON never goes below 0; a loss bigger than the balance takes what's left. Debt and liabilities come with STORY-040. Liquid MON is capped at 1,000,000 so it can't overflow; gains above it are lost.
   - **Shared view:** each pawn carries its player's liquid MON (`mon`), and `lastMove.change` is the MON the tile really moved. Every player sees everyone's MON in the same snapshot as the move. Pawns stored before this story hold the starting MON.
   - **Display:** the legend shows each player's MON next to their name, and the last-move line says what happened, e.g. "Bob rolled 3, landed on tile 24 (Rug pull) and lost 40 MON."
+- DEC-041 (2026-10-14, STORY-039 — confirmed by product owner): Chog Life Safe vs Degen choice.
+  - **When:** in the same turn, on landing. A `ROLL` that stops on a Branch moves the pawn but doesn't end the turn; the state marks the seat as `choosing`. The player then sends `CHOOSE_LANE` with `{"lane": "Safe"}` or `{"lane": "Degen"}`. The pawn stays on the branch with its chosen `lane`, and the turn ends. Their next `ROLL` leaves the branch by that lane (LIFE-003: roll → move → resolve → choice → end turn).
+  - **Only offered choices:** both lanes of the branch are always offered, whatever the player's MON. Anything else is refused with `invalid_lane`. A `CHOOSE_LANE` with no choice pending is refused with `no_choice_pending`, and a `ROLL` while the choice is pending with `choose_lane_first`. The engine's checks (turn, deadline, version, replay, outsiders) come first, as for every command. A refusal changes nothing and draws nothing.
+  - **Timeout:** a turn that runs out while the choice is pending takes the rules version's default lane, Safe in version 1 (`LifeRules.DefaultLane`). The engine counts the timeout as a missed turn, as it does every timeout (DEC-027). A turn that runs out before the roll is skipped as before.
+  - **Lane only:** the risk is in each lane's own tiles: small rewards on Safe, large rewards plus Rug and Liquidation events on Degen. Staking MON on a lane (LIFE-005's "invest 100" example) waits for portfolio and assets (STORY-040).
+  - **Older states:** a pawn standing on a branch with no lane recorded (a match from before this story) leaves by the default lane.
+  - **Display:** the chooser gets two buttons with each lane's summary built from its tiles, such as "+10 MON, +15 MON" or "Rug pull, +60 MON, Liquidation, Airdrop", and the pending fork's lanes are highlighted. They're told the default lane applies if time runs out. Everyone else sees "Bob is choosing a route…", and then which route each player took.

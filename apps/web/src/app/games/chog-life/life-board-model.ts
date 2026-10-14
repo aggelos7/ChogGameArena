@@ -1,6 +1,8 @@
 /** Mirrors the server's tile kinds (DEC-037). */
 export type LifeTileType = 'Start' | 'Normal' | 'Reward' | 'Loss' | 'Event' | 'Branch' | 'Finish';
 export type LifeLane = 'Main' | 'Safe' | 'Degen';
+/** The two lanes a fork offers (STORY-039, DEC-041). */
+export type LifeRoute = 'Safe' | 'Degen';
 export type LifeEventKind = 'Market' | 'Airdrop' | 'Rug' | 'Liquidation';
 
 /** A tile as the server shows it: links point forward by index; a branch links to its two lanes instead of `next`. */
@@ -17,17 +19,22 @@ export interface LifeTile {
   event?: LifeEventKind;
 }
 
-/** A player's pawn, by their seat (the room's `seat`), with their liquid MON (STORY-038); player ids never reach the client. */
+/**
+ * A player's pawn, by their seat (the room's `seat`), with their liquid MON (STORY-038); player ids never reach the
+ * client. On a fork, `lane` is the route its player chose to leave by (STORY-039, DEC-041).
+ */
 export interface LifePawn {
   seat: number;
   tile: number;
   mon: number;
+  lane?: LifeRoute;
 }
 
 /**
  * A seat's latest move (STORY-037, DEC-039): the server's roll, the tiles left and reached, and every tile passed on the
  * way, ending with `to`. A pawn already on the Finish passes without a roll. `change` is the MON the tile it stopped on
- * moved (STORY-038, DEC-040), absent for a tile that does nothing.
+ * moved (STORY-038, DEC-040), absent for a tile that does nothing. A move that stopped on a fork gets the `lane` chosen
+ * there, with `byDefault` when the turn ran out and the rules chose it (STORY-039, DEC-041).
  */
 export interface LifeMove {
   seat: number;
@@ -36,6 +43,8 @@ export interface LifeMove {
   to: number;
   path: number[];
   change?: number;
+  lane?: LifeRoute;
+  byDefault?: boolean;
 }
 
 /** The Chog Life view in a room snapshot's `state` (STORY-036, DEC-038). */
@@ -45,10 +54,17 @@ export interface LifeBoard {
   pawns: LifePawn[];
   /** The latest move, the same for every player; absent before the first roll. */
   lastMove?: LifeMove;
+  /** The seat whose roll stopped on a fork and who is choosing a lane (STORY-039, DEC-041). */
+  choosing?: number;
+  /** The lane taken when the turn runs out before the choice. */
+  defaultLane?: LifeRoute;
 }
 
 /** The command that rolls the die and moves your pawn on your turn. */
 export const LIFE_ROLL = 'ROLL';
+
+/** The command that chooses the lane to leave a fork by, with `{ lane }`, after a roll stopped there. */
+export const LIFE_CHOOSE_LANE = 'CHOOSE_LANE';
 
 /**
  * One line of the drawn track: a main tile across the board, the heading of a fork's two lanes, or a fork's safe and
@@ -61,6 +77,7 @@ export type LifeRow =
 
 const TILE_TYPES: readonly string[] = ['Start', 'Normal', 'Reward', 'Loss', 'Event', 'Branch', 'Finish'];
 const LANES: readonly string[] = ['Main', 'Safe', 'Degen'];
+const ROUTES: readonly unknown[] = ['Safe', 'Degen'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const isIndex = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
@@ -80,7 +97,13 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       ['next', 'safeNext', 'degenNext'].every((link) => tile[link] === undefined || (isIndex(tile[link]) && tile[link] > i && tile[link] < tiles.length)),
   );
   const validPawns = state['pawns'].every(
-    (pawn) => isRecord(pawn) && isIndex(pawn['seat']) && isIndex(pawn['tile']) && pawn['tile'] < tiles.length && isIndex(pawn['mon']),
+    (pawn) =>
+      isRecord(pawn) &&
+      isIndex(pawn['seat']) &&
+      isIndex(pawn['tile']) &&
+      pawn['tile'] < tiles.length &&
+      isIndex(pawn['mon']) &&
+      (pawn['lane'] === undefined || ROUTES.includes(pawn['lane'])),
   );
   const move = state['lastMove'];
   const validMove =
@@ -92,9 +115,13 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       move['to'] < tiles.length &&
       (move['roll'] === undefined || isIndex(move['roll'])) &&
       (move['change'] === undefined || Number.isInteger(move['change'])) &&
+      (move['lane'] === undefined || ROUTES.includes(move['lane'])) &&
+      (move['byDefault'] === undefined || typeof move['byDefault'] === 'boolean') &&
       Array.isArray(move['path']) &&
       move['path'].every((tile) => isIndex(tile) && tile < tiles.length));
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove) {
+  const validChoice =
+    (state['choosing'] === undefined || isIndex(state['choosing'])) && (state['defaultLane'] === undefined || ROUTES.includes(state['defaultLane']));
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validChoice) {
     return null;
   }
   return state as unknown as LifeBoard;
@@ -142,6 +169,22 @@ const EVENT_LABELS: Record<LifeEventKind, string> = {
   Rug: 'Rug pull',
   Liquidation: 'Liquidation',
 };
+
+/** The tiles of a fork's lane, from the branch at `branch` until it joins the main track; empty if it isn't a branch. */
+export function laneTiles(tiles: LifeTile[], branch: number, route: LifeRoute): LifeTile[] {
+  const fork = tiles[branch];
+  const first = route === 'Safe' ? fork?.safeNext : fork?.degenNext;
+  return fork?.type === 'Branch' && first !== undefined ? lane(tiles, first).tiles : [];
+}
+
+/**
+ * What a lane holds, from its tiles in order: each reward, loss and event, e.g. "+10 MON, Rug pull, +60 MON". A lane of
+ * plain tiles says so.
+ */
+export function laneSummary(tiles: LifeTile[]): string {
+  const parts = tiles.filter((tile) => tile.type === 'Reward' || tile.type === 'Loss' || tile.type === 'Event').map(tileLabel);
+  return parts.length > 0 ? parts.join(', ') : 'Nothing happens';
+}
 
 /** What a tile says on the board. */
 export function tileLabel(tile: LifeTile): string {

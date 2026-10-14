@@ -14,8 +14,10 @@ namespace ChogGames.Games.ChogLife;
 /// seats come with the room snapshot. On their turn a player sends <c>ROLL</c> (STORY-037, DEC-039): the server rolls the
 /// die, moves the pawn along the board and ends the turn; the state keeps that last move, so every player sees the same
 /// roll and destination. The tile the pawn stops on then resolves (STORY-038, DEC-040): Reward and Loss tiles move
-/// their MON and an event tile draws one of its outcomes, and every player sees each player's liquid MON. A turn that
-/// runs out is skipped.
+/// their MON and an event tile draws one of its outcomes, and every player sees each player's liquid MON. A roll that
+/// stops on a fork keeps the turn until the player sends <c>CHOOSE_LANE</c> (STORY-039, DEC-041); their next roll
+/// leaves by that lane. A turn that runs out while that choice is pending takes the rules' default lane; any other turn
+/// that runs out is skipped.
 /// </summary>
 public sealed class ChogLifeMatchRules : IMatchRules
 {
@@ -25,8 +27,14 @@ public sealed class ChogLifeMatchRules : IMatchRules
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>Roll the die, move and resolve the tile: the whole turn until branch choices arrive (STORY-039).</summary>
+    /// <summary>Roll the die, move and resolve the tile; it ends the turn unless the pawn stops on a fork.</summary>
     public const string Roll = "ROLL";
+
+    /// <summary>
+    /// Choose the lane to leave a fork by, with <c>{"lane": "Safe"}</c> or <c>{"lane": "Degen"}</c>, after a roll that
+    /// stopped there (STORY-039, DEC-041); it ends the turn.
+    /// </summary>
+    public const string ChooseLane = "CHOOSE_LANE";
 
     private readonly Dictionary<int, LifeRules> _rulesByVersion;
     private readonly LifeRules _current;
@@ -58,14 +66,16 @@ public sealed class ChogLifeMatchRules : IMatchRules
 
     /// <summary>
     /// <c>ROLL</c>: one die from the server's source of chance, never from the payload, which is ignored (DEC-031). The
-    /// pawn moves along <see cref="LifeRules.Path"/>, the tile it stops on resolves with <see cref="LifeRules.Resolve"/>
-    /// (an event's draw comes after the die's) and the turn ends. A pawn on the Finish doesn't move and draws nothing;
-    /// its roll just passes the turn until STORY-041 decides what finished players do. A match started before its state
-    /// existed (before STORY-036) gets its start state first, and pawns from before STORY-038 hold the starting MON.
+    /// pawn moves along <see cref="LifeRules.Path"/>, leaving a fork by the lane its player chose there, the tile it
+    /// stops on resolves with <see cref="LifeRules.Resolve"/> (an event's draw comes after the die's) and the turn ends,
+    /// unless the pawn stopped on a fork: then the player chooses a lane first (DEC-041). A pawn on the Finish doesn't
+    /// move and draws nothing; its roll just passes the turn until STORY-041 decides what finished players do. A match
+    /// started before its state existed (before STORY-036) gets its start state first, and pawns from before STORY-038
+    /// hold the starting MON. <c>CHOOSE_LANE</c> records the chosen lane on the pawn and ends the turn.
     /// </summary>
     public MatchRuleDecision Apply(MatchCommandContext context)
     {
-        if (context.Type != Roll)
+        if (context.Type is not (Roll or ChooseLane))
         {
             return MatchRuleDecision.Unknown;
         }
@@ -81,9 +91,26 @@ public sealed class ChogLifeMatchRules : IMatchRules
         if (state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn
             || pawn.Tile < 0
             || pawn.Tile >= rules.Tiles.Count
-            || pawn.Mon is not (>= 0 and <= LifeRules.MaxMon))
+            || pawn.Mon is not (>= 0 and <= LifeRules.MaxMon)
+            || pawn.Lane is not (null or LifeLane.Safe or LifeLane.Degen))
         {
             return MatchRuleDecision.Reject("game_state_unavailable");
+        }
+
+        // A pending choice belongs to the turn it was made in; one left by a player who has since gone counts for nobody.
+        var choosing = state.Choosing == pawn.Seat;
+        state = state with { Choosing = null };
+        return context.Type == Roll
+            ? RollFor(pawn, choosing, state, rules, context.Random)
+            : ChooseFor(pawn, choosing, state, rules, context.Payload);
+    }
+
+    private static MatchRuleDecision RollFor(
+        LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, IRandomSource random)
+    {
+        if (choosing)
+        {
+            return MatchRuleDecision.Reject("choose_lane_first");
         }
 
         LifeMove move;
@@ -93,24 +120,93 @@ public sealed class ChogLifeMatchRules : IMatchRules
         }
         else
         {
-            var roll = context.Random.Next(1, rules.DieFaces + 1);
-            var path = rules.Path(pawn.Tile, roll);
-            var change = rules.Resolve(path[^1], pawn.Mon!.Value, context.Random);
+            var roll = random.Next(1, rules.DieFaces + 1);
+            var path = rules.Path(pawn.Tile, roll, pawn.Lane);
+            var change = rules.Resolve(path[^1], pawn.Mon!.Value, random);
             move = new LifeMove(pawn.Seat, roll, pawn.Tile, path[^1], path, change);
         }
 
-        var pawns = state.Pawns
-            .Select(p => p.Seat == pawn.Seat ? p with { Tile = move.To, Mon = p.Mon + (move.Change ?? 0) } : p)
-            .ToArray();
-        var next = state with { Pawns = pawns, LastMove = move };
-        return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: true);
+        var atFork = rules.Tiles[move.To].Type == LifeTileType.Branch;
+        var next = state with
+        {
+            Pawns = Replace(state, pawn with { Tile = move.To, Mon = pawn.Mon + (move.Change ?? 0), Lane = null }),
+            LastMove = move,
+            Choosing = atFork ? pawn.Seat : null,
+        };
+        return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: !atFork);
     }
 
-    public JsonElement? TimeOutTurn(MatchTurnContext context) => null;
+    /// <summary>
+    /// Only the two lanes the fork offers are accepted, by name as the board shows them (<c>Safe</c>, <c>Degen</c>);
+    /// anything else, or a choice with none pending, changes nothing.
+    /// </summary>
+    private static MatchRuleDecision ChooseFor(
+        LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, JsonElement payload)
+    {
+        if (!choosing || rules.Tiles[pawn.Tile].Type != LifeTileType.Branch)
+        {
+            return MatchRuleDecision.Reject("no_choice_pending");
+        }
+
+        if (LaneIn(payload) is not { } lane)
+        {
+            return MatchRuleDecision.Reject("invalid_lane");
+        }
+
+        var chosen = Choose(state, pawn, lane, byDefault: false);
+        return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(chosen, Json), endsTurn: true);
+    }
+
+    private static LifeLane? LaneIn(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object
+        && payload.TryGetProperty("lane", out var lane)
+        && lane.ValueKind == JsonValueKind.String
+            ? lane.GetString() switch
+            {
+                nameof(LifeLane.Safe) => LifeLane.Safe,
+                nameof(LifeLane.Degen) => LifeLane.Degen,
+                _ => null,
+            }
+            : null;
+
+    /// <summary>The pawn keeps its place on the fork with the lane it will leave by, and the last move says which.</summary>
+    private static LifeMatchState Choose(LifeMatchState state, LifePawn pawn, LifeLane lane, bool byDefault) => state with
+    {
+        Pawns = Replace(state, pawn with { Lane = lane }),
+        LastMove = state.LastMove is { } move && move.Seat == pawn.Seat
+            ? move with { Lane = lane, ByDefault = byDefault ? true : null }
+            : state.LastMove,
+        Choosing = null,
+    };
+
+    private static LifePawn[] Replace(LifeMatchState state, LifePawn pawn) =>
+        state.Pawns.Select(p => p.Seat == pawn.Seat ? pawn : p).ToArray();
 
     /// <summary>
-    /// The board and the pawns with each player's liquid MON, the same for every player: Chog Life has no hidden
-    /// information on the board. Pawns of players who left are taken off. A state this server can't read, or of a version it no longer knows, shows nothing.
+    /// A turn that runs out while its player is choosing a lane takes the rules' default lane (DEC-041); any other turn
+    /// is skipped with the state unchanged, and so is a state this server can't play.
+    /// </summary>
+    public JsonElement? TimeOutTurn(MatchTurnContext context)
+    {
+        if (context.State is not { } json
+            || Read(json) is not { Choosing: { } seat } state
+            || !_rulesByVersion.TryGetValue(state.RulesVersion, out var rules)
+            || context.Match.Members.SingleOrDefault(member => member.PlayerId == context.Match.CurrentPlayerId)?.Seat != seat
+            || state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn
+            || pawn.Tile < 0
+            || pawn.Tile >= rules.Tiles.Count
+            || rules.Tiles[pawn.Tile].Type != LifeTileType.Branch)
+        {
+            return null;
+        }
+
+        return JsonSerializer.SerializeToElement(Choose(state, pawn, rules.DefaultLane, byDefault: true), Json);
+    }
+
+    /// <summary>
+    /// The board and the pawns with each player's liquid MON and the lane chosen at the fork they stand on, who is
+    /// choosing a lane and the lane taken if they don't, the same for every player: Chog Life has no hidden information
+    /// on the board. Pawns of players who left are taken off. A state this server can't read, or of a version it no longer knows, shows nothing.
     /// </summary>
     public JsonElement? ViewFor(MatchViewContext context)
     {
@@ -127,7 +223,9 @@ public sealed class ChogLifeMatchRules : IMatchRules
             rules.Version,
             rules.Tiles.Select(ToView).ToArray(),
             WithMon(state, rules).Pawns.Where(pawn => playing.Contains(pawn.Seat)).OrderBy(pawn => pawn.Seat).ToArray(),
-            state.LastMove);
+            state.LastMove,
+            state.Choosing is { } seat && playing.Contains(seat) ? seat : null,
+            rules.DefaultLane);
         return JsonSerializer.SerializeToElement(view, Json);
     }
 
@@ -159,22 +257,40 @@ public sealed class ChogLifeMatchRules : IMatchRules
 
     /// <summary>
     /// The stored state: the rules version the match started with, where each seat's pawn stands with its liquid MON,
-    /// and the latest move.
+    /// the latest move and the seat whose roll stopped on a fork and who is still to choose a lane.
     /// </summary>
-    private sealed record LifeMatchState(int RulesVersion, IReadOnlyList<LifePawn> Pawns, LifeMove? LastMove = null);
+    private sealed record LifeMatchState(
+        int RulesVersion, IReadOnlyList<LifePawn> Pawns, LifeMove? LastMove = null, int? Choosing = null);
 
     /// <summary>
     /// A seat's move: the roll (null when a pawn on the Finish passed), the tiles it left and reached, every tile it
     /// passed on the way, ending with <paramref name="To"/>, and the signed MON the tile it stopped on moved (null for a
-    /// tile that does nothing).
+    /// tile that does nothing). A move that stopped on a fork gets the <paramref name="Lane"/> chosen there, and
+    /// <paramref name="ByDefault"/> when the turn ran out and the rules chose it.
     /// </summary>
-    private sealed record LifeMove(int Seat, int? Roll, int From, int To, IReadOnlyList<int> Path, int? Change = null);
+    private sealed record LifeMove(
+        int Seat,
+        int? Roll,
+        int From,
+        int To,
+        IReadOnlyList<int> Path,
+        int? Change = null,
+        LifeLane? Lane = null,
+        bool? ByDefault = null);
 
-    /// <summary>A seat's pawn: the tile it stands on and the player's liquid MON (null in states from before STORY-038).</summary>
-    private sealed record LifePawn(int Seat, int Tile, int? Mon);
+    /// <summary>
+    /// A seat's pawn: the tile it stands on, the player's liquid MON (null in states from before STORY-038) and, on a
+    /// fork, the lane it will leave by (null until chosen).
+    /// </summary>
+    private sealed record LifePawn(int Seat, int Tile, int? Mon, LifeLane? Lane = null);
 
     private sealed record LifeBoardView(
-        int RulesVersion, IReadOnlyList<LifeTileView> Tiles, IReadOnlyList<LifePawn> Pawns, LifeMove? LastMove);
+        int RulesVersion,
+        IReadOnlyList<LifeTileView> Tiles,
+        IReadOnlyList<LifePawn> Pawns,
+        LifeMove? LastMove,
+        int? Choosing,
+        LifeLane DefaultLane);
 
     private sealed record LifeTileView(
         int Index,

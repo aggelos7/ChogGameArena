@@ -614,6 +614,50 @@ describe('Room page', () => {
       expect(element().querySelector('[data-roll]')).toBeNull();
     });
 
+    it('sends the route you choose at a fork and shows the room as the server left it', () => {
+      const atFork = { ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 2, tile: 2, mon: 100 }], choosing: 2, defaultLane: 'Safe' as const };
+      const started: Room = {
+        ...room,
+        version: 6,
+        status: 'Active',
+        state: { ...atFork, lastMove: { seat: 2, roll: 2, from: 0, to: 2, path: [1, 2] } },
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+      };
+      load(started);
+      expect(element().querySelector('[data-roll]')).toBeNull();
+
+      element().querySelector<HTMLButtonElement>('[data-route="Degen"]')?.click();
+      const choose = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(choose.request.body).toEqual({
+        actionId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        matchId: room.matchId,
+        expectedVersion: 6,
+        type: 'CHOOSE_LANE',
+        payload: { lane: 'Degen' },
+      });
+      fixture.detectChanges();
+      expect(element().querySelector<HTMLButtonElement>('[data-route="Safe"]')?.disabled).toBe(true);
+      choose.flush({ actionId: choose.request.body.actionId, type: 'CHOOSE_LANE', version: 7, currentVersion: 7, replayed: false });
+
+      http.expectOne('/api/rooms/K7QF3M').flush({
+        ...started,
+        version: 7,
+        state: {
+          ...FORK_BOARD,
+          pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 2, tile: 2, mon: 100, lane: 'Degen' }],
+          lastMove: { seat: 2, roll: 2, from: 0, to: 2, path: [1, 2], lane: 'Degen' },
+          defaultLane: 'Safe',
+        },
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      });
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-routes]')).toBeNull();
+      expect(element().querySelector('[data-last-move]')?.textContent?.trim()).toBe(
+        'You rolled 2 and moved to tile 2 (Safe or Degen?). You chose the degen route.',
+      );
+    });
+
     it('explains a refused roll and shows the room as it is now', () => {
       const started: Room = {
         ...room,

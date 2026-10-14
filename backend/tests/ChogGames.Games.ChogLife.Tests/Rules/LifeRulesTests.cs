@@ -36,9 +36,17 @@ public class LifeRulesTests
         int finishBonus = 100,
         TimeSpan? timeCap = null,
         int dieFaces = 6,
-        IEnumerable<LifeEvent>? events = null) =>
+        IEnumerable<LifeEvent>? events = null,
+        LifeLane defaultLane = LifeLane.Safe) =>
         LifeRules.Create(
-            version, tiles ?? Board(), startingMon, finishBonus, timeCap ?? TimeSpan.FromMinutes(20), dieFaces, events ?? LifeRulesV1.Rules.Events.Values);
+            version,
+            tiles ?? Board(),
+            startingMon,
+            finishBonus,
+            timeCap ?? TimeSpan.FromMinutes(20),
+            dieFaces,
+            events ?? LifeRulesV1.Rules.Events.Values,
+            defaultLane);
 
     private static string Refused(IEnumerable<LifeTile> tiles) => Assert.ThrowsAny<ArgumentException>(() => Build(tiles)).Message;
 
@@ -95,6 +103,22 @@ public class LifeRulesTests
             Build(version: version, startingMon: startingMon, finishBonus: finishBonus, timeCap: TimeSpan.FromSeconds(timeCapSeconds), dieFaces: dieFaces));
 
         Assert.Equal(parameter, error.ParamName);
+    }
+
+    [Fact]
+    public void The_default_lane_is_safe_unless_set_to_degen()
+    {
+        Assert.Equal(LifeLane.Safe, LifeRules.Create(
+            1, Board(), 100, 100, TimeSpan.FromMinutes(20), 6, LifeRulesV1.Rules.Events.Values).DefaultLane);
+        Assert.Equal(LifeLane.Degen, Build(defaultLane: LifeLane.Degen).DefaultLane);
+    }
+
+    [Theory]
+    [InlineData(LifeLane.Main)]
+    [InlineData((LifeLane)7)]
+    public void A_default_lane_off_the_forks_is_refused(LifeLane lane)
+    {
+        Assert.Equal("defaultLane", Assert.Throws<ArgumentOutOfRangeException>(() => Build(defaultLane: lane)).ParamName);
     }
 
     [Fact]
