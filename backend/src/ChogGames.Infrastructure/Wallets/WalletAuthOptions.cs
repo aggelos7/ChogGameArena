@@ -9,7 +9,7 @@ public sealed class WalletAuthOptions
 {
     public const string SectionName = "WalletAuth";
 
-    /// <summary>EIP-4361 domain: host[:port] of the web app, e.g. <c>localhost:4200</c> or <c>app.example.com</c>.</summary>
+    /// <summary>EIP-4361 domain: host[:port] of the web app, e.g. <c>localhost:4201</c> or <c>app.example.com</c>.</summary>
     public string Domain { get; set; } = string.Empty;
 
     /// <summary>EIP-4361 URI: origin of the web app, e.g. <c>https://app.example.com</c>.</summary>
