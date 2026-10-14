@@ -1,5 +1,6 @@
 import { GameSummary } from './games/game-catalog';
 import { LifeBoard, LifePawn } from './games/chog-life/life-board-model';
+import { LifeResult } from './games/chog-life/life-results';
 
 /** Catalogue fixture covering every status. */
 export const CATALOGUE: GameSummary[] = [
@@ -34,3 +35,26 @@ export const FORK_BOARD: LifeBoard = {
   ],
   pawns: [lifePawn(1, 0), lifePawn(2, 0)],
 };
+
+/** A Chog Life result as the server stores it with a rank (STORY-043, DEC-046): 100 MON to start, all statistics zero. */
+export function lifeResult(portfolio: number, extra: Partial<LifeResult> = {}): LifeResult {
+  return {
+    startingPortfolio: 100,
+    portfolio,
+    liquid: Math.max(portfolio, 0),
+    assets: 0,
+    bonuses: 0,
+    liabilities: Math.max(-portfolio, 0),
+    place: null,
+    airdrops: 0,
+    airdropMon: 0,
+    rugsSurvived: 0,
+    liquidations: 0,
+    biggestWin: 0,
+    degenRoutes: 0,
+    degenWins: 0,
+    degenScore: 0,
+    degenScoreVersion: 1,
+    ...extra,
+  };
+}

@@ -1,0 +1,62 @@
+<section class="results" aria-labelledby="results-heading" data-results>
+  <h2 id="results-heading">Results</h2>
+  @if (winnerLine(); as line) {
+    <p class="winner-line" data-winner>{{ line }}</p>
+  }
+  <ol class="standings" data-list="standings">
+    @for (standing of standings(); track $index) {
+      <li [class.winner]="standing.rank === 1" [class.you]="standing.member.isYou" data-standing>
+        <span class="place" data-place>{{ ordinal(standing.rank) }}</span>
+        <app-avatar-badge [avatar]="badge(standing.member.character)" [name]="standing.member.character.name" [size]="2" />
+        <span class="who">
+          <span class="name">{{ standing.member.displayName }}</span>
+          @if (standing.member.isYou) {
+            <span class="tag">You</span>
+          }
+        </span>
+        @if (standing.result; as result) {
+          <span class="portfolio" [class.negative]="result.portfolio < 0" data-portfolio>{{ result.portfolio }} MON</span>
+          <p class="summary" data-summary>
+            Started with {{ result.startingPortfolio }} MON
+            ({{ signedMon(result.portfolio - result.startingPortfolio) }}) ·
+            @if (result.place; as place) {
+              Reached the finish {{ ordinal(place) }}
+            } @else {
+              Didn’t reach the finish
+            }
+          </p>
+          <dl class="stats">
+            <div class="degen">
+              <dt>Degen Score</dt>
+              <dd data-stat="degen-score">{{ result.degenScore }}<span class="out-of">/100</span></dd>
+            </div>
+            <div>
+              <dt>Biggest win</dt>
+              <dd data-stat="biggest-win">{{ result.biggestWin > 0 ? signedMon(result.biggestWin) : 'None' }}</dd>
+            </div>
+            <div>
+              <dt>Airdrops</dt>
+              <dd data-stat="airdrops">
+                {{ result.airdrops }}
+                @if (result.airdropMon > 0) {
+                  <span class="detail">({{ signedMon(result.airdropMon) }})</span>
+                }
+              </dd>
+            </div>
+            <div>
+              <dt>Rugs survived</dt>
+              <dd data-stat="rugs">{{ result.rugsSurvived }}</dd>
+            </div>
+            <div>
+              <dt>Liquidations</dt>
+              <dd data-stat="liquidations">{{ result.liquidations }}</dd>
+            </div>
+          </dl>
+        } @else if (standing.member.hasLeft) {
+          <p class="summary" data-summary>Left the match</p>
+        }
+      </li>
+    }
+  </ol>
+  <p class="hint">The Degen Score shows how much risk each player took: it doesn’t count towards the ranking.</p>
+</section>

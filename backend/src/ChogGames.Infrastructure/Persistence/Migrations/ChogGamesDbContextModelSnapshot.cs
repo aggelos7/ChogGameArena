@@ -321,6 +321,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<string>("Result")
+                        .HasColumnType("jsonb");
+
                     b.Property<int?>("Seat")
                         .HasColumnType("integer");
 
@@ -349,6 +352,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_RoomMembers_Rank", "\"Rank\" IS NULL OR (\"Rank\" BETWEEN 1 AND 6 AND \"Seat\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_RoomMembers_Ready", "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))");
+
+                            t.HasCheckConstraint("CK_RoomMembers_Result", "\"Result\" IS NULL OR (jsonb_typeof(\"Result\") = 'object' AND \"Rank\" IS NOT NULL AND \"LeftAt\" IS NULL)");
 
                             t.HasCheckConstraint("CK_RoomMembers_Seat", "\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND 6");
                         });

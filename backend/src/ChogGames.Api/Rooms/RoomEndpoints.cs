@@ -54,6 +54,10 @@ public static class RoomEndpoints
     /// <param name="Seat">
     /// The member's place in the turn order from 1, given at the start; how abilities name their target (DEC-036).
     /// </param>
+    /// <param name="Result">
+    /// The game's record of how the member did in a completed match (STORY-043, DEC-046), as stored with their rank, the
+    /// same for every viewer; null for players who left, for games that record none and in every other status.
+    /// </param>
     public sealed record RoomMemberResponse(
         string DisplayName,
         string AvatarId,
@@ -66,7 +70,8 @@ public static class RoomEndpoints
         bool HasLeft,
         bool IsTurn,
         int? Rank,
-        int? Seat);
+        int? Seat,
+        JsonElement? Result);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>

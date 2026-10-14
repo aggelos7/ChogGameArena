@@ -63,7 +63,8 @@ public sealed class RoomSnapshots(
                     m.HasLeft,
                     m.PlayerId == room.CurrentPlayerId,
                     m.Rank,
-                    m.Seat);
+                    m.Seat,
+                    ResultOf(m));
             })
             .ToArray();
 
@@ -85,6 +86,17 @@ public sealed class RoomSnapshots(
             members,
             view,
             AbilityOptions(room, players, viewerId));
+    }
+
+    private static JsonElement? ResultOf(RoomMember member)
+    {
+        if (member.Result is null)
+        {
+            return null;
+        }
+
+        using var result = JsonDocument.Parse(member.Result);
+        return result.RootElement.Clone();
     }
 
     /// <summary>
