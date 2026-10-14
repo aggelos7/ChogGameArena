@@ -56,15 +56,14 @@ public class WalletAuthOptionsTests
     }
 
     [Fact]
-    public async Task Missing_wallet_auth_settings_stop_startup()
+    public void Missing_wallet_auth_settings_stop_startup()
     {
-        await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, new Dictionary<string, string?>
+        var error = StartupValidation.Failure(new Dictionary<string, string?>
         {
             ["WalletAuth:Domain"] = "",
             ["WalletAuth:Uri"] = "",
         });
 
-        var error = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
         Assert.Contains("'WalletAuth:Uri' must be the web app origin", error.Message);
     }
 }

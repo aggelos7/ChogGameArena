@@ -140,6 +140,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
   - Ability tests (`Core.Tests/Abilities`) use `FakeAbilityGame` (a boost and a seat-targeted steal); `AbilityPoolTests` compare guests and NFT holders with different traits, and a fixed fake strategy shows the pool stays inside the catalog; a reflection test shows nothing in the handler-facing contract can reach characters, NFT traits or rooms.
   - Security tests (`MatchSecurityTests`) use a fake dice game: forged rolls and player ids are ignored, retries don't reroll, and every unauthorized command (outsider, other match, not started, not your turn, forfeited, expired, stale, closed; for `ROLL` and `USE_ABILITY`) changes nothing, records nothing, draws nothing and never reaches the rules.
   - Turn tests (`MatchTurnTests`) use a `ManualTimeProvider`, remove `TurnTimeoutWorker` and call `TurnTimeoutService` directly; one test keeps the worker to show it runs by itself.
+  - Settings that must stop startup are tested with `StartupValidation` (Api.Tests): it runs the host's `IStartupValidator` over the API's `appsettings.json`, the `ApiFactory` settings and the test's own, without starting a host. Starting an `ApiFactory` that fails to start races the host's disposal and flaked on CI with `ObjectDisposedException`.
   - CI checks that the EF model has no changes missing from a migration.
   - 3 live-chain tests are skipped unless explicitly enabled.
 - **Web:** Vitest with `HttpTestingController`; specs drive the page through its rendered DOM.
