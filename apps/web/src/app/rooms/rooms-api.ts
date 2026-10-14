@@ -72,6 +72,8 @@ export interface Room {
   turnNumber: number;
   /** When the current turn runs out (ISO 8601); null unless the match is active. */
   turnEndsAt: string | null;
+  /** How long each turn of this match lasts, in seconds (DEC-045); null before the start. */
+  turnSeconds: number | null;
   /**
    * When the match's time is up (ISO 8601, STORY-041, ENG-011), kept once it ends; null before the start and for games
    * without a time limit.

@@ -4,6 +4,7 @@ import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
 import {
+  FORK_ABILITIES,
   LifeBoard,
   LifePawn,
   LifeRoute,
@@ -12,7 +13,9 @@ import {
   laneTiles,
   lifeRows,
   ordinal,
+  previewSummary,
   seatColor,
+  signedMon,
   stakeSummary,
   tileLabel,
   timeLeft,
@@ -54,6 +57,11 @@ const ROUTE_NAMES: Record<LifeRoute, string> = { Safe: 'safe', Degen: 'degen' };
  * (STORY-039, DEC-041); everyone else sees who is choosing, and then which route they took and what they staked.
  * While the match runs it counts down the time left to the server's `endsAt`; the legend marks who has finished and in
  * which place, and once the match is over it says what ended it, over the final portfolios (STORY-041, DEC-043).
+ * On your turn it offers your locked ability while it has uses left and can be used now: Reward Boost, Loss Protection
+ * and Lucky Reroll before you roll, Event Preview at a fork before you choose a route; the legend marks an armed
+ * ability and the last move says what it did (for Lucky Reroll, both outcomes drawn). After Event Preview, choosing a
+ * route shows only you your next move there, and you keep that route or switch to the other one blind (STORY-042,
+ * DEC-044).
  */
 @Component({
   selector: 'app-life-board',
@@ -70,6 +78,8 @@ export class LifeBoardView {
   readonly rolling = input(false);
   readonly roll = output<void>();
   readonly chooseLane = output<LifeRoute>();
+  /** Uses your locked ability, by id. */
+  readonly useAbility = output<string>();
 
   protected readonly label = tileLabel;
   protected readonly ordinal = ordinal;
@@ -161,6 +171,68 @@ export class LifeBoardView {
     }));
   });
 
+  /** Your locked ability, while it has uses left and it's your turn with your pawn still on the board. */
+  private readonly yourAbility = computed(() => {
+    const you = this.players().find((member) => member.isYou);
+    const pawn = you ? this.pawnBySeat().get(you.seat) : undefined;
+    const ability = you?.ability;
+    if (!you?.isTurn || !pawn || pawn.place !== undefined || this.board().ended || !ability || !ability.usesLeft) {
+      return null;
+    }
+    return { ability, pawn };
+  });
+
+  /** Your ability, when it can be used before you roll: not while choosing a route, nor while one is armed. */
+  protected readonly rollAbility = computed(() => {
+    const yours = this.yourAbility();
+    return yours && !this.chooser() && !FORK_ABILITIES.includes(yours.ability.id) && !yours.pawn.armed ? yours.ability : null;
+  });
+
+  /** Your ability, when it can be used at a fork before you choose a route and isn't armed yet. */
+  protected readonly forkAbility = computed(() => {
+    const yours = this.yourAbility();
+    return yours && this.chooser()?.isYou && FORK_ABILITIES.includes(yours.ability.id) && !yours.pawn.armed ? yours.ability : null;
+  });
+
+  /** You armed Event Preview at this fork: choosing a route will show your next move there. */
+  protected readonly previewArmed = computed(() => {
+    const you = this.players().find((member) => member.isYou);
+    const armed = you ? this.pawnBySeat().get(you.seat)?.armed : undefined;
+    return !!this.chooser()?.isYou && !!armed && FORK_ABILITIES.includes(armed);
+  });
+
+  /** The player who previewed their next move and is deciding whether to keep their route, while it's their turn. */
+  protected readonly decider = computed(() => {
+    const seat = this.board().confirming;
+    return this.players().find((member) => member.seat === seat && member.isTurn) ?? null;
+  });
+
+  /** Your previewed move, in words, until you roll. */
+  protected readonly previewText = computed(() => {
+    const preview = this.board().preview;
+    return preview ? previewSummary(preview, this.board().tiles) : null;
+  });
+
+  /** While you decide: the route you chose and the other one, to keep or switch to. */
+  protected readonly keepOrSwitch = computed(() => {
+    const preview = this.board().preview;
+    if (!this.decider()?.isYou || !preview) {
+      return null;
+    }
+    const other: LifeRoute = preview.lane === 'Safe' ? 'Degen' : 'Safe';
+    return { keep: preview.lane, keepName: ROUTE_NAMES[preview.lane], other, otherName: ROUTE_NAMES[other] };
+  });
+
+  /** The name of the ability the player on `seat` has armed; null when none is. */
+  protected armedName(seat: number): string | null {
+    const armed = this.pawnBySeat().get(seat)?.armed;
+    if (!armed) {
+      return null;
+    }
+    const ability = this.players().find((member) => member.seat === seat)?.ability;
+    return ability?.id === armed ? ability.name : armed;
+  }
+
   protected readonly defaultRoute = computed(() => ROUTE_NAMES[this.board().defaultLane ?? 'Safe']);
 
   /** The tiles of both lanes of the fork being chosen at, which the board highlights. */
@@ -193,12 +265,23 @@ export class LifeBoardView {
     const staked = move.staked ? ` and ${member?.isYou ? 'stake' : 'stakes'} ${move.staked} MON` : '';
     const route = !move.lane
       ? ''
-      : move.byDefault
+      : move.switched
+        ? ` ${who} switched to the ${ROUTE_NAMES[move.lane]} route${move.staked ? `, taking the ${move.staked} MON stake along` : ''}.`
+        : move.byDefault
         ? ` Time ran out, so ${member?.isYou ? 'you take' : `${who} takes`} the ${ROUTE_NAMES[move.lane]} route${staked}.`
         : ` ${who} chose the ${ROUTE_NAMES[move.lane]} route${move.staked ? ` and staked ${move.staked} MON` : ''}.`;
     const matured = move.matured
       ? ` ${member?.isYou ? 'Your' : 'Their'} ${ROUTE_NAMES[move.matured.lane]} stake of ${move.matured.stake} MON paid back ${move.matured.payout} MON.`
       : '';
+    const yours = member?.isYou ? 'Your' : 'Their';
+    const ability =
+      move.boost !== undefined
+        ? ` ${yours} Reward Boost added ${move.boost} MON to bonuses.`
+        : move.saved !== undefined
+          ? ` ${yours} Loss Protection saved ${move.saved} MON.`
+          : move.rerolled !== undefined
+            ? ` ${yours} Lucky Reroll drew the event twice: it kept ${signedMon(move.change ?? 0)} over ${signedMon(move.rerolled)}.`
+            : '';
     if (move.change === undefined) {
       return `${who} rolled ${move.roll} and moved to ${where}.${matured}${route}`;
     }
@@ -208,7 +291,7 @@ export class LifeBoardView {
         : move.change < 0
           ? `lost ${-move.change} MON`
           : `${member?.isYou ? 'your' : 'their'} MON didn’t change`;
-    return `${who} rolled ${move.roll}, landed on ${where} and ${outcome}.${matured}${route}`;
+    return `${who} rolled ${move.roll}, landed on ${where} and ${outcome}.${ability}${matured}${route}`;
   });
 
   protected isChoice(tile: LifeTile): boolean {

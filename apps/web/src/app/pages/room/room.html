@@ -194,6 +194,9 @@
             } @else {
               <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
             }
+            @if (turnTimer(); as timer) {
+              <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
+            }
             @if (lifeBoard(); as board) {
               <app-life-board
                 [board]="board"
@@ -202,6 +205,7 @@
                 [rolling]="busy()"
                 (roll)="roll()"
                 (chooseLane)="chooseLane($event)"
+                (useAbility)="useAbility($event)"
               />
             }
             <div class="leave" data-leave>

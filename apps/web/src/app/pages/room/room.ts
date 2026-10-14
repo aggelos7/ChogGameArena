@@ -20,8 +20,9 @@ import {
 } from '../../rooms/rooms-api';
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { LifeBoardView } from '../../games/chog-life/life-board';
-import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
+import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
+import { TurnTimer } from '../../rooms/turn-timer';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -39,7 +40,7 @@ const NFT_COLOR = 'var(--brand)';
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, LoadingState, ErrorState, AvatarBadge, LifeBoardView],
+  imports: [RouterLink, LoadingState, ErrorState, AvatarBadge, LifeBoardView, TurnTimer],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })
@@ -77,6 +78,16 @@ export class RoomPage implements OnInit {
   protected readonly lifeBoard = computed(() => {
     const room = this.room();
     return room?.gameType === 'chog-life' && (room.status === 'Active' || room.status === 'Completed') ? toLifeBoard(room.state) : null;
+  });
+
+  /** Whose turn it is and when it runs out, while a match is active (DEC-045). */
+  protected readonly turnTimer = computed(() => {
+    const room = this.room();
+    const current = room?.members.find((member) => member.isTurn);
+    if (room?.status !== 'Active' || !room.turnEndsAt || !room.turnSeconds || !current) {
+      return null;
+    }
+    return { endsAt: room.turnEndsAt, seconds: room.turnSeconds, name: current.displayName, isYou: current.isYou };
   });
 
   /** The game has abilities: the player has some to choose from, or someone has one. */
@@ -199,6 +210,11 @@ export class RoomPage implements OnInit {
   /** Chooses the route to leave a fork by, after a roll stopped there (STORY-039, DEC-041); refusals as for a roll. */
   protected chooseLane(lane: LifeRoute): void {
     this.command(LIFE_CHOOSE_LANE, { lane });
+  }
+
+  /** Uses the player's locked ability on their turn (STORY-042, DEC-044); refusals as for a roll. */
+  protected useAbility(abilityId: string): void {
+    this.command(USE_ABILITY, { abilityId });
   }
 
   private command(type: string, payload: object = {}): void {

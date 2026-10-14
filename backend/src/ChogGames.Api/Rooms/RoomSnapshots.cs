@@ -80,6 +80,7 @@ public sealed class RoomSnapshots(
             room.Capacity,
             room.TurnNumber,
             room.TurnEndsAt,
+            room.TurnTimeout is { } turn ? (int)turn.TotalSeconds : null,
             room.MatchEndsAt,
             members,
             view,

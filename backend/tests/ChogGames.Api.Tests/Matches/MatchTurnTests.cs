@@ -29,7 +29,7 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
     private sealed record MemberDto(string DisplayName, bool IsYou, bool HasLeft, bool IsTurn);
 
     private sealed record RoomDto(
-        string Code, Guid MatchId, long Version, string GameType, string Status, int TurnNumber, DateTimeOffset? TurnEndsAt, MemberDto[] Members)
+        string Code, Guid MatchId, long Version, string GameType, string Status, int TurnNumber, DateTimeOffset? TurnEndsAt, int? TurnSeconds, MemberDto[] Members)
     {
         public string? TurnOf => Members.SingleOrDefault(m => m.IsTurn)?.DisplayName;
     }
@@ -153,9 +153,9 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
         {
             var room = await StartedAsync("chog-life", alice, bob);
 
-            Assert.Equal((1, _clock.Now + Turn, "Alice"), (room.TurnNumber, room.TurnEndsAt, room.TurnOf));
+            Assert.Equal((1, _clock.Now + Turn, 45, "Alice"), (room.TurnNumber, room.TurnEndsAt, room.TurnSeconds, room.TurnOf));
             var seenByBob = await ViewAsync(bob, room.Code);
-            Assert.Equal((1, _clock.Now + Turn, "Alice"), (seenByBob.TurnNumber, seenByBob.TurnEndsAt, seenByBob.TurnOf));
+            Assert.Equal((1, _clock.Now + Turn, 45, "Alice"), (seenByBob.TurnNumber, seenByBob.TurnEndsAt, seenByBob.TurnSeconds, seenByBob.TurnOf));
         }
     }
 
@@ -167,7 +167,7 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
 
         var room = (await created.Content.ReadFromJsonAsync<RoomDto>(Json))!;
 
-        Assert.Equal((0, (DateTimeOffset?)null, (string?)null), (room.TurnNumber, room.TurnEndsAt, room.TurnOf));
+        Assert.Equal((0, (DateTimeOffset?)null, (int?)null, (string?)null), (room.TurnNumber, room.TurnEndsAt, room.TurnSeconds, room.TurnOf));
     }
 
     [PostgresFact]
@@ -471,11 +471,11 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
     }
 
     [Fact]
-    public void Turn_settings_default_to_a_twenty_second_turn_and_three_misses()
+    public void Turn_settings_default_to_a_twenty_five_second_turn_and_three_misses()
     {
         var defaults = new MatchOptions();
 
-        Assert.Equal((TimeSpan.FromSeconds(20), 3, TimeSpan.FromSeconds(1)), (defaults.TurnTimeout, defaults.MaxMissedTurns, defaults.TimeoutCheckInterval));
+        Assert.Equal((TimeSpan.FromSeconds(25), 3, TimeSpan.FromSeconds(1)), (defaults.TurnTimeout, defaults.MaxMissedTurns, defaults.TimeoutCheckInterval));
     }
 
     /// <summary>
