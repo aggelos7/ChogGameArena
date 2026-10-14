@@ -43,6 +43,8 @@ export interface LifePawn {
   portfolio: number;
   /** The order its player reached the Finish in, from 1 (STORY-041, DEC-043); absent while still on the board. */
   place?: number;
+  /** The id of the ability its player armed before a roll, until it acts (STORY-042, DEC-044). */
+  armed?: string;
 }
 
 /** A stake that paid out as its pawn rejoined the main track. */
@@ -85,6 +87,35 @@ export interface LifeMove {
   matured?: LifeMaturity;
   place?: number;
   bonus?: number;
+  /** MON a Reward Boost added to bonuses on this move's tile (STORY-042, DEC-044). */
+  boost?: number;
+  /** MON Loss Protection kept from this move's loss. */
+  saved?: number;
+  /** The signed MON of the event outcome a Lucky Reroll discarded for the better one. */
+  rerolled?: number;
+  /** The route was switched after an Event Preview. */
+  switched?: boolean;
+}
+
+/** An event outcome as its rule: a fixed `amount` plus `percent` of the player's liquid MON, at least `minimum`. */
+export interface LifeEventOutcome {
+  chance: number;
+  effect: 'Gain' | 'Loss';
+  amount: number;
+  percent: number;
+  minimum: number;
+}
+
+/**
+ * Your next move on the route you chose after Event Preview (STORY-042, DEC-044): the die, where it lands, the tiles
+ * passed and, on an event tile, the outcome drawn. A stake's payout is never shown.
+ */
+export interface LifePreview {
+  lane: LifeRoute;
+  roll: number;
+  to: number;
+  path: number[];
+  outcome?: LifeEventOutcome;
 }
 
 /** What ended the match: every player still playing reached the Finish, or its time was up (STORY-041, DEC-043). */
@@ -109,6 +140,10 @@ export interface LifeBoard {
   finishBonus?: number;
   /** What ended the match, once it's over. */
   ended?: LifeEnding;
+  /** The seat that previewed its next move and is deciding whether to keep its route or switch (STORY-042, DEC-044). */
+  confirming?: number;
+  /** Only for the player who used Event Preview, until they roll: their next move on the route chosen. */
+  preview?: LifePreview;
 }
 
 /** The command that rolls the die and moves your pawn on your turn. */
@@ -116,6 +151,12 @@ export const LIFE_ROLL = 'ROLL';
 
 /** The command that chooses the lane to leave a fork by, with `{ lane }`, after a roll stopped there. */
 export const LIFE_CHOOSE_LANE = 'CHOOSE_LANE';
+
+/** The engine's command that uses your locked ability, with `{ abilityId }` (DEC-036). */
+export const USE_ABILITY = 'USE_ABILITY';
+
+/** Chog Life's abilities used at a fork before choosing a route; the others are used before a roll (DEC-044). */
+export const FORK_ABILITIES: readonly string[] = ['event_preview'];
 
 /**
  * One line of the drawn track: a main tile across the board, the heading of a fork's two lanes, or a fork's safe and
@@ -141,6 +182,33 @@ const isStakeReturns = (value: unknown): boolean =>
   Array.isArray(value['outcomes']) &&
   value['outcomes'].length > 0 &&
   value['outcomes'].every((outcome) => isRecord(outcome) && isIndex(outcome['chance']) && isIndex(outcome['percent']));
+
+const isOutcome = (value: unknown): boolean =>
+  isRecord(value) &&
+  (value['effect'] === 'Gain' || value['effect'] === 'Loss') &&
+  ['chance', 'amount', 'percent', 'minimum'].every((part) => isIndex(value[part]));
+
+const isMove = (move: unknown, tileCount: number): boolean =>
+  isRecord(move) &&
+  isIndex(move['seat']) &&
+  isIndex(move['from']) &&
+  isIndex(move['to']) &&
+  move['to'] < tileCount &&
+  (move['roll'] === undefined || isIndex(move['roll'])) &&
+  (move['change'] === undefined || Number.isInteger(move['change'])) &&
+  (move['lane'] === undefined || ROUTES.includes(move['lane'])) &&
+  (move['byDefault'] === undefined || typeof move['byDefault'] === 'boolean') &&
+  (move['staked'] === undefined || isIndex(move['staked'])) &&
+  (move['place'] === undefined || isPlace(move['place'])) &&
+  (move['bonus'] === undefined || isIndex(move['bonus'])) &&
+  (move['boost'] === undefined || isIndex(move['boost'])) &&
+  (move['saved'] === undefined || isIndex(move['saved'])) &&
+  (move['rerolled'] === undefined || Number.isInteger(move['rerolled'])) &&
+  (move['switched'] === undefined || typeof move['switched'] === 'boolean') &&
+  (move['matured'] === undefined ||
+    (isRecord(move['matured']) && ROUTES.includes(move['matured']['lane']) && isIndex(move['matured']['stake']) && isIndex(move['matured']['payout']))) &&
+  Array.isArray(move['path']) &&
+  move['path'].every((tile) => isIndex(tile) && tile < tileCount);
 
 /** The board in `state`, or null when the state isn't a Chog Life board this client understands. */
 export function toLifeBoard(state: unknown): LifeBoard | null {
@@ -169,35 +237,32 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       Number.isInteger(pawn['portfolio']) &&
       (pawn['lane'] === undefined || ROUTES.includes(pawn['lane'])) &&
       (pawn['stake'] === undefined || isStake(pawn['stake'])) &&
-      (pawn['place'] === undefined || isPlace(pawn['place'])),
+      (pawn['place'] === undefined || isPlace(pawn['place'])) &&
+      (pawn['armed'] === undefined || typeof pawn['armed'] === 'string'),
   );
   const move = state['lastMove'];
-  const validMove =
-    move === undefined ||
-    (isRecord(move) &&
-      isIndex(move['seat']) &&
-      isIndex(move['from']) &&
-      isIndex(move['to']) &&
-      move['to'] < tiles.length &&
-      (move['roll'] === undefined || isIndex(move['roll'])) &&
-      (move['change'] === undefined || Number.isInteger(move['change'])) &&
-      (move['lane'] === undefined || ROUTES.includes(move['lane'])) &&
-      (move['byDefault'] === undefined || typeof move['byDefault'] === 'boolean') &&
-      (move['staked'] === undefined || isIndex(move['staked'])) &&
-      (move['place'] === undefined || isPlace(move['place'])) &&
-      (move['bonus'] === undefined || isIndex(move['bonus'])) &&
-      (move['matured'] === undefined ||
-        (isRecord(move['matured']) && ROUTES.includes(move['matured']['lane']) && isIndex(move['matured']['stake']) && isIndex(move['matured']['payout']))) &&
-      Array.isArray(move['path']) &&
-      move['path'].every((tile) => isIndex(tile) && tile < tiles.length));
+  const validMove = move === undefined || isMove(move, tiles.length);
+  const preview = state['preview'];
+  const validPreview =
+    preview === undefined ||
+    (isRecord(preview) &&
+      ROUTES.includes(preview['lane']) &&
+      isIndex(preview['roll']) &&
+      isIndex(preview['to']) &&
+      preview['to'] < tiles.length &&
+      Array.isArray(preview['path']) &&
+      preview['path'].every((tile) => isIndex(tile) && tile < tiles.length) &&
+      (preview['outcome'] === undefined || isOutcome(preview['outcome'])));
   const validChoice =
-    (state['choosing'] === undefined || isIndex(state['choosing'])) && (state['defaultLane'] === undefined || ROUTES.includes(state['defaultLane']));
+    (state['choosing'] === undefined || isIndex(state['choosing'])) &&
+    (state['confirming'] === undefined || isIndex(state['confirming'])) &&
+    (state['defaultLane'] === undefined || ROUTES.includes(state['defaultLane']));
   const returns = state['stakeReturns'];
   const validStakes =
     (state['forkStake'] === undefined || isIndex(state['forkStake'])) &&
     (returns === undefined || (Array.isArray(returns) && returns.every(isStakeReturns)));
   const validEnd = (state['finishBonus'] === undefined || isIndex(state['finishBonus'])) && (state['ended'] === undefined || ENDINGS.includes(state['ended']));
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validChoice || !validStakes || !validEnd) {
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPreview || !validChoice || !validStakes || !validEnd) {
     return null;
   }
   return state as unknown as LifeBoard;
@@ -276,6 +341,38 @@ export function stakeSummary(stake: number, returns: LifeStakeReturns | undefine
   }
   const [first, ...rest] = returns.outcomes.map((outcome, i) => `${payouts[i]}${i === 0 ? ' back' : ''} (${outcome.chance}%)`);
   return `Stake ${stake} MON, get ${first} or ${rest.join(' or ')}`;
+}
+
+/** Signed MON: "+11 MON", "−20 MON" or "0 MON". */
+export function signedMon(change: number): string {
+  return change > 0 ? `+${change} MON` : change < 0 ? `−${-change} MON` : '0 MON';
+}
+
+/**
+ * An event outcome as its rule: "lose 25% of your liquid MON, at least 20 MON", "gain 25 MON" or "gain 10 MON plus 5%
+ * of your liquid MON".
+ */
+export function outcomeRule(outcome: LifeEventOutcome): string {
+  const verb = outcome.effect === 'Gain' ? 'gain' : 'lose';
+  const parts = [outcome.amount > 0 ? `${outcome.amount} MON` : '', outcome.percent > 0 ? `${outcome.percent}% of your liquid MON` : '']
+    .filter((part) => part)
+    .join(' plus ');
+  const minimum = outcome.minimum > 0 ? `, at least ${outcome.minimum} MON` : '';
+  return `${verb} ${parts || '0 MON'}${minimum}`;
+}
+
+/**
+ * What a previewed move does (STORY-042, DEC-044): "Roll 6, land on tile 19 (Market): lose 10% of your liquid MON, at
+ * least 5 MON", "Roll 1, land on tile 10 (+10 MON)" or "Roll 4, reach the finish".
+ */
+export function previewSummary(preview: LifePreview, tiles: LifeTile[]): string {
+  const tile = tiles[preview.to];
+  if (tile?.type === 'Finish') {
+    return `Roll ${preview.roll}, reach the finish`;
+  }
+  const label = tile ? tileLabel(tile) : '';
+  const outcome = preview.outcome ? `: ${outcomeRule(preview.outcome)}` : '';
+  return `Roll ${preview.roll}, land on tile ${preview.to}${label ? ` (${label})` : ''}${outcome}`;
 }
 
 /** A place as shown: 1st, 2nd, 3rd, 4th… (matches hold at most six players). */

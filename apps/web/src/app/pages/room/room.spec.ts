@@ -48,6 +48,7 @@ describe('Room page', () => {
     capacity: 6,
     turnNumber: 0,
     turnEndsAt: null,
+    turnSeconds: null,
     matchEndsAt: null,
     members: [
       member('Alice', { isHost: true }),
@@ -657,6 +658,64 @@ describe('Room page', () => {
       expect(element().querySelector('[data-last-move]')?.textContent?.trim()).toBe(
         'You rolled 2 and moved to tile 2 (Safe or Degen?). You chose the degen route.',
       );
+    });
+
+    it('uses your ability on your turn and shows the room as the server left it (STORY-042)', () => {
+      const boost = { id: 'reward_boost', name: 'Reward Boost', description: 'Boost a reward.', target: 'None' as const, maxUses: 1 };
+      const started: Room = {
+        ...room,
+        version: 8,
+        status: 'Active',
+        state: FORK_BOARD,
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true, ability: { ...boost, usesLeft: 1 } })],
+      };
+      load(started);
+
+      element().querySelector<HTMLButtonElement>('[data-use-ability]')?.click();
+      const use = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(use.request.body).toEqual({
+        actionId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        matchId: room.matchId,
+        expectedVersion: 8,
+        type: 'USE_ABILITY',
+        payload: { abilityId: 'reward_boost' },
+      });
+      use.flush({ actionId: use.request.body.actionId, type: 'USE_ABILITY', version: 9, currentVersion: 9, replayed: false });
+
+      http.expectOne('/api/rooms/K7QF3M').flush({
+        ...started,
+        version: 9,
+        state: { ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0, 100, { armed: 'reward_boost' })] },
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true, ability: { ...boost, usesLeft: 0 } })],
+      });
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-use-ability]')).toBeNull();
+      expect(element().querySelector('[data-armed]')?.textContent?.trim()).toBe('Reward Boost armed');
+      expect(element().querySelector('[data-roll]')).not.toBeNull();
+    });
+
+    it('shows whose turn it is and how much of it is left (DEC-045)', () => {
+      const endsAt = new Date(Date.now() + 20_000).toISOString();
+      load({
+        ...room,
+        status: 'Active',
+        turnEndsAt: endsAt,
+        turnSeconds: 25,
+        state: FORK_BOARD,
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      });
+
+      const timer = element().querySelector('[data-turn-timer]');
+      expect(timer?.querySelector('.who')?.textContent).toBe('Alice’s turn');
+      expect(timer?.querySelector('[data-turn-left]')?.textContent).toMatch(/^(19|20)s left$/);
+      expect(timer?.querySelector<HTMLElement>('[data-turn-bar]')?.style.width).toMatch(/%$/);
+    });
+
+    it('shows no turn timer before the match starts', () => {
+      load(room);
+
+      expect(element().querySelector('[data-turn-timer]')).toBeNull();
     });
 
     it('explains a refused roll and shows the room as it is now', () => {

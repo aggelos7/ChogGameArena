@@ -9,7 +9,7 @@ public sealed class MatchOptions
     public static readonly TimeSpan MaxTurnTimeout = TimeSpan.FromMinutes(10);
 
     /// <summary>How long a player has for each turn. A match keeps the value it started with.</summary>
-    public TimeSpan TurnTimeout { get; set; } = TimeSpan.FromSeconds(20);
+    public TimeSpan TurnTimeout { get; set; } = TimeSpan.FromSeconds(25);
 
     /// <summary>A player whose turn runs out this many times in a row forfeits the match.</summary>
     public int MaxMissedTurns { get; set; } = 3;

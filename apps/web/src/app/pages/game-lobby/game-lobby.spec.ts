@@ -16,6 +16,7 @@ describe('Game lobby page', () => {
     capacity: 6,
     turnNumber: 0,
     turnEndsAt: null,
+    turnSeconds: null,
     matchEndsAt: null,
     state: null,
     abilities: [],

@@ -15,6 +15,9 @@
           @if (pawnBySeat().get(member.seat)?.place; as place) {
             <span class="tag finished" data-finished>Finished {{ ordinal(place) }}</span>
           }
+          @if (armedName(member.seat); as armed) {
+            <span class="tag armed" data-armed>{{ armed }} armed</span>
+          }
         </span>
         @if (pawnBySeat().get(member.seat); as pawn) {
           <span class="portfolio" [class.negative]="pawn.portfolio < 0" data-portfolio>{{ pawn.portfolio }} MON</span>
@@ -32,7 +35,13 @@
     <p class="ending" role="status" data-ending>{{ text }}</p>
   }
   <p class="turn-line" role="status" data-turn-line>
-    @if (chooser(); as current) {
+    @if (decider(); as current) {
+      @if (current.isYou) {
+        Keep your route or switch?
+      } @else {
+        {{ current.displayName }} is deciding whether to keep their route…
+      }
+    } @else if (chooser(); as current) {
       @if (current.isYou) {
         Choose your route.
       } @else {
@@ -66,10 +75,43 @@
           }
         </button>
       }
+      @if (forkAbility(); as ability) {
+        <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
+          Use {{ ability.name }}
+          <span class="ability-description">{{ ability.description }}</span>
+        </button>
+      }
+      @if (previewArmed()) {
+        <p class="route-hint" data-preview-armed>Event Preview is on: choose a route to see your next move there.</p>
+      }
       <p class="route-hint" data-route-hint>If time runs out, you take the {{ defaultRoute() }} route.</p>
     </div>
-  } @else if (turnOf()?.isYou && !chooser()) {
-    <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
+  } @else if (keepOrSwitch(); as choice) {
+    <div class="routes" role="group" aria-label="Keep your route or switch" data-keep-or-switch>
+      <p class="preview" data-preview>Your next move: {{ previewText() }}.</p>
+      <button type="button" [class]="'route ' + choice.keepName" [disabled]="rolling()" (click)="chooseLane.emit(choice.keep)" data-keep>
+        <span class="route-name">Keep the {{ choice.keepName }} route</span>
+        <span class="route-summary">Your next roll plays out as shown.</span>
+      </button>
+      <button type="button" [class]="'route ' + choice.otherName" [disabled]="rolling()" (click)="chooseLane.emit(choice.other)" data-switch>
+        <span class="route-name">Switch to the {{ choice.otherName }} route</span>
+        <span class="route-summary">Your next roll is drawn again, unseen.</span>
+      </button>
+      <p class="route-hint">If time runs out, you keep the {{ choice.keepName }} route.</p>
+    </div>
+  } @else if (turnOf()?.isYou && !chooser() && !decider()) {
+    @if (previewText(); as preview) {
+      <p class="preview" data-preview>Previewed: {{ preview }}.</p>
+    }
+    <div class="actions">
+      <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
+      @if (rollAbility(); as ability) {
+        <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
+          Use {{ ability.name }}
+          <span class="ability-description">{{ ability.description }}</span>
+        </button>
+      }
+    </div>
   }
 
   <ol class="track" aria-label="Board, from start to finish">
