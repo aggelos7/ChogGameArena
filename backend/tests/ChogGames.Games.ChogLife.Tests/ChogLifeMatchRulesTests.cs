@@ -11,7 +11,9 @@ namespace ChogGames.Games.ChogLife.Tests;
 /// STORY-036 to STORY-039 (DEC-038 to DEC-041): a Chog Life match starts with every pawn on the start tile with the
 /// starting MON under the current rules version, and every player sees that version's board and the pawns, with their
 /// MON, of the players still playing. A roll moves the pawn and resolves the tile it stops on; a roll that stops on a
-/// fork keeps the turn until the player chooses a lane, and a turn that runs out first takes the default lane.
+/// fork keeps the turn until the player chooses a lane, and a turn that runs out first takes the default lane. The lane
+/// taken holds a stake that pays out when the pawn rejoins the main track, a loss beyond the liquid MON held becomes a
+/// liability, and every player sees each player's portfolio (STORY-040, DEC-042).
 /// </summary>
 public class ChogLifeMatchRulesTests
 {
@@ -295,16 +297,20 @@ public class ChogLifeMatchRulesTests
         Assert.False(chosen.State!.Value.TryGetProperty("choosing", out _));
         Assert.Equal(lane, chosen.State.Value.GetProperty("pawns")[0].GetProperty("lane").GetString());
         Assert.Equal(
-            $$"""{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9],"lane":"{{lane}}"}""",
+            $$"""{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9],"lane":"{{lane}}","staked":50}""",
             LastMove(chosen).GetRawText());
 
         var dice = new Dice(roll);
         var off = Roll(room, players[0], chosen.State.Value.GetRawText(), dice);
 
+        // The stake stays on the lane until the pawn rejoins the main track.
         Assert.Equal([(1, 7)], dice.Draws);
         Assert.Equal(path, LastMove(off).GetProperty("path").EnumerateArray().Select(t => t.GetInt32()));
-        Assert.Equal(100 + change, Mon(off.State!.Value)[0]);
+        Assert.Equal(50 + change, Mon(off.State!.Value)[0]);
         Assert.False(off.State.Value.GetProperty("pawns")[0].TryGetProperty("lane", out _));
+        Assert.Equal(
+            $$"""{"lane":"{{lane}}","amount":50}""",
+            off.State.Value.GetProperty("pawns")[0].GetProperty("stake").GetRawText());
     }
 
     [Theory]
@@ -404,7 +410,7 @@ public class ChogLifeMatchRulesTests
         Assert.False(document.RootElement.TryGetProperty("choosing", out _));
         Assert.Equal("Safe", document.RootElement.GetProperty("pawns")[0].GetProperty("lane").GetString());
         Assert.Equal(
-            """{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9],"lane":"Safe","byDefault":true}""",
+            """{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9],"lane":"Safe","byDefault":true,"staked":50}""",
             document.RootElement.GetProperty("lastMove").GetRawText());
 
         var off = Roll(room, players[0], timedOut, new Dice(1));
@@ -628,14 +634,15 @@ public class ChogLifeMatchRulesTests
     }
 
     [Fact]
-    public void A_loss_bigger_than_the_balance_stops_at_zero()
+    public void A_loss_bigger_than_the_balance_leaves_the_rest_as_a_liability()
     {
         var (room, players) = Started(2);
 
         var decision = Roll(room, players[0], StateWithMon((1, 0, 9), (2, 0, 100)), new Dice(5));
 
         Assert.Equal([0, 100], Mon(decision.State!.Value));
-        Assert.Equal(-9, LastMove(decision).GetProperty("change").GetInt32());
+        Assert.Equal(6, decision.State.Value.GetProperty("pawns")[0].GetProperty("liabilities").GetInt32());
+        Assert.Equal(-15, LastMove(decision).GetProperty("change").GetInt32());
     }
 
     [Fact]
@@ -675,5 +682,184 @@ public class ChogLifeMatchRulesTests
 
         Assert.Equal([140, 100], Mon(decision.State!.Value));
         Assert.False(LastMove(decision).TryGetProperty("change", out _));
+    }
+
+    private static JsonElement Pawn(MatchRuleDecision decision, int index = 0) =>
+        decision.State!.Value.GetProperty("pawns")[index];
+
+    [Theory]
+    [InlineData(50, 0, 50)]
+    [InlineData(30, 0, 30)]
+    [InlineData(1, 0, 1)]
+    public void Choosing_a_lane_stakes_the_fork_stake_or_all_the_liquid_mon_held(int mon, int left, int staked)
+    {
+        var (room, players) = Started(2);
+        var state = $$"""{"rulesVersion":1,"pawns":[{"seat":1,"tile":9,"mon":{{mon}}},{"seat":2,"tile":0,"mon":100}],"choosing":1}""";
+
+        var chosen = Choose(room, players[0], state, new { lane = "Degen" });
+
+        Assert.Equal(left, Pawn(chosen).GetProperty("mon").GetInt32());
+        Assert.Equal($$"""{"lane":"Degen","amount":{{staked}}}""", Pawn(chosen).GetProperty("stake").GetRawText());
+    }
+
+    [Fact]
+    public void Choosing_with_no_liquid_mon_stakes_nothing()
+    {
+        var (room, players) = Started(2);
+        var state = """{"rulesVersion":1,"pawns":[{"seat":1,"tile":9,"mon":0,"liabilities":6},{"seat":2,"tile":0,"mon":100}],"lastMove":{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9]},"choosing":1}""";
+
+        var chosen = Choose(room, players[0], state, new { lane = "Degen" });
+
+        Assert.Equal(MatchRuleOutcome.Accepted, chosen.Outcome);
+        Assert.Equal("""{"seat":1,"tile":9,"mon":0,"lane":"Degen","liabilities":6}""", Pawn(chosen).GetRawText());
+        Assert.Equal("""{"seat":1,"roll":6,"from":6,"to":9,"path":[7,8,9],"lane":"Degen"}""", LastMove(chosen).GetRawText());
+    }
+
+    [Fact]
+    public void A_turn_that_runs_out_stakes_on_the_default_lane()
+    {
+        var (room, _) = Started(2);
+
+        var timedOut = TimeOut(room, """{"rulesVersion":1,"pawns":[{"seat":1,"tile":9,"mon":20},{"seat":2,"tile":0,"mon":100}],"choosing":1}""");
+
+        using var document = JsonDocument.Parse(timedOut!);
+        Assert.Equal(
+            """{"seat":1,"tile":9,"mon":0,"lane":"Safe","stake":{"lane":"Safe","amount":20}}""",
+            document.RootElement.GetProperty("pawns")[0].GetRawText());
+    }
+
+    [Fact]
+    public void A_safe_stake_pays_back_as_the_pawn_rejoins_the_main_track()
+    {
+        var (room, players) = Started(2);
+        var state = """{"rulesVersion":1,"pawns":[{"seat":1,"tile":13,"mon":50,"stake":{"lane":"Safe","amount":50}},{"seat":2,"tile":0,"mon":100}]}""";
+        var dice = new Dice(1);
+
+        var decision = Roll(room, players[0], state, dice);
+
+        Assert.Equal([(1, 7)], dice.Draws);
+        Assert.Equal("""{"seat":1,"tile":18,"mon":112}""", Pawn(decision).GetRawText());
+        Assert.Equal(
+            """{"seat":1,"roll":1,"from":13,"to":18,"path":[18],"matured":{"lane":"Safe","stake":50,"payout":62}}""",
+            LastMove(decision).GetRawText());
+    }
+
+    [Theory]
+    [InlineData(0, 150, 220)]
+    [InlineData(30, 10, 66)]
+    public void A_degen_stake_draws_its_return_before_the_tile_it_stops_on(int stakeDraw, int payout, int mon)
+    {
+        // From the last degen tile, 2 steps rejoin the main track and stop on a market (+10%, drawn 0).
+        var (room, players) = Started(2);
+        var state = """{"rulesVersion":1,"pawns":[{"seat":1,"tile":17,"mon":50,"stake":{"lane":"Degen","amount":50}},{"seat":2,"tile":0,"mon":100}]}""";
+        var dice = new Dice(2, stakeDraw, 0);
+
+        var decision = Roll(room, players[0], state, dice);
+
+        Assert.Equal([(1, 7), (0, 100), (0, 100)], dice.Draws);
+        Assert.Equal(mon, Mon(decision.State!.Value)[0]);
+        Assert.False(Pawn(decision).TryGetProperty("stake", out _));
+        Assert.Equal(payout, LastMove(decision).GetProperty("matured").GetProperty("payout").GetInt32());
+        Assert.Equal(mon - 50 - payout, LastMove(decision).GetProperty("change").GetInt32());
+    }
+
+    [Fact]
+    public void A_payout_and_a_gain_repay_liabilities_first()
+    {
+        var (room, players) = Started(2);
+
+        var paidOut = Roll(room, players[0],
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":13,"mon":0,"stake":{"lane":"Safe","amount":50},"liabilities":30},{"seat":2,"tile":0,"mon":100}]}""",
+            new Dice(1));
+        var rewarded = Roll(room, players[0],
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"mon":0,"liabilities":6},{"seat":2,"tile":0,"mon":100}]}""",
+            new Dice(2));
+
+        Assert.Equal("""{"seat":1,"tile":18,"mon":32}""", Pawn(paidOut).GetRawText());
+        Assert.Equal("""{"seat":1,"tile":2,"mon":14}""", Pawn(rewarded).GetRawText());
+        Assert.Equal(20, LastMove(rewarded).GetProperty("change").GetInt32());
+    }
+
+    [Fact]
+    public void A_loss_in_debt_adds_to_the_liabilities()
+    {
+        // A liquidation takes at least 20 MON, even from a player with none.
+        var (room, players) = Started(2);
+
+        var decision = Roll(room, players[0],
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":14,"mon":0,"liabilities":6},{"seat":2,"tile":0,"mon":100}]}""",
+            new Dice(2));
+
+        Assert.Equal("""{"seat":1,"tile":16,"mon":0,"liabilities":26}""", Pawn(decision).GetRawText());
+        Assert.Equal(-20, LastMove(decision).GetProperty("change").GetInt32());
+    }
+
+    [Fact]
+    public void Every_player_sees_each_players_portfolio_as_the_server_values_it()
+    {
+        var (room, players) = Started(3);
+        using var document = JsonDocument.Parse(
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":10,"mon":40,"stake":{"lane":"Safe","amount":50}},{"seat":2,"tile":5,"mon":0,"liabilities":6},{"seat":3,"tile":0}]}""");
+
+        var views = players
+            .Select(p => Rules.ViewFor(new MatchViewContext(room, p.Id, document.RootElement))!.Value)
+            .ToArray();
+
+        Assert.Single(views.Select(v => v.GetRawText()).Distinct());
+        Assert.Equal(
+            """[{"seat":1,"tile":10,"mon":40,"stake":{"lane":"Safe","amount":50},"assets":50,"bonuses":0,"liabilities":0,"portfolio":90},"""
+            + """{"seat":2,"tile":5,"mon":0,"assets":0,"bonuses":0,"liabilities":6,"portfolio":-6},"""
+            + """{"seat":3,"tile":0,"mon":100,"assets":0,"bonuses":0,"liabilities":0,"portfolio":100}]""",
+            views[0].GetProperty("pawns").GetRawText());
+        Assert.Equal(50, views[0].GetProperty("forkStake").GetInt32());
+        Assert.Equal(
+            """[{"lane":"Safe","outcomes":[{"chance":100,"percent":125}]},{"lane":"Degen","outcomes":[{"chance":30,"percent":300},{"chance":70,"percent":20}]}]""",
+            views[0].GetProperty("stakeReturns").GetRawText());
+    }
+
+    [Fact]
+    public void Rules_without_a_fork_stake_offer_no_stake()
+    {
+        var noStakes = LifeRules.Create(
+            2,
+            LifeRulesV1.Rules.Tiles,
+            startingMon: 100,
+            finishBonus: 100,
+            timeCap: TimeSpan.FromMinutes(20),
+            dieFaces: 6,
+            events: LifeRulesV1.Rules.Events.Values);
+        var rules = new ChogLifeMatchRules([noStakes]);
+        var (room, players) = Started(2, rules);
+        using var state = JsonDocument.Parse(
+            """{"rulesVersion":2,"pawns":[{"seat":1,"tile":9,"mon":100},{"seat":2,"tile":0,"mon":100}],"choosing":1}""");
+
+        var chosen = rules.Apply(new MatchCommandContext(
+            room, players[0].Id, ChogLifeMatchRules.ChooseLane, JsonSerializer.SerializeToElement(new { lane = "Degen" }), state.RootElement, new Dice()));
+        var view = rules.ViewFor(new MatchViewContext(room, players[0].Id, chosen.State!.Value))!.Value;
+
+        Assert.Equal("""{"seat":1,"tile":9,"mon":100,"lane":"Degen"}""", Pawn(chosen).GetRawText());
+        Assert.False(view.TryGetProperty("forkStake", out _));
+        Assert.False(view.TryGetProperty("stakeReturns", out _));
+    }
+
+    [Theory]
+    [InlineData(""","liabilities":-1""")]
+    [InlineData(""","liabilities":1000001""")]
+    [InlineData(""","bonuses":-1""")]
+    [InlineData(""","stake":{"lane":"Safe","amount":0}""")]
+    [InlineData(""","stake":{"lane":"Safe","amount":1000001}""")]
+    [InlineData(""","stake":{"lane":"Main","amount":50}""")]
+    [InlineData(""","stake":{"lane":"Sideways","amount":50}""")]
+    public void A_roll_or_choice_with_an_invalid_portfolio_is_rejected_without_a_draw(string extra)
+    {
+        var (room, players) = Started(2);
+        var state = $$"""{"rulesVersion":1,"pawns":[{"seat":1,"tile":9,"mon":100{{extra}}},{"seat":2,"tile":0,"mon":100}]}""";
+        var choosing = state.Replace("]}", "],\"choosing\":1}");
+        var dice = new Dice();
+
+        Assert.Equal("game_state_unavailable", Roll(room, players[0], state, dice).Reason);
+        Assert.Equal("game_state_unavailable", Choose(room, players[0], choosing, new { lane = "Safe" }).Reason);
+        Assert.Null(TimeOut(room, choosing));
+        Assert.Empty(dice.Draws);
     }
 }

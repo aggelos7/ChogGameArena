@@ -592,7 +592,7 @@
 
 #### STORY-040 — Portfolio and assets
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E06
 - **Implementation:** Track liquid MON, assets, bonuses and liabilities and compute total portfolio.

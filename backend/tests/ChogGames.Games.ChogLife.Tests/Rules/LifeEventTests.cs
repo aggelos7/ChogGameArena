@@ -6,8 +6,9 @@ namespace ChogGames.Games.ChogLife.Tests.Rules;
 
 /// <summary>
 /// STORY-038, DEC-040: the tile a pawn stops on resolves. Reward and Loss tiles move their MON, each event draws one of
-/// its configured outcomes from the injected source of chance, and a balance never goes below 0 or above the cap.
-/// Malformed event definitions are refused when the rules are built.
+/// its configured outcomes from the injected source of chance. A loss is the full amount even when it's more than the
+/// liquid MON held: settling it turns the rest into a liability (STORY-040, DEC-042). Malformed event definitions are
+/// refused when the rules are built.
 /// </summary>
 public class LifeEventTests
 {
@@ -53,8 +54,8 @@ public class LifeEventTests
     [InlineData(Reward20, 100, 20)]
     [InlineData(Reward20, 0, 20)]
     [InlineData(Loss15, 100, -15)]
-    [InlineData(Loss15, 10, -10)]
-    [InlineData(Loss15, 0, 0)]
+    [InlineData(Loss15, 10, -15)]
+    [InlineData(Loss15, 0, -15)]
     public void Reward_and_loss_tiles_move_their_amount_without_a_draw(int tile, int liquid, int change)
     {
         var chance = new Chance();
@@ -86,8 +87,8 @@ public class LifeEventTests
     [InlineData(50, 100, -10)]
     [InlineData(99, 255, -25)]
     [InlineData(50, 30, -5)]
-    [InlineData(50, 3, -3)]
-    [InlineData(50, 0, 0)]
+    [InlineData(50, 3, -5)]
+    [InlineData(50, 0, -5)]
     public void A_market_moves_10_percent_up_or_down_at_least_5_mon(int draw, int liquid, int change)
     {
         Assert.Equal(change, Resolve(Market, liquid, draw));
@@ -110,19 +111,19 @@ public class LifeEventTests
     [InlineData(200, -50)]
     [InlineData(100, -25)]
     [InlineData(50, -20)]
-    [InlineData(10, -10)]
-    [InlineData(0, 0)]
-    public void A_liquidation_takes_25_percent_but_at_least_20_mon_and_never_more_than_held(int liquid, int change)
+    [InlineData(10, -20)]
+    [InlineData(0, -20)]
+    public void A_liquidation_takes_25_percent_but_at_least_20_mon_even_from_less(int liquid, int change)
     {
         Assert.Equal(change, Resolve(Liquidation, liquid));
     }
 
     [Fact]
-    public void A_balance_never_rises_above_the_cap()
+    public void A_tile_moves_its_full_amount_whatever_the_balance()
     {
-        Assert.Equal(0, Resolve(Reward20, LifeRules.MaxMon));
-        Assert.Equal(5, Resolve(Reward20, LifeRules.MaxMon - 5));
-        Assert.Equal(0, Resolve(Market, LifeRules.MaxMon, 0));
+        // The cap and the floor are applied when the change is settled (LifePortfolio.Settle).
+        Assert.Equal(20, Resolve(Reward20, LifeRules.MaxMon));
+        Assert.Equal(100_000, Resolve(Market, LifeRules.MaxMon, 0));
     }
 
     [Theory]
@@ -199,6 +200,6 @@ public class LifeEventTests
         var rules = LifeRules.Create(1, Rules.Tiles, 100, 100, TimeSpan.FromMinutes(20), 6,
             Events(LifeEventKind.Rug, new LifeEventOutcome(100, LifeEffect.Loss, LifeRules.MaxTileAmount, 100, LifeRules.MaxTileAmount)));
 
-        Assert.Equal(-100, rules.Resolve(Rug, 100, new Chance()));
+        Assert.Equal(-1_100, rules.Resolve(Rug, 100, new Chance()));
     }
 }

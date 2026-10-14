@@ -5,7 +5,7 @@ import { Router, provideRouter } from '@angular/router';
 import { Subject } from 'rxjs';
 import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { Room, RoomAbility, RoomMember } from '../../rooms/rooms-api';
-import { CATALOGUE, FORK_BOARD } from '../../testing';
+import { CATALOGUE, FORK_BOARD, lifePawn } from '../../testing';
 import { RoomPage } from './room';
 
 /** Stands in for the hub connection: the spec pushes status changes and snapshots. */
@@ -605,7 +605,7 @@ describe('Room page', () => {
       http.expectOne('/api/rooms/K7QF3M').flush({
         ...started,
         version: 5,
-        state: { ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 2, tile: 1, mon: 100 }], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1] } },
+        state: { ...FORK_BOARD, pawns: [lifePawn(1, 0, 100), lifePawn(2, 1, 100)], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1] } },
         members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
       });
       fixture.detectChanges();
@@ -615,7 +615,7 @@ describe('Room page', () => {
     });
 
     it('sends the route you choose at a fork and shows the room as the server left it', () => {
-      const atFork = { ...FORK_BOARD, pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 2, tile: 2, mon: 100 }], choosing: 2, defaultLane: 'Safe' as const };
+      const atFork = { ...FORK_BOARD, pawns: [lifePawn(1, 0, 100), lifePawn(2, 2, 100)], choosing: 2, defaultLane: 'Safe' as const };
       const started: Room = {
         ...room,
         version: 6,
@@ -644,7 +644,7 @@ describe('Room page', () => {
         version: 7,
         state: {
           ...FORK_BOARD,
-          pawns: [{ seat: 1, tile: 0, mon: 100 }, { seat: 2, tile: 2, mon: 100, lane: 'Degen' }],
+          pawns: [lifePawn(1, 0, 100), lifePawn(2, 2, 100, { lane: 'Degen' })],
           lastMove: { seat: 2, roll: 2, from: 0, to: 2, path: [1, 2], lane: 'Degen' },
           defaultLane: 'Safe',
         },
