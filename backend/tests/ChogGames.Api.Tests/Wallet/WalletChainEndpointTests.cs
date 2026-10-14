@@ -56,11 +56,10 @@ public class WalletChainEndpointTests
     [InlineData("Wallet:Chain:ChainId", "0", "'Wallet:Chain:ChainId' must be a positive EIP-155 chain id")]
     [InlineData("Wallet:Chain:RpcUrls:0", "http://rpc.monad.xyz", "'Wallet:Chain:RpcUrls:0' must be a public https:// URL")]
     [InlineData("Wallet:Chain:RpcUrls:0", "https://rpc.example.com/?key=secret", "'Wallet:Chain:RpcUrls:0' must be a public https:// URL")]
-    public async Task Invalid_chain_configuration_stops_startup(string key, string value, string expectedMessage)
+    public void Invalid_chain_configuration_stops_startup(string key, string value, string expectedMessage)
     {
-        await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, new Dictionary<string, string?> { [key] = value });
+        var error = StartupValidation.Failure(new Dictionary<string, string?> { [key] = value });
 
-        var error = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
         Assert.Contains(expectedMessage, error.Message);
     }
 
