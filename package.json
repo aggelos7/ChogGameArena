@@ -18,7 +18,8 @@
     "deps:verify": "node tools/compose-smoke.mjs",
     "db:migrate": "node tools/db-migrate.mjs",
     "deploy:verify": "node tools/deploy-smoke.mjs",
-    "backup:verify": "node tools/backup-smoke.mjs"
+    "backup:verify": "node tools/backup-smoke.mjs",
+    "release:verify": "node tools/release-smoke.mjs"
   },
   "dependencies": {
     "@angular/common": "22.2.1",

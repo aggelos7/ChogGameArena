@@ -1,4 +1,9 @@
 {
+  "/api/health/ready": {
+    "target": "http://localhost:5248",
+    "secure": false,
+    "pathRewrite": { "^/api/health/ready$": "/health/ready" }
+  },
   "/api": {
     "target": "http://localhost:5248",
     "secure": false,
