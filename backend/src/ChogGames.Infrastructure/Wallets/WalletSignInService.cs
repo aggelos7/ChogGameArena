@@ -1,6 +1,7 @@
 using ChogGames.Core.Players;
 using ChogGames.Core.Wallets;
 using ChogGames.Infrastructure.Identity;
+using ChogGames.Infrastructure.Monitoring;
 using ChogGames.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -30,7 +31,8 @@ public sealed class WalletSignInService(
     ChogGamesDbContext dbContext,
     GuestSessionService sessions,
     TimeProvider timeProvider,
-    IOptions<WalletAuthOptions> options)
+    IOptions<WalletAuthOptions> options,
+    ChogGamesMetrics metrics)
 {
     public async Task<WalletChallenge> CreateChallengeAsync(Guid playerId, WalletAddress address, long chainId, CancellationToken cancellationToken)
     {
@@ -53,6 +55,18 @@ public sealed class WalletSignInService(
     /// and the caller's session is replaced by a new one; the old session token stops working.
     /// </summary>
     public async Task<WalletSignInResult> VerifyAsync(
+        Guid playerId,
+        string currentSessionToken,
+        Guid challengeId,
+        string? signature,
+        CancellationToken cancellationToken)
+    {
+        var result = await VerifyChallengeAsync(playerId, currentSessionToken, challengeId, signature, cancellationToken);
+        metrics.WalletSignIn(result.Failure);
+        return result;
+    }
+
+    private async Task<WalletSignInResult> VerifyChallengeAsync(
         Guid playerId,
         string currentSessionToken,
         Guid challengeId,

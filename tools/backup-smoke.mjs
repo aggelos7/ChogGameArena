@@ -24,11 +24,23 @@ const origin = `https://localhost:${httpsPort}`;
 const offsiteVolume = `chog-backup-smoke-offsite-${process.pid}`;
 const workDir = mkdtempSync(join(tmpdir(), 'chog-backup-smoke-'));
 const override = join(workDir, 'offsite.yml');
-// The stand-in bucket, mounted where BACKUP_S3_BUCKET points.
+// The stand-in bucket, mounted where BACKUP_S3_BUCKET points, and a stand-in heartbeat monitor (STORY-048)
+// that answers every request and prints its request line.
 writeFileSync(
   override,
-  `services:\n  backup:\n    volumes: ["${offsiteVolume}:/offsite"]\nvolumes:\n  ${offsiteVolume}:\n    external: true\n`,
+  `services:
+  backup:
+    volumes: ["${offsiteVolume}:/offsite"]
+  heartbeat:
+    image: chog-game-arena/backup:smoke
+    entrypoint: ["sh", "-c", "while :; do printf 'HTTP/1.0 200 OK\\r\\nContent-Length: 0\\r\\n\\r\\n' | nc -l -p 8080 | head -n 1; done"]
+    networks: [backend]
+volumes:
+  ${offsiteVolume}:
+    external: true
+`,
 );
+const heartbeatToken = randomBytes(12).toString('hex');
 
 const s3Secret = randomBytes(20).toString('hex');
 const baseEnv = {
@@ -148,9 +160,14 @@ async function main() {
   backupShell(`set -e; mkdir -p /offsite/chog-game-arena; for f in ${old.join(' ')}; do echo old > /backups/$f; cp /backups/$f /offsite/chog-game-arena/$f; done`);
 
   step('backing up now');
-  const log = compose(['run', '--rm', '-T', 'backup', 'now']);
+  const log = compose(['run', '--rm', '-T', '-e', `BACKUP_HEARTBEAT_URL=http://heartbeat:8080/ping/${heartbeatToken}`, 'backup', 'now']);
   const name = log.match(/wrote (choggames-\d{8}T\d{6}Z\.dump\.age)/)?.[1];
   check(name && log.includes(`copied ${name} off-VM`), `backup did not finish:\n${log}`);
+
+  step('a successful backup pings the heartbeat monitor without logging its URL');
+  check(log.includes('pinged BACKUP_HEARTBEAT_URL'), `the backup must report the heartbeat ping:\n${log}`);
+  check(!log.includes(heartbeatToken), 'the heartbeat URL must not be logged');
+  check(compose(['logs', '--no-log-prefix', 'heartbeat']).includes(`GET /ping/${heartbeatToken} `), 'the heartbeat monitor must receive the ping');
   const expected = run('sh', [retention], { input: [name, ...old].join('\n') }).split('\n').filter(Boolean);
   const kept = [name, ...old].filter((archive) => !expected.includes(archive)).sort();
   check(kept.length === 8 && kept.includes(name), `retention should keep 8 archives, not ${kept.join(', ')}`);

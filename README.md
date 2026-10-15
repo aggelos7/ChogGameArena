@@ -75,13 +75,13 @@ To wipe local data: `docker compose -f infrastructure/docker-compose.yml down -v
 
 ### Production-like deployment (single VM)
 
-`infrastructure/production/docker-compose.yml` runs the whole stack on one Linux VM (STORY-045, DEC-049): nginx serving the built web app and proxying `/api` (REST and the SignalR WebSocket) on one origin, the API, a one-shot `migrate` job (an EF Core migrations bundle that runs before the API starts), PostgreSQL and Redis. Only nginx publishes ports: 443 serves the app over HTTPS for `PUBLIC_HOSTNAME` only (HSTS for one year, `upgrade-insecure-requests`, TLS 1.2+, wss for the hub), and 80 answers the Let's Encrypt challenge and redirects to HTTPS (STORY-046, DEC-050). The `certbot` service (`letsencrypt` profile) obtains and renews the certificate; nginx starts on a self-signed one and switches within a minute. The `backup` service (`backup` profile, STORY-047, DEC-051) dumps the database daily at 03:00 UTC, encrypts it with `age` to a public key whose private key stays off the VM, keeps it in the `backups` volume, copies it to an S3-compatible bucket with `rclone`, and keeps 7 daily + 4 weekly archives in both places; it also restores into an empty database. Data lives in the `postgres-data`, `redis-data`, `letsencrypt` and `backups` volumes. Images: `infrastructure/production/api.Dockerfile` (targets `api` and `migrate`), `web.Dockerfile` and `backup.Dockerfile`, built from the repository root (`.dockerignore`). Runbook (deployment, backups and restore): `docs/deployment.md`.
+`infrastructure/production/docker-compose.yml` runs the whole stack on one Linux VM (STORY-045, DEC-049): nginx serving the built web app and proxying `/api` (REST and the SignalR WebSocket) on one origin, the API, a one-shot `migrate` job (an EF Core migrations bundle that runs before the API starts), PostgreSQL and Redis. Only nginx publishes ports: 443 serves the app over HTTPS for `PUBLIC_HOSTNAME` only (HSTS for one year, `upgrade-insecure-requests`, TLS 1.2+, wss for the hub), and 80 answers the Let's Encrypt challenge and redirects to HTTPS (STORY-046, DEC-050). The `certbot` service (`letsencrypt` profile) obtains and renews the certificate; nginx starts on a self-signed one and switches within a minute. The `backup` service (`backup` profile, STORY-047, DEC-051) dumps the database daily at 03:00 UTC, encrypts it with `age` to a public key whose private key stays off the VM, keeps it in the `backups` volume, copies it to an S3-compatible bucket with `rclone`, and keeps 7 daily + 4 weekly archives in both places; it also restores into an empty database. Every service logs to rotated Docker logs; the API and nginx write JSON lines that share a request id. The API serves internal Prometheus metrics, readiness is public at `/api/health/ready` for an uptime check, and the backups ping an optional heartbeat URL (STORY-048, DEC-052). Data lives in the `postgres-data`, `redis-data`, `letsencrypt` and `backups` volumes. Images: `infrastructure/production/api.Dockerfile` (targets `api` and `migrate`), `web.Dockerfile` and `backup.Dockerfile`, built from the repository root (`.dockerignore`). Runbook (deployment, backups and restore, monitoring and alerts): `docs/deployment.md`.
 
 ```bash
 cp infrastructure/production/.env.example infrastructure/production/.env   # chmod 600; set the values below
 docker compose -f infrastructure/production/docker-compose.yml up -d --build --wait
-npm run deploy:verify   # smoke test: builds an isolated copy on ports 18081/18443, checks HTTPS, app, API, wss hub, redirect and a restart, then cleans up
-npm run backup:verify   # smoke test: backs up an isolated copy, checks encryption, secrets and retention, restores into a clean copy, then cleans up
+npm run deploy:verify   # smoke test: builds an isolated copy on ports 18081/18443, checks HTTPS, app, API, wss hub, redirect, monitoring and a restart, then cleans up
+npm run backup:verify   # smoke test: backs up an isolated copy, checks encryption, secrets, retention and the heartbeat ping, restores into a clean copy, then cleans up
 ```
 
 | Setting (`infrastructure/production/.env`) | Default | Notes |
@@ -94,6 +94,7 @@ npm run backup:verify   # smoke test: backs up an isolated copy, checks encrypti
 | `BACKUP_S3_ACCESS_KEY_ID` / `BACKUP_S3_SECRET_ACCESS_KEY` | *(required for backups)* | a key that can put, get, list and delete objects in the bucket |
 | `BACKUP_S3_REGION` / `BACKUP_S3_PROVIDER` / `BACKUP_S3_PREFIX` | *(none)* / `Other` / `chog-game-arena` | rclone S3 settings and the folder in the bucket |
 | `BACKUP_TIME` / `BACKUP_KEEP_DAILY` / `BACKUP_KEEP_WEEKLY` | `03:00` (UTC) / `7` / `4` | schedule and retention, on the VM and off-VM |
+| `BACKUP_HEARTBEAT_URL` / `BACKUP_HEARTBEAT_FAIL_URL` | *(none)* | optional alerting (DEC-052): pinged after each successful backup / when a scheduled backup fails, e.g. a healthchecks.io check and its `/fail` URL |
 | `CERTBOT_EMAIL` | *(none)* | optional Let's Encrypt account contact |
 | `WALLET_AUTH_DOMAIN` / `WALLET_AUTH_URI` | `PUBLIC_HOSTNAME` / `https://PUBLIC_HOSTNAME` | `WalletAuth:Domain`/`Uri`; override only for a non-standard port |
 | `POSTGRES_DB` / `POSTGRES_USER` | `choggames` | |
@@ -387,6 +388,14 @@ Health endpoints:
 | `GET /health/ready` | PostgreSQL connection (5 s timeout) | `200` | `503` |
 
 Responses are JSON (`status`, per-check `name`/`status`/`durationMs`) and never include exception details or connection information.
+
+In the production stack nginx exposes readiness publicly as `GET /api/health/ready`, for an external uptime check. Liveness and `/metrics` are internal (STORY-048, DEC-052).
+
+Monitoring (STORY-048, DEC-052):
+
+- **`GET /metrics`:** Prometheus text format 0.0.4. It covers request durations by route, SignalR connections, rooms created, cancelled and open, matches started and ended, guest sessions, wallet sign-ins and room subscriptions. Labels are game ids, outcomes and results only. It is outside `/api`, so nginx never forwards it. `docs/deployment.md` lists every metric and shows how to read them on the VM.
+- **`X-Request-Id`:** every response carries a correlation id. It is the request's `X-Request-Id` header when that is 1–64 letters, digits, `.`, `_` or `-` (nginx always sets it to its `$request_id`); otherwise it is a new id. Every log line written during the request has it as the `CorrelationId` scope.
+- **Logs:** outside Development they are JSON lines on the console (`Logging:Console:FormatterName=json`, with scopes and UTC timestamps). Development keeps the plain `simple` format. EF Core's per-query SQL logs are at `Warning`. Tokens, cookies, signatures and sign-in challenges are never logged.
 
 Migrations (EF Core 8, `ChogGames.Infrastructure/Persistence/Migrations`) are applied explicitly, never automatically at startup, so they can be reviewed before deploy. `dotnet-ef` is pinned in `backend/.config/dotnet-tools.json`:
 

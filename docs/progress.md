@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-15 (STORY-047).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-15 (STORY-048).
 
 ## Stories done
 
@@ -57,6 +57,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-045 | #157 | Production-like Compose deployment (DEC-049): `infrastructure/production/docker-compose.yml` runs nginx (`web.Dockerfile`: Nx build, then nginx serving the app and proxying `/api` and the `/api/hubs/` WebSocket on one origin, `nginx.conf`), the API and a one-shot `migrate` job (`api.Dockerfile` targets `api` and `migrate`, an EF Core migrations bundle run before the API starts), PostgreSQL and Redis on one VM. Only nginx publishes a port (loopback 8080 by default until HTTPS); data in named volumes; secrets in a git-ignored `infrastructure/production/.env` (Compose refuses to start without `POSTGRES_PASSWORD`, `WALLET_AUTH_DOMAIN`, `WALLET_AUTH_URI`). The API runs in Production with forwarded headers on; nginx overwrites `X-Forwarded-For`, so rate limits see the real client. `tools/deploy.test.mjs` (config) and `npm run deploy:verify` (`tools/deploy-smoke.mjs`: builds, serves through nginx, WebSocket upgrade, guest survives recreating every container) run in CI. Runbook: `docs/deployment.md`. No API, app config or migration change. |
 | STORY-046 | #159 | Frontend hosting and HTTPS (DEC-050): the app stays on nginx (no CDN). `nginx.conf.template` (filled with `PUBLIC_HOSTNAME` only, `NGINX_ENVSUBST_FILTER`) serves only that host: 443 with TLS 1.2/1.3 and HTTP/2, HSTS one year and `upgrade-insecure-requests` on every response (`security-headers.conf`, included again in each location with its own `add_header`), wss for the hub; 80 serves `/.well-known/acme-challenge/` and 301s to `https://PUBLIC_HOSTNAME`; other names get 444 / a refused handshake. `certbot/certbot:v5.8.0` (`letsencrypt` profile) runs `certonly --webroot --keep-until-expiring` every 12 h. `nginx-tls.sh` (entrypoint) starts nginx on a self-signed certificate and reloads within a minute when the issued one appears or renews. Ports 80/443 on all interfaces by default; `WalletAuth` defaults to the host. `deploy:verify` now runs over verified TLS. |
 | STORY-047 | #161 | Encrypted backups and restore (DEC-051): a `backup` service (`backup` profile, `backup.Dockerfile` = `postgres:18.6-alpine3.24` + pinned Alpine `age` and `rclone`, user `postgres`) runs `backup.sh`: daily at `BACKUP_TIME` (03:00 UTC) `pg_dump -Fc` piped into `age` (public-key recipient; the private key never on the VM) into the `backups` volume, `rclone` copy to an S3-compatible bucket (env-only config), then retention (`backup-retention.sh`: 7 newest + newest of the 4 newest weeks) on both. Healthy only once key and bucket check out. `run --rm backup now / list / restore <name|latest>`; restore reads the key from stdin, refuses a non-empty database, and loads in one transaction. Runbook in `docs/deployment.md`; `npm run backup:verify` (CI) backs up, restores into a clean stack from the off-VM copy and checks encryption, secrets, retention and refusals. |
+| STORY-048 | (pending) | Operational monitoring (DEC-052): JSON console logs outside Development (scopes, UTC), `X-Request-Id` correlation (nginx `$request_id`, validated, returned, `CorrelationId` log scope), JSON nginx access log without query strings, Docker log rotation (5 × 10 MB) on every service. `GET /metrics` (outside `/api`, internal only): in-house Prometheus writer over `System.Diagnostics.Metrics` (`PrometheusMetrics`), with ASP.NET request and SignalR meters plus the `ChogGames` meter (rooms, matches by outcome via a commit-aware EF interceptor, open rooms from the database, guest sessions, wallet sign-ins, room subscriptions). Readiness public at `/api/health/ready` for an uptime check; the backup service pings optional `BACKUP_HEARTBEAT_URL` / `_FAIL_URL`. A test captures every log line through guest and wallet sign-in and finds no token, signature or challenge. |
 
 ## Key architectural decisions
 
@@ -188,7 +189,10 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Restart resume runs at every start:** including a quick restart with seconds left on a turn, which then gets a full turn. If the database is down at startup, matches aren't resumed and their turns time out as before.
 - **Out-of-turn actions:** only the current player can act. Reactions by other players (Chog Race, DEC-003) will need the rules to allow them.
 - **Turn scheduler is single instance:** like the hub registry, it runs in-process; scale-out needs one runner (e.g. an advisory lock).
-- **Dev log noise:** in Development, EF logs the overdue-turn query every second.
+- **Metrics are per process:** counters restart from zero with the API, and there's no Prometheus server or dashboard yet (DEC-052); reading `/metrics` is manual until one scrapes it.
+- **Reconnects aren't counted on their own:** they show as extra room subscriptions and hub connections.
+- **No dependency metrics:** Monad RPC and IPFS failures are only logged (warnings), not counted.
+- **API errors aren't alerted on:** only a failing readiness check and missed backups alert; error log lines need someone to look.
 - **No foreign key on `GameRooms.CurrentPlayerId`:** the domain keeps it a playing member; a composite FK to `RoomMembers` would create an insert cycle in EF.
 - **Matches started before STORY-023** have no character snapshots; the room shows their current Chog, and they can still be left. Migration `AddMatchLifecycle` reclassifies a started-then-cancelled room as `Abandoned`, so rolling it back and forward is lossless.
 - **No presence indicator:** other players can't see who is disconnected (DEC-029); the turn timer handles absent players.
@@ -220,7 +224,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-048 — Operational monitoring** (E07, P1): structured logs, request correlation, readiness and basic game/session metrics; wallet secrets and signatures never logged. Needs product decisions first: which metrics and where they go (e.g. a Prometheus endpoint, or logs only, a new dependency to approve), and alerting (including failed backups, DEC-051).
+1. **STORY-049 — Release checklist and smoke tests** (E07, P1): a documented checklist covering guests, wallet, NFT selection, 2–6 players, reconnect, finish and rollback, which must pass on staging before the public launch. Needs product decisions first: whether a staging environment exists and where (a second VM or another Compose project on the same VM; DEC-049 forbids a shared database), and how much is automated beyond the existing `deploy:verify` and `backup:verify` smoke tests.
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4201`, proxying `/api` to the API on `:5248`.

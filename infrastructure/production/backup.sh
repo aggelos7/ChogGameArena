@@ -11,6 +11,9 @@
 # `offsite` remote (configured by RCLONE_CONFIG_OFFSITE_*), and then old archives are pruned in both
 # places (backup-retention.sh). The archive holds database rows only: no .env, no PostgreSQL role
 # passwords, no certificates, no keys.
+# Alerting (STORY-048, DEC-052): after every successful backup, BACKUP_HEARTBEAT_URL (optional) is pinged, so a
+# monitor such as healthchecks.io alerts when a ping is missed; BACKUP_HEARTBEAT_FAIL_URL (optional) is pinged
+# when a scheduled backup fails. The URLs carry the monitor's token, so they are never logged.
 set -eu -o pipefail
 umask 077
 
@@ -23,6 +26,22 @@ prefix=${PGDATABASE:?PGDATABASE must be set}
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) chog-backup: $*"; }
 fail() { log "ERROR: $*" >&2; exit 1; }
+
+# Pings a heartbeat URL (an environment variable's name); a failed ping is logged and never fails the backup.
+ping_heartbeat() {
+  url=$(printenv "$1" || true)
+  [ -n "$url" ] || return 0
+  if wget -q -T 15 -O /dev/null "$url" 2>/dev/null; then log "pinged $1"; else log "WARNING: pinging $1 failed"; fi
+}
+
+check_heartbeat() {
+  for name in BACKUP_HEARTBEAT_URL BACKUP_HEARTBEAT_FAIL_URL; do
+    case "$(printenv "$name" || true)" in
+      "" | https://* | http://*) ;;
+      *) fail "$name must be an http(s) URL" ;;
+    esac
+  done
+}
 
 require_remote() {
   [ -n "$remote" ] || fail "BACKUP_S3_BUCKET is not set: backups need an off-VM copy (see docs/deployment.md)"
@@ -61,6 +80,7 @@ backup() {
   rclone copyto "$backups/$name" "$remote/$name" || fail "copying $name off-VM failed; it is kept on the VM and nothing was pruned"
   log "copied $name off-VM"
   prune
+  ping_heartbeat BACKUP_HEARTBEAT_URL
 }
 
 # Seconds until the next BACKUP_TIME (HH:MM, UTC); a full day when it is exactly now.
@@ -82,6 +102,7 @@ run() {
   rm -f "$ready"
   require_recipient
   require_remote
+  check_heartbeat
   # Catch a wrong endpoint or key when the stack starts, not at the first backup.
   quick="--retries 1 --low-level-retries 1 --contimeout 10s --timeout 20s"
   { rclone mkdir $quick "$remote" && rclone lsf $quick --max-depth 1 "$remote" >/dev/null; } || fail "cannot reach the off-VM bucket $remote"
@@ -96,6 +117,7 @@ run() {
     else
       wait_seconds=${BACKUP_RETRY_SECONDS:-3600}
       log "backup failed; retrying in ${wait_seconds}s"
+      ping_heartbeat BACKUP_HEARTBEAT_FAIL_URL
     fi
   done
 }
