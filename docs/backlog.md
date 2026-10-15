@@ -742,7 +742,7 @@
 
 #### STORY-049 — Release checklist and smoke tests
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E07
 - **Implementation:** Test guests, wallet, NFT selection, 2-6 players, reconnect, finish and rollback.

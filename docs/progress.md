@@ -1,7 +1,7 @@
 # Progress
 
 Snapshot of where the project stands, for picking work up in a new session. Source of truth for scope is
-`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-15 (STORY-048).
+`docs/backlog.md`; for decisions, `docs/decisions.md`. Last updated 2026-10-15 (STORY-049).
 
 ## Stories done
 
@@ -58,6 +58,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 | STORY-046 | #159 | Frontend hosting and HTTPS (DEC-050): the app stays on nginx (no CDN). `nginx.conf.template` (filled with `PUBLIC_HOSTNAME` only, `NGINX_ENVSUBST_FILTER`) serves only that host: 443 with TLS 1.2/1.3 and HTTP/2, HSTS one year and `upgrade-insecure-requests` on every response (`security-headers.conf`, included again in each location with its own `add_header`), wss for the hub; 80 serves `/.well-known/acme-challenge/` and 301s to `https://PUBLIC_HOSTNAME`; other names get 444 / a refused handshake. `certbot/certbot:v5.8.0` (`letsencrypt` profile) runs `certonly --webroot --keep-until-expiring` every 12 h. `nginx-tls.sh` (entrypoint) starts nginx on a self-signed certificate and reloads within a minute when the issued one appears or renews. Ports 80/443 on all interfaces by default; `WalletAuth` defaults to the host. `deploy:verify` now runs over verified TLS. |
 | STORY-047 | #161 | Encrypted backups and restore (DEC-051): a `backup` service (`backup` profile, `backup.Dockerfile` = `postgres:18.6-alpine3.24` + pinned Alpine `age` and `rclone`, user `postgres`) runs `backup.sh`: daily at `BACKUP_TIME` (03:00 UTC) `pg_dump -Fc` piped into `age` (public-key recipient; the private key never on the VM) into the `backups` volume, `rclone` copy to an S3-compatible bucket (env-only config), then retention (`backup-retention.sh`: 7 newest + newest of the 4 newest weeks) on both. Healthy only once key and bucket check out. `run --rm backup now / list / restore <name|latest>`; restore reads the key from stdin, refuses a non-empty database, and loads in one transaction. Runbook in `docs/deployment.md`; `npm run backup:verify` (CI) backs up, restores into a clean stack from the off-VM copy and checks encryption, secrets, retention and refusals. |
 | STORY-048 | #163 | Operational monitoring (DEC-052): JSON console logs outside Development (scopes, UTC), `X-Request-Id` correlation (nginx `$request_id`, validated, returned, `CorrelationId` log scope), JSON nginx access log without query strings, Docker log rotation (5 × 10 MB) on every service. `GET /metrics` (outside `/api`, internal only): in-house Prometheus writer over `System.Diagnostics.Metrics` (`PrometheusMetrics`), with ASP.NET request and SignalR meters plus the `ChogGames` meter (rooms, matches by outcome via a commit-aware EF interceptor, open rooms from the database, guest sessions, wallet sign-ins, room subscriptions). Readiness public at `/api/health/ready` for an uptime check; the backup service pings optional `BACKUP_HEARTBEAT_URL` / `_FAIL_URL`. A test captures every log line through guest and wallet sign-in and finds no token, signature or challenge. |
+| STORY-049 | #165 | Release checklist and smoke tests (DEC-053): `docs/release-checklist.md`, which every release passes on a separate staging VM before production, with a staging `.env` profile, manual sections (guests, wallet, NFT, 2–6 players, reconnect, finish), the `IMAGE_TAG` rollback drill and a release record. `npm run release:verify` (`tools/release-smoke.mjs`, `RELEASE_BASE_URL`, `RELEASE_CA_FILE`) drives a deployment over the API and the room hub through an in-house WebSocket and SignalR JSON client (`tools/hub-client.mjs`, Node built-ins). It covers guests, character choice, wallet refusal, a six-player room, refused lobby and match commands with nothing changed, a forfeit, a reconnect, and six- and two-player matches to the finish with ranks and stats. `deploy:verify` runs it through nginx over TLS and wss. The dev proxy maps `/api/health/ready` like nginx. |
 
 ## Key architectural decisions
 
@@ -216,6 +217,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **npm:** npm 10.9 crashes on `npm install` of new packages. Use `npx npm@11 install …` (`npm ci` is fine).
 - **Mock NFT ownership** isn't exclusive: every wallet that isn't a fixture sees the same tokens.
 - **Deferred:** WalletConnect (DEC-014) and smart-contract wallet (ERC-1271) sign-in.
+- **No staging VM yet:** the checklist's first full pass on staging (DEC-053) is a launch gate, not done in the repo. The automated part has passed against the dev servers and inside `deploy:verify`.
+- **Release smoke data:** every `release:verify` run leaves eight guests and two completed matches on the target. That's fine on staging, and the reason it never runs against production.
 - **Pending decisions:**
   - DEC-003: Chog Race reactions.
   - DEC-004: merging guest and wallet histories.
@@ -224,7 +227,8 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **STORY-049 — Release checklist and smoke tests** (E07, P1): a documented checklist covering guests, wallet, NFT selection, 2–6 players, reconnect, finish and rollback, which must pass on staging before the public launch. Needs product decisions first: whether a staging environment exists and where (a second VM or another Compose project on the same VM; DEC-049 forbids a shared database), and how much is automated beyond the existing `deploy:verify` and `backup:verify` smoke tests.
+1. **STORY-050 — Race configuration and board** (E08, P1): Chog Race's board of 24–30 spaces, moves of 1–3, a 20-minute cap and a win on reaching the finish. Config validation must reject an unreachable finish, and the mobile board must show 6 pawns. Start with DEC-003 (Chog Race reactions), which is still open, and check whether it blocks this story.
+2. **Before the public launch:** set up the staging VM and pass `docs/release-checklist.md` on it (DEC-053).
 
 Dev environment notes:
 - Start everything with `NX_DAEMON=false npm run start:all`: web on `:4201`, proxying `/api` to the API on `:5248`.
