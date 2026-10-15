@@ -23,6 +23,14 @@
       }
     }
   </p>
+  @if (lastMove(); as move) {
+    <p class="last-move" data-last-move>{{ move }}</p>
+  }
+  @if (yourPhase() === 'Move') {
+    <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
+  } @else if (yourPhase() === 'Play') {
+    <button type="button" class="action" [disabled]="rolling()" (click)="endTurn.emit()" data-end-turn>End turn</button>
+  }
 
   <ol class="track" aria-label="Race track, from start to finish" [style.--columns]="columns()" [attr.data-columns]="columns()">
     @for (spot of spots(); track spot.tile.index) {

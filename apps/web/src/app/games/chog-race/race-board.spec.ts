@@ -29,6 +29,8 @@ const NAMES = ['Alice', 'Bob', 'Carol', 'Dave', 'Erin', 'Frank'];
 describe('Chog Race board model', () => {
   it('reads the board the server sends', () => {
     expect(toRaceBoard(RACE_BOARD)).toBe(RACE_BOARD);
+    const moved = { ...RACE_BOARD, lastMove: { seat: 1, roll: 2, from: 2, landed: 4, to: 6, effect: 'Boost' }, phase: 'Move', winner: 1 };
+    expect(toRaceBoard(moved)).toBe(moved);
   });
 
   it('refuses a state it cannot draw', () => {
@@ -46,6 +48,11 @@ describe('Chog Race board model', () => {
       { rulesVersion: 1, tiles: [{ index: 0, type: 'Normal', to: 0 }], pawns: [] },
       { rulesVersion: 1, tiles, pawns: [{ seat: 1, tile: 28 }] },
       { rulesVersion: 1, tiles, pawns: [{ seat: 'one', tile: 0 }] },
+      { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 30 } },
+      { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, effect: 'Branch' } },
+      { rulesVersion: 1, tiles, pawns: [], lastMove: 'rolled' },
+      { rulesVersion: 1, tiles, pawns: [], phase: 'React' },
+      { rulesVersion: 1, tiles, pawns: [], winner: 'Alice' },
     ]) {
       expect(toRaceBoard(state)).toBeNull();
     }
@@ -172,6 +179,79 @@ describe('Chog Race board', () => {
 
     render(RACE_BOARD, [member('Alice', 1), member('Bob', 2, { isYou: true, isTurn: true })]);
     expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s your turn.');
+  });
+});
+
+describe('Chog Race board moves (STORY-051)', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+  let events: string[];
+
+  function render(board: RaceBoard, members: RoomMember[], rolling = false): void {
+    fixture.componentRef.setInput('board', board);
+    fixture.componentRef.setInput('members', members);
+    fixture.componentRef.setInput('rolling', rolling);
+    fixture.detectChanges();
+  }
+
+  const button = (selector: string) => page.querySelector<HTMLButtonElement>(selector);
+  const lastMove = () => page.querySelector('[data-last-move]')?.textContent?.trim();
+  const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+    events = [];
+    fixture.componentInstance.roll.subscribe(() => events.push('roll'));
+    fixture.componentInstance.endTurn.subscribe(() => events.push('endTurn'));
+  });
+
+  it('offers Roll on your turn in the Move phase', () => {
+    render({ ...RACE_BOARD, phase: 'Move' }, you);
+
+    button('[data-roll]')?.click();
+
+    expect(events).toEqual(['roll']);
+    expect(button('[data-end-turn]')).toBeNull();
+  });
+
+  it('offers End turn on your turn in the Play phase', () => {
+    render({ ...RACE_BOARD, phase: 'Play' }, you);
+
+    button('[data-end-turn]')?.click();
+
+    expect(events).toEqual(['endTurn']);
+    expect(button('[data-roll]')).toBeNull();
+  });
+
+  it('offers nothing on another player’s turn, once the race is over, or while a command is on its way', () => {
+    render({ ...RACE_BOARD, phase: 'Move' }, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+    expect(button('[data-roll]')).toBeNull();
+
+    render({ ...RACE_BOARD, winner: 1 }, you);
+    expect(button('[data-roll]')).toBeNull();
+
+    render({ ...RACE_BOARD, phase: 'Move' }, you, true);
+    expect(button('[data-roll]')?.disabled).toBe(true);
+  });
+
+  it('says what the latest move did', () => {
+    const moved = (lastMove: RaceBoard['lastMove'], extra: Partial<RaceBoard> = {}) => render({ ...RACE_BOARD, lastMove, ...extra }, you);
+
+    moved({ seat: 2, roll: 3, from: 0, landed: 3, to: 3 });
+    expect(lastMove()).toBe('Bob rolled 3 and moved to tile 3.');
+    moved({ seat: 1, roll: 1, from: 3, landed: 4, to: 6, effect: 'Boost' });
+    expect(lastMove()).toBe('You rolled 1, landed on the Boost at tile 4 and jumped to tile 6.');
+    moved({ seat: 2, roll: 3, from: 6, landed: 9, to: 7, effect: 'Setback' });
+    expect(lastMove()).toBe('Bob rolled 3, landed on the Setback at tile 9 and fell back to tile 7.');
+    moved({ seat: 2, roll: 2, from: 0, landed: 2, to: 2, effect: 'Card' });
+    expect(lastMove()).toBe('Bob rolled 2 and landed on the Card tile 2.');
+    moved({ seat: 2, roll: 3, from: 25, landed: 27, to: 27, effect: 'Finish' }, { winner: 2 });
+    expect(lastMove()).toBe('Bob rolled 3, reached the finish and won the race!');
+
+    render(RACE_BOARD, you);
+    expect(lastMove()).toBeUndefined();
   });
 });
 

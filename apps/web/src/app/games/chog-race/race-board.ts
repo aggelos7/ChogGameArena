@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, input, output, signal } from '@angular/core';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
@@ -21,7 +21,8 @@ interface DrawnPawn {
  * The Chog Race board (STORY-050, DEC-054): the track as a serpentine grid, four tiles a row on a phone and up to ten on
  * wider screens, so the whole race is on screen. Each tile shows its number, what it does and the pawns on it, up to all
  * six. Pawns are numbered and coloured by seat, yours outlined and the current player's ringed, and the legend names
- * each player and whose turn it is. It only draws what the server sent; it has no moves of its own.
+ * each player and whose turn it is. It only draws what the server sent. On your turn it offers Roll in the Move phase and
+ * End turn in the Play phase (STORY-051, DEC-055), and says what the latest move did; the server decides every outcome.
  */
 @Component({
   selector: 'app-race-board',
@@ -32,6 +33,10 @@ interface DrawnPawn {
 export class RaceBoardView {
   readonly board = input.required<RaceBoard>();
   readonly members = input.required<RoomMember[]>();
+  /** A command is on its way: the buttons wait for it. */
+  readonly rolling = input(false);
+  readonly roll = output<void>();
+  readonly endTurn = output<void>();
 
   protected readonly label = raceTileLabel;
 
@@ -68,6 +73,34 @@ export class RaceBoardView {
   });
 
   protected readonly turnOf = computed(() => this.players().find((member) => member.isTurn) ?? null);
+
+  /** Your turn's phase, while it's your turn in a live match; null otherwise. */
+  protected readonly yourPhase = computed(() => (this.turnOf()?.isYou ? (this.board().phase ?? null) : null));
+
+  /** What the latest move did, in words: who rolled what, where they landed and where the tile sent them. */
+  protected readonly lastMove = computed(() => {
+    const move = this.board().lastMove;
+    if (!move) {
+      return null;
+    }
+    const member = this.members().find((player) => player.seat === move.seat);
+    const who = member?.isYou ? 'You' : (member?.displayName ?? `Seat ${move.seat}`);
+    const rolled = `${who} rolled ${move.roll}`;
+    switch (move.effect) {
+      case 'Boost':
+        return `${rolled}, landed on the Boost at tile ${move.landed} and jumped to tile ${move.to}.`;
+      case 'Setback':
+        return `${rolled}, landed on the Setback at tile ${move.landed} and fell back to tile ${move.to}.`;
+      case 'Card':
+        return `${rolled} and landed on the Card tile ${move.to}.`;
+      case 'Finish':
+        return this.board().winner === move.seat
+          ? `${rolled}, reached the finish and won the race!`
+          : `${rolled} and reached the finish.`;
+      default:
+        return `${rolled} and moved to tile ${move.to}.`;
+    }
+  });
 
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;

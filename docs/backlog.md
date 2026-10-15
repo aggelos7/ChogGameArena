@@ -774,7 +774,7 @@
 
 #### STORY-051 — Race movement and turn phases
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Implement move, landing tile, optional card and end-turn phases.

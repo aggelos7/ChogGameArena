@@ -885,6 +885,29 @@ describe('Room page', () => {
       expect(element().querySelector('[data-started]')?.classList).toContain('visually-hidden');
     });
 
+    it('rolls and ends a Chog Race turn on your turn (STORY-051)', () => {
+      const started: Room = {
+        ...room,
+        version: 4,
+        gameType: 'chog-race',
+        status: 'Active',
+        state: { ...RACE_BOARD, phase: 'Move' },
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+      };
+      load(started);
+
+      element().querySelector<HTMLButtonElement>('[data-roll]')?.click();
+      const roll = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(roll.request.body).toMatchObject({ expectedVersion: 4, type: 'ROLL', payload: {} });
+      roll.flush({ actionId: roll.request.body.actionId, type: 'ROLL', version: 5, currentVersion: 5, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush({ ...started, version: 5, state: { ...RACE_BOARD, phase: 'Play' } });
+      fixture.detectChanges();
+
+      element().querySelector<HTMLButtonElement>('[data-end-turn]')?.click();
+      const ended = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(ended.request.body).toMatchObject({ expectedVersion: 5, type: 'END_TURN', payload: {} });
+    });
+
     it('keeps the final Chog Race board once the game is over', () => {
       load({
         ...room,
