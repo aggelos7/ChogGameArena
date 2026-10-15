@@ -761,7 +761,7 @@
 
 #### STORY-050 — Race configuration and board
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Define 24-30 spaces, movement 1-3, max 20 minutes, win by reaching finish.

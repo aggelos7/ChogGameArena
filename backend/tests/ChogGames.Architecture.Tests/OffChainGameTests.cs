@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace ChogGames.Architecture.Tests;
 
 /// <summary>
-/// STORY-035, DEC-010, DEC-037: gameplay is off-chain. MON are fictional game points, so no game module touches
+/// STORY-035, STORY-050, DEC-010, DEC-037, DEC-054: gameplay is off-chain. MON are fictional game points, so no game module touches
 /// wallets, the chain, the network or crypto libraries, and no real token can ever move.
 /// </summary>
 public class OffChainGameTests
@@ -45,6 +45,7 @@ public class OffChainGameTests
             .ToList();
 
         Assert.Contains(files, path => Path.GetFileName(path) == "LifeRules.cs");
+        Assert.Contains(files, path => Path.GetFileName(path) == "RaceRules.cs");
         Assert.Empty(files.SelectMany(path =>
             TraitAccessRules.FindViolations(Path.GetRelativePath(Src, path), File.ReadAllText(path), Forbidden, Reason)));
     }
