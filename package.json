@@ -17,7 +17,8 @@
     "deps:down": "docker compose -f infrastructure/docker-compose.yml down",
     "deps:verify": "node tools/compose-smoke.mjs",
     "db:migrate": "node tools/db-migrate.mjs",
-    "deploy:verify": "node tools/deploy-smoke.mjs"
+    "deploy:verify": "node tools/deploy-smoke.mjs",
+    "backup:verify": "node tools/backup-smoke.mjs"
   },
   "dependencies": {
     "@angular/common": "22.2.1",

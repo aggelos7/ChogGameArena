@@ -23,3 +23,5 @@ infrastructure
 !infrastructure/production/nginx.conf.template
 !infrastructure/production/security-headers.conf
 !infrastructure/production/nginx-tls.sh
+!infrastructure/production/backup.sh
+!infrastructure/production/backup-retention.sh

@@ -53,6 +53,7 @@ test('no private keys or access tokens are committed', () => {
     /\b(gh[pousr]_[A-Za-z0-9]{36,})\b/, // GitHub tokens
     /\bAKIA[0-9A-Z]{16}\b/, // AWS access key id
     /\b0x[a-fA-F0-9]{64}\b/, // raw 32-byte hex, e.g. a wallet private key
+    /AGE-SECRET-KEY-1[0-9A-Z]{58}/, // an age private key (backup decryption, STORY-047)
   ];
   const offenders = files.flatMap((file) => patterns.filter((p) => p.test(read(file))).map((p) => `${file} matches ${p}`));
   assert.deepEqual(offenders, []);
