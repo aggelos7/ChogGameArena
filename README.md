@@ -10,7 +10,7 @@ Nx is the frontend monorepo/task orchestration tool. Angular lives in `apps/web`
 apps/web/        Angular 22 SPA (standalone, zoneless, esbuild, Vitest)
 libs/            Shared browser-side TypeScript libraries
 backend/         Native .NET 8 solution (ChogGames.sln: Api, Core, Games.*, Infrastructure)
-infrastructure/  Docker Compose for local PostgreSQL and Redis (deployment assets later)
+infrastructure/  Docker Compose for local PostgreSQL and Redis and the production stack (`production/`)
 docs/            Requirements, architecture, backlog, decisions
 tools/           Workspace scripts and checks
 ```
@@ -75,20 +75,23 @@ To wipe local data: `docker compose -f infrastructure/docker-compose.yml down -v
 
 ### Production-like deployment (single VM)
 
-`infrastructure/production/docker-compose.yml` runs the whole stack on one Linux VM (STORY-045, DEC-049): nginx serving the built web app and proxying `/api` (REST and the SignalR WebSocket) on one origin, the API, a one-shot `migrate` job (an EF Core migrations bundle that runs before the API starts), PostgreSQL and Redis. Only nginx publishes a port (`127.0.0.1:8080` by default); data lives in the `postgres-data` and `redis-data` volumes. Images: `infrastructure/production/api.Dockerfile` (targets `api` and `migrate`) and `web.Dockerfile`, built from the repository root (`.dockerignore`). Runbook: `docs/deployment.md`.
+`infrastructure/production/docker-compose.yml` runs the whole stack on one Linux VM (STORY-045, DEC-049): nginx serving the built web app and proxying `/api` (REST and the SignalR WebSocket) on one origin, the API, a one-shot `migrate` job (an EF Core migrations bundle that runs before the API starts), PostgreSQL and Redis. Only nginx publishes ports: 443 serves the app over HTTPS for `PUBLIC_HOSTNAME` only (HSTS for one year, `upgrade-insecure-requests`, TLS 1.2+, wss for the hub), and 80 answers the Let's Encrypt challenge and redirects to HTTPS (STORY-046, DEC-050). The `certbot` service (`letsencrypt` profile) obtains and renews the certificate; nginx starts on a self-signed one and switches within a minute. Data lives in the `postgres-data`, `redis-data` and `letsencrypt` volumes. Images: `infrastructure/production/api.Dockerfile` (targets `api` and `migrate`) and `web.Dockerfile`, built from the repository root (`.dockerignore`). Runbook: `docs/deployment.md`.
 
 ```bash
 cp infrastructure/production/.env.example infrastructure/production/.env   # chmod 600; set the values below
 docker compose -f infrastructure/production/docker-compose.yml up -d --build --wait
-npm run deploy:verify   # smoke test: builds an isolated copy on port 18081, checks app, API, hub and a restart, then cleans up
+npm run deploy:verify   # smoke test: builds an isolated copy on ports 18081/18443, checks HTTPS, app, API, wss hub, redirect and a restart, then cleans up
 ```
 
 | Setting (`infrastructure/production/.env`) | Default | Notes |
 |---|---|---|
 | `POSTGRES_PASSWORD` | *(required)* | letters and digits only (`openssl rand -hex 24`) |
-| `WALLET_AUTH_DOMAIN` / `WALLET_AUTH_URI` | *(required)* | the web app's address as users see it (`WalletAuth:Domain`/`Uri`) |
+| `PUBLIC_HOSTNAME` | *(required)* | the one host name served over HTTPS; its DNS must point at the VM |
+| `COMPOSE_PROFILES` | `letsencrypt` (in `.env.example`) | runs certbot; without it nginx serves a self-signed certificate |
+| `CERTBOT_EMAIL` | *(none)* | optional Let's Encrypt account contact |
+| `WALLET_AUTH_DOMAIN` / `WALLET_AUTH_URI` | `PUBLIC_HOSTNAME` / `https://PUBLIC_HOSTNAME` | `WalletAuth:Domain`/`Uri`; override only for a non-standard port |
 | `POSTGRES_DB` / `POSTGRES_USER` | `choggames` | |
-| `HTTP_BIND` / `HTTP_PORT` | `127.0.0.1` / `8080` | where nginx listens; loopback until HTTPS (STORY-046) |
+| `HTTP_BIND` / `HTTP_PORT` / `HTTPS_PORT` | `0.0.0.0` / `80` / `443` | where nginx listens |
 | `MONAD_RPC_URL` | `https://rpc.monad.xyz` | `Nfts:Monad:RpcUrl` |
 | `CHOG_LIFE_STATUS` | `ComingSoon` | `Games:Items:0:Status` |
 | `IMAGE_PREFIX` / `IMAGE_TAG` | `chog-game-arena` / `local` | image names, for releases and rollbacks |

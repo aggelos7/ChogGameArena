@@ -72,7 +72,7 @@ Use stable IDs, indexes on room code, match status and wallet/token identity. Mi
 - **Caching:** Local Nx cache for deterministic frontend tasks; backend tasks must not be cached until inputs/outputs and correctness are verified. Nx Cloud is not required.
 - **Dependency direction:** Angular libs depend inward on shared contracts; browser code never imports backend C# code. Share API contracts through OpenAPI-generated TypeScript clients or explicitly maintained schemas, not runtime coupling.
 - **CI:** GitHub Actions installs pinned Node.js and .NET SDK versions, uses `npm ci`, runs frontend Nx targets, then runs `dotnet` restore/build/test. Nx affected optimizations may be added after baseline full checks work.
-- **Deployment:** Docker builds compile frontend and backend in build stages; production runs Nginx/static Angular assets and .NET runtime containers. Nx/Node are not required on the VM host at runtime. PostgreSQL, Redis, SignalR, HTTPS/WSS and Docker Compose topology do not change.
+- **Deployment:** Docker builds compile frontend and backend in build stages; production runs Nginx/static Angular assets (HTTPS with Let's Encrypt via certbot, DEC-050) and .NET runtime containers. Nx/Node are not required on the VM host at runtime. PostgreSQL, Redis, SignalR, HTTPS/WSS and Docker Compose topology do not change.
 
 ### Repository convention
 
