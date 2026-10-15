@@ -1,0 +1,62 @@
+<svg
+  [attr.viewBox]="'0 0 ' + layout().width + ' ' + layout().height"
+  aria-hidden="true"
+  focusable="false"
+  data-drawing
+>
+  <rect class="ground" [attr.width]="layout().width" [attr.height]="layout().height" rx="16" />
+  @for (road of layout().roads; track road.from + '-' + road.to) {
+    <path [class]="'road lane-' + road.lane.toLowerCase()" [attr.d]="road.path" [attr.data-road]="road.from + '-' + road.to" />
+  }
+  @for (name of layout().laneNames; track $index) {
+    <text [class]="'lane-title ' + name.route.toLowerCase()" [attr.x]="name.x" [attr.y]="name.y" text-anchor="middle">
+      {{ name.route }}
+    </text>
+  }
+  @for (spot of layout().spots; track spot.tile.index) {
+    <g
+      [class]="'spot type-' + spot.tile.type.toLowerCase() + ' lane-' + spot.tile.lane.toLowerCase()"
+      [class.last-stop]="lastStop() === spot.tile.index"
+      [class.choice]="choice().has(spot.tile.index)"
+      [attr.transform]="'translate(' + spot.x + ' ' + spot.y + ')'"
+      [attr.data-spot]="spot.tile.index"
+      [attr.data-type]="spot.tile.type"
+      [attr.data-lane]="spot.tile.lane"
+    >
+      <rect
+        class="spot-face"
+        [attr.x]="-spotWidth / 2"
+        [attr.y]="-spotHeight / 2"
+        [attr.width]="spotWidth"
+        [attr.height]="spotHeight"
+        rx="12"
+      />
+      <text class="spot-number" [attr.x]="-spotWidth / 2 + 5" [attr.y]="-spotHeight / 2 + 11">{{ spot.tile.index }}</text>
+      @if (icon(spot.tile); as glyph) {
+        <g class="icon" transform="translate(0 -5)">
+          @if (glyph.fill) {
+            <path class="icon-fill" [attr.d]="glyph.fill" />
+          }
+          @if (glyph.stroke) {
+            <path class="icon-stroke" [attr.d]="glyph.stroke" />
+          }
+        </g>
+      }
+      <text class="spot-label" y="19" text-anchor="middle">{{ label(spot.tile) }}</text>
+    </g>
+  }
+  @for (pawn of pawns(); track pawn.seat) {
+    <g
+      class="board-pawn"
+      [style.transform]="'translate(' + pawn.x + 'px, ' + pawn.y + 'px)'"
+      [attr.data-board-pawn]="pawn.seat"
+      [attr.data-at]="pawn.tile"
+    >
+      @if (pawn.isTurn) {
+        <circle class="turn-ring" r="14" data-turn-ring />
+      }
+      <circle class="pawn-body" [class.you]="pawn.isYou" r="10" [attr.fill]="pawn.color" />
+      <text class="pawn-seat" text-anchor="middle" dy="4">{{ pawn.seat }}</text>
+    </g>
+  }
+</svg>

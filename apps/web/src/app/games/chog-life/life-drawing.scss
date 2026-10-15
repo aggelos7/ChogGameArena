@@ -1,0 +1,185 @@
+:host {
+  --safe: #13703a;
+  --safe-surface: #e8f5ec;
+  --degen: #b4400b;
+  --reward: #13703a;
+  --loss: #8a1c1c;
+  --loss-surface: #fbe7e7;
+  --event: #5b2bd6;
+  --event-surface: #efe9fc;
+  --ground: #f3efe4;
+  --road: #c9bfa6;
+}
+
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+// Given a height beside the players, the board fills it, centred.
+:host(.fill),
+:host(.fill) svg {
+  height: 100%;
+}
+
+.ground {
+  fill: var(--ground);
+}
+
+.road {
+  fill: none;
+  stroke: var(--road);
+  stroke-width: 12;
+  stroke-linecap: round;
+}
+
+.road.lane-safe {
+  stroke: var(--safe);
+  stroke-opacity: 0.55;
+}
+
+.road.lane-degen {
+  stroke: var(--degen);
+  stroke-opacity: 0.55;
+}
+
+.lane-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  paint-order: stroke;
+  stroke: var(--ground);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+
+.lane-title.safe {
+  fill: var(--safe);
+}
+
+.lane-title.degen {
+  fill: var(--degen);
+}
+
+.spot-face {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.spot {
+  --ink: var(--text-muted);
+}
+
+.spot.type-reward {
+  --ink: var(--reward);
+
+  .spot-face {
+    fill: var(--safe-surface);
+    stroke: var(--reward);
+  }
+}
+
+.spot.type-loss {
+  --ink: var(--loss);
+
+  .spot-face {
+    fill: var(--loss-surface);
+    stroke: var(--loss);
+  }
+}
+
+.spot.type-event {
+  --ink: var(--event);
+
+  .spot-face {
+    fill: var(--event-surface);
+    stroke: var(--event);
+  }
+}
+
+.spot.type-branch {
+  --ink: var(--text);
+
+  .spot-face {
+    stroke: var(--text);
+    stroke-width: 2;
+  }
+}
+
+.spot.type-start,
+.spot.type-finish {
+  --ink: #fff;
+
+  .spot-face {
+    fill: var(--text);
+    stroke: var(--text);
+  }
+
+  .spot-number {
+    fill: rgb(255 255 255 / 70%);
+  }
+}
+
+.spot.last-stop .spot-face {
+  stroke: var(--focus);
+  stroke-width: 3;
+}
+
+.spot.choice .spot-face {
+  stroke: var(--focus);
+  stroke-width: 3;
+  stroke-dasharray: 6 3;
+}
+
+.spot-number {
+  font-size: 9px;
+  fill: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spot-label {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--ink);
+}
+
+.icon-fill {
+  fill: var(--ink);
+}
+
+.icon-stroke {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.board-pawn {
+  transition: transform 180ms ease-in-out;
+}
+
+.pawn-body {
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.pawn-body.you {
+  stroke: var(--text);
+  stroke-width: 2.5;
+}
+
+.turn-ring {
+  fill: none;
+  stroke: var(--focus);
+  stroke-width: 2.5;
+}
+
+.pawn-seat {
+  font-size: 11px;
+  font-weight: 700;
+  fill: #fff;
+}

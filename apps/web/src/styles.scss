@@ -82,6 +82,12 @@ button:disabled {
   border: 0;
 }
 
+/* A page showing a game board gets more of a wide screen, so the whole board fits on it (DEC-048). The element name
+   outweighs the shell component's own scoped rule. */
+main.shell-main:has(.game-wide) {
+  max-width: 2400px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

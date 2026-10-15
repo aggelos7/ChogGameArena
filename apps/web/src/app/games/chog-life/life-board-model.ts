@@ -415,3 +415,180 @@ export const SEAT_COLORS: readonly string[] = ['#5b2bd6', '#0a6c8f', '#b4400b', 
 export function seatColor(seat: number): string {
   return SEAT_COLORS[(seat - 1) % SEAT_COLORS.length] ?? SEAT_COLORS[0];
 }
+
+/** A tile placed on the illustrated board (STORY-064, DEC-048): its centre, in board units. */
+export interface LifeSpot {
+  tile: LifeTile;
+  x: number;
+  y: number;
+}
+
+/** The road from one tile to the next as an SVG path, coloured by the lane it runs on. */
+export interface LifeRoad {
+  from: number;
+  to: number;
+  lane: LifeLane;
+  path: string;
+}
+
+/** The illustrated board: its size in board units, every tile by index, the roads between them and each fork's lane names. */
+export interface LifeLayout {
+  width: number;
+  height: number;
+  spots: LifeSpot[];
+  roads: LifeRoad[];
+  laneNames: { route: LifeRoute; x: number; y: number }[];
+}
+
+/** A tile's size on the illustrated board, in board units. */
+export const SPOT_WIDTH = 64;
+export const SPOT_HEIGHT = 54;
+const COLUMNS = 4;
+const columnX = (column: number): number => 54 + column * 84;
+/** How far each lane runs from the middle of the board: 70, or further on a board with more tiles to a row. */
+const laneSpread = (columns: number): number => Math.max(70, ((columns - 1) * 84) / 4);
+/** Room above the first row and below the last for pawns standing on a tile's edge. */
+const MARGIN = 44;
+const ROW_GAP = 80;
+const LANE_GAP = 72;
+const LANE_NAME_GAP = 44;
+const U_TURN = 48;
+
+/** Which way the illustrated board runs: down the screen on phones, across it on wide screens (DEC-048). */
+export type LifeOrientation = 'vertical' | 'horizontal';
+
+/**
+ * The illustrated board laid out from the server's tile graph (STORY-064, DEC-048): the main track in rows of `columns` tiles,
+ * left to right and then right to left, and each fork's Safe and Degen lanes as two columns side by side until they join
+ * the main track again, so lanes of any length fit. Horizontal, the same board is turned on its side: the track winds
+ * through columns from left to right (four by default), and each fork's lanes run as two rows with their names between them. Null
+ * when a tile can't be placed because no route reaches it.
+ */
+export function lifeLayout(tiles: LifeTile[], orientation: LifeOrientation = 'vertical', columns = COLUMNS): LifeLayout | null {
+  const width = columnX(columns - 1) + 54;
+  const laneX: Record<LifeRoute, number> = { Safe: width / 2 - laneSpread(columns), Degen: width / 2 + laneSpread(columns) };
+  const spots = new Map<number, LifeSpot>();
+  const laneNames: LifeLayout['laneNames'] = [];
+  // Roads into and out of a fork's lanes cross more of a wider board, so they get a little more room to bend.
+  const bend = columns > COLUMNS ? 24 : 0;
+  let y = MARGIN - ROW_GAP;
+  let column = 0;
+  let direction = 1;
+  let previous: LifeRow['kind'] | null = null;
+  for (const row of lifeRows(tiles)) {
+    if (row.kind === 'main') {
+      const next = column + direction;
+      if (previous !== 'main' || next < 0 || next >= columns) {
+        // A new row: after a full row the track turns back; after a fork it carries on the way it was going.
+        if (previous === 'main') {
+          direction = -direction;
+        }
+        column = direction > 0 ? 0 : columns - 1;
+        y += ROW_GAP + (previous === 'fork' ? bend : 0);
+      } else {
+        column = next;
+      }
+      spots.set(row.tile.index, { tile: row.tile, x: columnX(column), y });
+    } else if (row.kind === 'lanes') {
+      y += LANE_NAME_GAP + bend;
+      laneNames.push({ route: 'Safe', x: laneX.Safe, y }, { route: 'Degen', x: laneX.Degen, y });
+    } else {
+      y += previous === 'lanes' ? LANE_NAME_GAP : LANE_GAP;
+      for (const [route, tile] of [['Safe', row.safe], ['Degen', row.degen]] as const) {
+        if (tile) {
+          spots.set(tile.index, { tile, x: laneX[route], y });
+        }
+      }
+    }
+    previous = row.kind;
+  }
+  if (spots.size !== tiles.length) {
+    return null;
+  }
+  const placed = [...spots.values()].sort((a, b) => a.tile.index - b.tile.index);
+  const roads: LifeRoad[] = [];
+  for (const from of placed) {
+    for (const link of [from.tile.next, from.tile.safeNext, from.tile.degenNext]) {
+      const to = link === undefined ? undefined : spots.get(link);
+      if (to) {
+        roads.push({ from: from.tile.index, to: to.tile.index, lane: to.tile.lane !== 'Main' ? to.tile.lane : from.tile.lane, path: road(from, to) });
+      }
+    }
+  }
+  const vertical: LifeLayout = { width, height: y + MARGIN, spots: placed, roads, laneNames };
+  return orientation === 'vertical' ? vertical : turned(vertical);
+}
+
+/** The smallest scale the horizontal board is drawn at when filling a space, so its tiles stay readable. */
+const LEAST_SCALE = 0.9;
+
+/**
+ * The horizontal board that fills most of a space of `width` × `height` pixels (DEC-048): from 4 to 9 tiles to a column,
+ * the one whose drawing covers the most of it while its tiles are drawn at least at `LEAST_SCALE`, and the fewest tiles
+ * to a column when two cover alike. When none is that large, the one drawn largest. Null when the graph can't be laid out.
+ */
+export function fittedLayout(tiles: LifeTile[], width: number, height: number): LifeLayout | null {
+  const options: { layout: LifeLayout; scale: number; area: number }[] = [];
+  for (let columns = 4; columns <= 9; columns++) {
+    const layout = lifeLayout(tiles, 'horizontal', columns);
+    if (!layout) {
+      return null;
+    }
+    const scale = Math.min(width / layout.width, height / layout.height);
+    options.push({ layout, scale, area: scale * scale * layout.width * layout.height });
+  }
+  const readable = options.filter((option) => option.scale >= LEAST_SCALE);
+  const candidates = readable.length > 0 ? readable : options;
+  const size = (option: (typeof options)[number]): number => (readable.length > 0 ? option.area : option.scale);
+  return candidates.reduce((best, option) => (size(option) > size(best) * 1.01 ? option : best)).layout;
+}
+
+/** The vertical board turned on its side: every point mirrored across the diagonal, with each fork's lane names moved between its two lanes. */
+function turned(board: LifeLayout): LifeLayout {
+  return {
+    width: board.height,
+    height: board.width,
+    spots: board.spots.map((spot) => ({ tile: spot.tile, x: spot.y, y: spot.x })),
+    roads: board.roads.map((road) => ({ ...road, path: road.path.replace(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g, '$2 $1') })),
+    laneNames: board.laneNames.map((name) => {
+      // A name goes by the first tile of its lane, which sits right under it on the vertical board.
+      const first = board.spots.find((spot) => spot.tile.lane === name.route && spot.y > name.y);
+      return {
+        route: name.route,
+        x: first?.y ?? name.y,
+        // Safe runs above Degen: its name goes under the Safe lane, Degen's over the Degen lane.
+        y: name.route === 'Safe' ? name.x + SPOT_HEIGHT / 2 + 14 : name.x - SPOT_HEIGHT / 2 - 7,
+      };
+    }),
+  };
+}
+
+/** A straight road along a row or a lane, a U-turn at the end of a row, or an S-bend into and out of a fork. */
+function road(a: LifeSpot, b: LifeSpot): string {
+  if (a.y === b.y || (a.x === b.x && (a.tile.lane !== 'Main' || b.tile.lane !== 'Main'))) {
+    return `M${a.x} ${a.y} L${b.x} ${b.y}`;
+  }
+  if (a.x === b.x) {
+    const out = a.x > columnX(0) ? U_TURN : -U_TURN;
+    return `M${a.x} ${a.y} C${a.x + out} ${a.y} ${b.x + out} ${b.y} ${b.x} ${b.y}`;
+  }
+  const middle = (a.y + b.y) / 2;
+  return `M${a.x} ${a.y} C${a.x} ${middle} ${b.x} ${middle} ${b.x} ${b.y}`;
+}
+
+/**
+ * Where the `i`th of `count` pawns on a tile stands, from the tile's centre: up to three along its top edge, then up to
+ * three along its bottom edge, each row centred.
+ */
+export function pawnOffset(i: number, count: number): { x: number; y: number } {
+  const top = Math.min(count, 3);
+  const inRow = i < 3 ? top : count - 3;
+  const place = i < 3 ? i : i - 3;
+  const spacing = inRow === 2 ? 24 : 20;
+  return { x: (place - (inRow - 1) / 2) * spacing, y: i < 3 ? -SPOT_HEIGHT / 2 : SPOT_HEIGHT / 2 };
+}
+
+/** What a tile says on the illustrated board, short enough to fit: "+20 MON", "Rug pull", "Fork". */
+export function spotLabel(tile: LifeTile): string {
+  return tile.type === 'Branch' ? 'Fork' : tileLabel(tile);
+}

@@ -222,3 +222,13 @@ h2 {
   color: var(--text-muted);
   font-size: 0.875rem;
 }
+
+// A live game's title and details, beside the board on wide screens (DEC-048).
+.game-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+}
+
+.game-header .hint {
+  margin: 0 0 0.75rem;
+}

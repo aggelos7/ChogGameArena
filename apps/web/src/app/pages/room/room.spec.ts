@@ -581,6 +581,45 @@ describe('Room page', () => {
       expect(board()?.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s your turn.');
     });
 
+    it('hides the invite and the lobby list while the board shows the players, but not a dropped live connection', () => {
+      load({ ...room, state: FORK_BOARD });
+      expect(element().querySelector('[data-invite-link]')).not.toBeNull();
+      expect(element().querySelector('[data-list="members"]')).not.toBeNull();
+
+      const started: Room = {
+        ...room,
+        version: 2,
+        status: 'Active',
+        state: FORK_BOARD,
+        turnEndsAt: new Date(Date.now() + 20_000).toISOString(),
+        turnSeconds: 25,
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      };
+      changed(started);
+      live.events.next({ type: 'status', status: 'live' });
+      fixture.detectChanges();
+      // The title and your Chog go beside the board, and the turn timer over it.
+      expect(Array.from(element().querySelectorAll('h1')).map((h) => h.closest('.side') !== null)).toEqual([true]);
+      expect(element().querySelector('[data-board] .side .game-header')?.textContent).toContain('You’re playing as');
+      expect(element().querySelector('[data-board] .stage app-turn-timer')).not.toBeNull();
+      expect(element().querySelector('[data-invite-link]')).toBeNull();
+      expect(element().querySelector('[data-list="members"]')).toBeNull();
+      expect(element().querySelector('.match')?.classList).toContain('game-wide');
+      // The banner stays for screen readers, and the live status says nothing while all is well.
+      expect(element().querySelector('[data-started]')?.classList).toContain('visually-hidden');
+      expect(liveStatus()?.textContent?.trim()).toBe('');
+
+      live.events.next({ type: 'status', status: 'offline' });
+      fixture.detectChanges();
+      expect(liveStatus()?.textContent).toContain('Live updates are off');
+      expect(maybeButton('Refresh')).toBeDefined();
+
+      // A player who left has no board, so the lobby list shows who is still playing.
+      changed({ ...started, version: 3, members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, hasLeft: true })] });
+      expect(element().querySelector('[data-list="members"]')).not.toBeNull();
+      expect(element().querySelector('[data-invite-link]')).toBeNull();
+    });
+
     it('rolls on your turn and shows the room as the server left it', () => {
       const started: Room = {
         ...room,
