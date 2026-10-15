@@ -130,9 +130,9 @@ jobs:
       - name: Validate production Compose configuration
         env:
           POSTGRES_PASSWORD: ci-only-password
-          WALLET_AUTH_DOMAIN: localhost:8080
-          WALLET_AUTH_URI: http://localhost:8080
+          PUBLIC_HOSTNAME: play.example.com
+          COMPOSE_PROFILES: letsencrypt
         run: docker compose -f infrastructure/production/docker-compose.yml config --quiet
 
-      - name: Production stack smoke test (build, serve through nginx, data survives restart)
+      - name: Production stack smoke test (build, serve over HTTPS through nginx, data survives restart)
         run: npm run deploy:verify

@@ -703,7 +703,7 @@
 
 #### STORY-046 — Frontend hosting and HTTPS
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E07
 - **Implementation:** Build static frontend for CDN or reverse proxy with HTTPS and WebSocket proxy.

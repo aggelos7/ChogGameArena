@@ -1,6 +1,8 @@
-# Production-like stack on one Linux VM (STORY-045, DEC-049): nginx (web app + /api proxy), the API,
-# a one-shot migration job, PostgreSQL and Redis. Only nginx publishes a port; the rest share an
-# internal network. Data lives in named volumes, so recreating containers keeps it.
+# Production-like stack on one Linux VM (STORY-045, DEC-049): nginx (web app + /api proxy over HTTPS),
+# the API, a one-shot migration job, PostgreSQL and Redis, plus certbot for the Let's Encrypt
+# certificate in the `letsencrypt` profile (STORY-046, DEC-050; .env.example turns it on). Only nginx
+# publishes ports (80 and 443); the rest share an internal network. Data lives in named volumes, so
+# recreating containers keeps it.
 # Usage: copy infrastructure/production/.env.example to infrastructure/production/.env (git-ignored,
 # chmod 600), set the values, then:
 #   docker compose -f infrastructure/production/docker-compose.yml up -d --build --wait
@@ -73,8 +75,10 @@ services:
       # which overwrites both headers, can reach it.
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       Database__ConnectionString: Host=postgres;Port=5432;Database=${POSTGRES_DB:-choggames};Username=${POSTGRES_USER:-choggames};Password=${POSTGRES_PASSWORD}
-      WalletAuth__Domain: ${WALLET_AUTH_DOMAIN:?WALLET_AUTH_DOMAIN must be set in infrastructure/production/.env (see .env.example)}
-      WalletAuth__Uri: ${WALLET_AUTH_URI:?WALLET_AUTH_URI must be set in infrastructure/production/.env (see .env.example)}
+      # The address users open; wallets show it on sign-in (DEC-015). Override only for a
+      # non-standard port (the smoke test).
+      WalletAuth__Domain: ${WALLET_AUTH_DOMAIN:-${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}}
+      WalletAuth__Uri: ${WALLET_AUTH_URI:-https://${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}}
       Nfts__Monad__RpcUrl: ${MONAD_RPC_URL:-https://rpc.monad.xyz}
       Games__Items__0__Status: ${CHOG_LIFE_STATUS:-ComingSoon}
     networks: [backend]
@@ -90,12 +94,50 @@ services:
       context: ../..
       dockerfile: infrastructure/production/web.Dockerfile
     restart: unless-stopped
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}
     ports:
-      # Loopback by default until HTTPS (STORY-046); set HTTP_BIND=0.0.0.0 to expose it.
-      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80"
+      # Port 80 only answers the ACME challenge and redirects to HTTPS.
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+      - "${HTTP_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+    volumes:
+      # Written by certbot only; nginx reads the certificate and serves the challenge tokens.
+      - letsencrypt:/etc/letsencrypt:ro
+      - acme-webroot:/var/www/certbot:ro
     networks: [backend]
     depends_on:
       api:
+        condition: service_healthy
+
+  # Obtains the certificate for PUBLIC_HOSTNAME (HTTP-01 through nginx's webroot), then checks twice a
+  # day and renews it within 30 days of expiry; nginx picks up a new certificate within a minute.
+  # Needs PUBLIC_HOSTNAME's DNS pointing at the VM and port 80 reachable from the internet.
+  certbot:
+    image: certbot/certbot:v5.8.0
+    profiles: [letsencrypt]
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        trap exit TERM
+        if [ -n "$$CERTBOT_EMAIL" ]; then contact="--email $$CERTBOT_EMAIL"; else contact=--register-unsafely-without-email; fi
+        while :; do
+          if certbot certonly --webroot -w /var/www/certbot --cert-name chog -d "$$PUBLIC_HOSTNAME" \
+              --non-interactive --agree-tos --no-eff-email $$contact --keep-until-expiring; then
+            wait_seconds=43200
+          else
+            wait_seconds=3600
+          fi
+          sleep "$$wait_seconds" & wait $$!
+        done
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - acme-webroot:/var/www/certbot
+    depends_on:
+      web:
         condition: service_healthy
 
 networks:
@@ -104,3 +146,5 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  letsencrypt:
+  acme-webroot:

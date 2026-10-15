@@ -1,6 +1,7 @@
 # Web image (STORY-045, DEC-049). Build context: the repository root.
 # Builds the Angular app with Nx, then serves it with nginx, which also proxies /api (REST and the
-# SignalR hub) to the API container, so the app and the API share one origin (DEC-013).
+# SignalR hub) to the API container, so the app and the API share one origin (DEC-013). nginx serves
+# HTTPS for PUBLIC_HOSTNAME (STORY-046, DEC-050); openssl makes its self-signed start-up certificate.
 
 ARG NODE=node:22.23.3-alpine3.24
 ARG NGINX=nginx:1.30.6-alpine3.24
@@ -15,8 +16,12 @@ COPY apps/web ./apps/web
 RUN npx nx build web --configuration=production --output-style=static
 
 FROM ${NGINX} AS web
-COPY infrastructure/production/nginx.conf /etc/nginx/conf.d/default.conf
+RUN apk add --no-cache openssl
+ENV NGINX_ENVSUBST_FILTER=^PUBLIC_HOSTNAME$
+COPY infrastructure/production/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY infrastructure/production/security-headers.conf /etc/nginx/snippets/security-headers.conf
+COPY --chmod=755 infrastructure/production/nginx-tls.sh /docker-entrypoint.d/40-chog-tls.sh
 COPY --from=build /src/dist/apps/web/browser /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 80 443
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=6 \
-  CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+  CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]

@@ -11,7 +11,7 @@ This file adds the working rules that have proven themselves in this repo.
 - **Git and GitHub:** commit, push, open PRs or create issues only when the user asks. After a PR, stop. The user merges and then says "proceed".
   - Commit messages start with `STORY-<nnn>:` and end with the `Co-Authored-By` line.
   - PRs target `develop`, use `.github/pull_request_template.md`, contain `Closes #<issue>`, and end with the Claude Code line.
-- **New stories:** take the next free number, go in the right epic of `docs/backlog.md`, and get a GitHub issue in the same body format with labels `story`, `epic:E0x`, `priority:Px` and the epic milestone. Commit them on the current story's branch.
+- **New stories:** take the next free number, go in the right epic of `docs/backlog.md`, and get a GitHub issue in the same body format with labels `story`, `epic:E0x`, `priority:Px` and the epic milestone. Add the issue to the "Chog Game Arena" project (`gh project item-add 1 --owner aggelos7 --url <issue url>`) with Status `Todo`. Commit them on the current story's branch.
 - **Finishing a story:**
   - Set the story to `Done` only after every acceptance criterion is verified.
   - Update the README sections for API, config and migration changes.
