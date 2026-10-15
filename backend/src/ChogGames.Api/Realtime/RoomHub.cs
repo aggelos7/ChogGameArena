@@ -2,6 +2,7 @@ using System.Security.Claims;
 using ChogGames.Api.Rooms;
 using static ChogGames.Api.Rooms.RoomEndpoints;
 using ChogGames.Core.Rooms;
+using ChogGames.Infrastructure.Monitoring;
 using ChogGames.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -29,7 +30,8 @@ public interface IRoomClient
 /// subscribing returns the current one, so a client that missed updates catches up there (STORY-026, DEC-028).
 /// </summary>
 [Authorize]
-public sealed class RoomHub(ChogGamesDbContext db, RoomConnectionRegistry connections, RoomSnapshots snapshots) : Hub<IRoomClient>
+public sealed class RoomHub(ChogGamesDbContext db, RoomConnectionRegistry connections, RoomSnapshots snapshots, ChogGamesMetrics metrics)
+    : Hub<IRoomClient>
 {
     public const string Path = "/api/hubs/rooms";
 
@@ -49,6 +51,7 @@ public sealed class RoomHub(ChogGamesDbContext db, RoomConnectionRegistry connec
         var playerId = Guid.Parse(Context.User!.FindFirstValue(ClaimTypes.NameIdentifier)!);
         if (!RoomCode.TryParse(code, out var roomCode))
         {
+            metrics.RoomSubscription(subscribed: false);
             throw new HubException(ErrorCodes.RoomNotFound);
         }
 
@@ -60,9 +63,11 @@ public sealed class RoomHub(ChogGamesDbContext db, RoomConnectionRegistry connec
         if (room is null || !room.IsPlaying(playerId))
         {
             connections.Remove(Context.ConnectionId, roomCode.Value);
+            metrics.RoomSubscription(subscribed: false);
             throw new HubException(ErrorCodes.RoomNotFound);
         }
 
+        metrics.RoomSubscription(subscribed: true);
         return await snapshots.ForAsync(room, playerId, Context.ConnectionAborted);
     }
 

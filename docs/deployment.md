@@ -186,6 +186,7 @@ stand-in for the bucket:
 - backs up live data;
 - checks the archive is encrypted and holds no secrets;
 - checks retention in both places;
+- checks that a successful backup pings a stand-in heartbeat monitor without logging its URL;
 - deletes the stack;
 - refuses a wrong key, a damaged archive and a non-empty database;
 - restores from the off-VM copy into a clean stack;
@@ -204,6 +205,65 @@ $D exec postgres psql -U choggames -d choggames -c 'SELECT count(*) FROM "Player
 $D down -v      # removes the drill's volumes only
 ```
 
+## Monitoring and alerts
+
+STORY-048 (DEC-052). Nothing extra runs on the VM. You get logs, metrics, a public readiness URL and a backup heartbeat,
+and an external monitor of your choice does the alerting.
+
+**Set up alerts (once):**
+
+1. **Backups:** create a check at a dead-man's-switch service such as healthchecks.io (free tier) with a period
+   of 1 day and a grace of 2 hours. Put its ping URL in `.env` as `BACKUP_HEARTBEAT_URL`, and optionally the
+   same URL plus `/fail` as `BACKUP_HEARTBEAT_FAIL_URL`. Every backup that reaches the bucket pings it. A missed
+   ping (the backup failed, the service is stopped or the VM is down) alerts you after the grace period, and a
+   failed scheduled backup alerts you at once. Then run `up -d --wait` again, and `run --rm backup now` to send
+   the first ping.
+2. **Uptime:** point an HTTP(S) uptime check (e.g. UptimeRobot, Better Stack, or a healthchecks.io HTTP check)
+   at `https://<PUBLIC_HOSTNAME>/api/health/ready`, expecting `200`. It fails when nginx, the API or the
+   database is down, and when the certificate is invalid. The response holds check names, statuses and durations
+   only.
+
+**Logs.** Every container logs to Docker, rotated at 5 × 10 MB.
+
+- The API writes one JSON object per line, with `Timestamp` (UTC), `LogLevel`, `Category`, `Message`, `State`
+  and `Scopes`.
+- nginx's access log is JSON too: `time`, `requestId`, `remoteAddr`, `method`, `path` (no query string), `status`,
+  `bytes`, `durationSeconds`, `upstreamSeconds` and `userAgent`.
+- Every API response carries `X-Request-Id`, which is nginx's `requestId`. Every API log line written during that
+  request has the same value as `CorrelationId` in its scopes. Ask users who report a problem for it.
+- Session tokens, cookies, wallet signatures, sign-in challenges and the heartbeat URLs are never logged.
+
+```bash
+C="docker compose -f infrastructure/production/docker-compose.yml"
+$C logs -f --since 1h api web                    # follow both
+$C logs --no-log-prefix web | grep '"requestId":"<id>"'
+$C logs --no-log-prefix api | grep '<id>'
+$C logs --no-log-prefix api | grep '"LogLevel":"Error"'
+$C logs backup | grep -E 'ERROR|WARNING|pinged'  # backup results and heartbeat pings
+```
+
+**Metrics.** The API serves Prometheus text at `/metrics` on its own port. nginx doesn't forward it, so read it
+on the VM:
+
+```bash
+$C exec -T api bash -c "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /metrics HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && cat <&3"
+```
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `http_server_request_duration_seconds` (histogram) | `http_route`, `http_request_method`, `http_response_status_code` | API request durations and counts by route |
+| `http_server_active_requests` | `http_request_method` | Requests in progress |
+| `signalr_server_active_connections`, `signalr_server_connection_duration_seconds` | `signalr_transport`, `signalr_connection_status` | Live hub connections |
+| `choggames_rooms_created_total`, `choggames_rooms_cancelled_total` | `game` | Rooms created, and closed by the host before the start |
+| `choggames_matches_started_total`, `choggames_matches_ended_total` | `game`, `outcome` (`completed`, `abandoned`) | Matches |
+| `choggames_rooms_open` | `game`, `status` (`waiting`, `active`) | Rooms open now (counted in the database) |
+| `choggames_guest_sessions_created_total` | | New guest players |
+| `choggames_wallet_sign_ins_total` | `result` (`succeeded`, `challenge_unavailable`, `invalid_signature`) | Wallet sign-ins |
+| `choggames_realtime_room_subscriptions_total` | `result` (`subscribed`, `room_not_found`) | Live room subscriptions (every reconnect subscribes again) |
+
+Counters start from zero when the API restarts. A Prometheus server could scrape `api:8080/metrics` from the
+Compose network later, without any API change.
+
 ## Restarts and upgrades
 
 - Containers restart on failure and after a reboot (`restart: unless-stopped`; enable the Docker service).
@@ -220,9 +280,12 @@ $D down -v      # removes the drill's volumes only
 - `docker compose -f infrastructure/production/docker-compose.yml ps` shows every service `healthy`, and `migrate` `exited (0)`.
 - `curl -fsS https://<PUBLIC_HOSTNAME>/api/games` returns the catalog; `curl -sI http://<PUBLIC_HOSTNAME>/` is a
   `301` to `https://`.
-- Logs: `docker compose ... logs -f api web`.
+- Logs: `docker compose ... logs -f api web` (JSON lines; see "Monitoring and alerts").
+- `curl -fsS https://<PUBLIC_HOSTNAME>/api/health/ready` returns `{"status":"Healthy",...}`.
 - `npm run deploy:verify` (on a development machine or CI) builds and runs an isolated copy for `localhost` on
   ports 18081/18443 (without certbot). Over TLS verified against the served certificate it checks the app, the
   API, the wss hub, the HSTS and CSP headers, the HTTP redirect, the refusal of other host names, the switch to a
-  stand-in issued certificate, and that a guest and the certificate survive recreating every container. Then it
+  stand-in issued certificate, and that a guest and the certificate survive recreating every container. It also
+  checks that readiness is public while `/metrics` and liveness are not, that the request id nginx logs is the
+  one the API returns, that the API logs JSON without the session token, and that metrics count the guest. Then it
   removes the copy.
