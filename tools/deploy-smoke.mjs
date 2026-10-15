@@ -6,7 +6,8 @@
 // "issued" certificate where certbot would write one and checks nginx switches to it. It creates a
 // guest, checks readiness is public while metrics stay internal, that the API returns the request id nginx
 // logged and logs JSON lines, recreates every container (volumes kept) and checks the session, its player and the
-// certificate survived. Finally it removes the project and its volumes. It does not touch a running
+// certificate survived. In between it runs the release smoke test (STORY-049, DEC-053) through nginx over TLS and
+// wss: guests, rooms, matches played to the finish and a reconnect. Finally it removes the project and its volumes. It does not touch a running
 // deployment or the dev stack, and it never contacts Let's Encrypt (the letsencrypt profile is off).
 import { execFileSync } from 'node:child_process';
 import { X509Certificate, randomBytes } from 'node:crypto';
@@ -15,6 +16,7 @@ import { request as httpsRequest } from 'node:https';
 import { connect } from 'node:tls';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runReleaseSmoke } from './release-smoke.mjs';
 
 const composeFile = join(dirname(fileURLToPath(import.meta.url)), '..', 'infrastructure', 'production', 'docker-compose.yml');
 const hostname = 'localhost';
@@ -35,6 +37,8 @@ const env = {
   HTTP_PORT: httpPort,
   HTTPS_PORT: httpsPort,
   IMAGE_TAG: 'smoke',
+  // The release smoke test plays Chog Life, which production lists as Coming Soon by default.
+  CHOG_LIFE_STATUS: 'Available',
 };
 const compose = (...args) =>
   execFileSync('docker', ['compose', '-f', composeFile, '--env-file', '/dev/null', ...args], {
@@ -221,6 +225,9 @@ async function main() {
     "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /metrics HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3");
   check(/^choggames_guest_sessions_created_total 1$/m.test(metrics), 'metrics must count the guest');
   check(/^http_server_request_duration_seconds_count\{[^}]*http_route="\/api\/games"[^}]*\} \d+$/m.test(metrics), 'metrics must time requests by route');
+
+  step('release smoke test through nginx (TLS and wss)');
+  await runReleaseSmoke({ origin, ca, log: (line) => console.log(`  ${line}`) });
 
   step('nginx switches to the issued certificate once it appears (checked every minute)');
   const issued = installIssuedCertificate();

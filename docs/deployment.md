@@ -273,6 +273,8 @@ Compose network later, without any API change.
   Migrations run before the new API starts; if they fail, Compose stops with an error before replacing the API.
 - Roll back: `IMAGE_TAG=<previous release> docker compose ... up -d --wait`. Migrations aren't rolled back
   automatically, so a release that changes the schema needs its own rollback note.
+- Before production, every release passes [`docs/release-checklist.md`](release-checklist.md) on the separate
+  staging VM (STORY-049, DEC-053). That includes `npm run release:verify` against staging and the rollback drill.
 - Matches in progress resume after an API restart (DEC-030); every active turn gets a fresh timer.
 
 ## Checks

@@ -82,7 +82,10 @@ cp infrastructure/production/.env.example infrastructure/production/.env   # chm
 docker compose -f infrastructure/production/docker-compose.yml up -d --build --wait
 npm run deploy:verify   # smoke test: builds an isolated copy on ports 18081/18443, checks HTTPS, app, API, wss hub, redirect, monitoring and a restart, then cleans up
 npm run backup:verify   # smoke test: backs up an isolated copy, checks encryption, secrets, retention and the heartbeat ping, restores into a clean copy, then cleans up
+RELEASE_BASE_URL=https://staging.<domain> npm run release:verify   # release smoke test against staging (default: the dev server on :4201); never against production
 ```
+
+Releases (STORY-049, DEC-053): every release passes [`docs/release-checklist.md`](docs/release-checklist.md) on a separate staging VM before production. The checklist has two parts. The automated part is `npm run release:verify`: guests, character choice, wallet refusal, a six-player room, refused commands, a forfeit, a reconnect, and two matches played to the finish, through the API and the room hub with Node built-ins only. The manual part covers a real wallet, real Chog NFTs, phones, and a rollback drill. `npm run deploy:verify` also runs the release smoke test against its production-like stack. Set `RELEASE_CA_FILE` to a PEM file when staging's certificate isn't from a public authority.
 
 | Setting (`infrastructure/production/.env`) | Default | Notes |
 |---|---|---|
@@ -374,7 +377,7 @@ Live room updates (STORY-022, STORY-026, ENG-005, DEC-024, DEC-028): a SignalR h
 - **Who gets updates:** only players still playing in the room when the update is sent. A player who forfeits a started match (also by missing turns) gets one last snapshot showing them out; a member who leaves a waiting room gets nothing more. Either way all their connections are unsubscribed and can't subscribe again.
 - **Limits:** opening a connection counts as a room request; hub calls have their own per-player budget of the same size (`rate_limited` hub error).
 - **Scale:** subscriptions are tracked in memory, so this is for a single API instance (a backplane comes with scale-out, ADR-010).
-- **Dev proxy:** `apps/web/proxy.conf.json` proxies `/api` with `ws: true`, so the hub works through `:4201`.
+- **Dev proxy:** `apps/web/proxy.conf.json` proxies `/api` with `ws: true`, so the hub works through `:4201`. Like nginx, it maps `/api/health/ready` to the API's `/health/ready`, so `npm run release:verify` runs against the dev servers too.
 
 | Setting (`Rooms:`) | Default | |
 |---|---|---|
@@ -428,7 +431,7 @@ Allowed project references (enforced by `ChogGames.Architecture.Tests`): `Core` 
 |---|---|
 | Frontend (Nx) | `npm ci`, `npm run test:workspace`, `nx run-many -t lint,test,build` for all frontend projects |
 | Backend (.NET) | `dotnet restore/build/test` (Release) against a PostgreSQL 18.6 service, incl. integration tests; no model changes without a migration; migrations apply to an empty database; `.trx` results uploaded as an artifact |
-| Docker Compose | dev and production config validation, `npm run deps:verify`, `npm run deploy:verify` and `npm run backup:verify` smoke tests |
+| Docker Compose | dev and production config validation, `npm run deps:verify`, `npm run deploy:verify` (including the release smoke test) and `npm run backup:verify` smoke tests |
 
 Node.js and the .NET SDK come from `.nvmrc` and `backend/global.json`; actions are pinned to commit SHAs. `tools/ci.test.mjs` guards these rules.
 
