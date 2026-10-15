@@ -73,6 +73,28 @@ npm run deps:verify  # smoke test: isolated stack on ports 15432/16379, checks d
 
 To wipe local data: `docker compose -f infrastructure/docker-compose.yml down -v`.
 
+### Production-like deployment (single VM)
+
+`infrastructure/production/docker-compose.yml` runs the whole stack on one Linux VM (STORY-045, DEC-049): nginx serving the built web app and proxying `/api` (REST and the SignalR WebSocket) on one origin, the API, a one-shot `migrate` job (an EF Core migrations bundle that runs before the API starts), PostgreSQL and Redis. Only nginx publishes a port (`127.0.0.1:8080` by default); data lives in the `postgres-data` and `redis-data` volumes. Images: `infrastructure/production/api.Dockerfile` (targets `api` and `migrate`) and `web.Dockerfile`, built from the repository root (`.dockerignore`). Runbook: `docs/deployment.md`.
+
+```bash
+cp infrastructure/production/.env.example infrastructure/production/.env   # chmod 600; set the values below
+docker compose -f infrastructure/production/docker-compose.yml up -d --build --wait
+npm run deploy:verify   # smoke test: builds an isolated copy on port 18081, checks app, API, hub and a restart, then cleans up
+```
+
+| Setting (`infrastructure/production/.env`) | Default | Notes |
+|---|---|---|
+| `POSTGRES_PASSWORD` | *(required)* | letters and digits only (`openssl rand -hex 24`) |
+| `WALLET_AUTH_DOMAIN` / `WALLET_AUTH_URI` | *(required)* | the web app's address as users see it (`WalletAuth:Domain`/`Uri`) |
+| `POSTGRES_DB` / `POSTGRES_USER` | `choggames` | |
+| `HTTP_BIND` / `HTTP_PORT` | `127.0.0.1` / `8080` | where nginx listens; loopback until HTTPS (STORY-046) |
+| `MONAD_RPC_URL` | `https://rpc.monad.xyz` | `Nfts:Monad:RpcUrl` |
+| `CHOG_LIFE_STATUS` | `ComingSoon` | `Games:Items:0:Status` |
+| `IMAGE_PREFIX` / `IMAGE_TAG` | `chog-game-arena` / `local` | image names, for releases and rollbacks |
+
+The API runs with `ASPNETCORE_ENVIRONMENT=Production` and `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`: it publishes no port, and nginx overwrites `X-Forwarded-For` with the client it saw, so per-client rate limits use the real client address.
+
 ### Configuration and secrets
 
 Backend settings are bound to typed options and validated at startup; a missing or invalid required setting stops the API with a message naming the setting. Secrets never go in `appsettings*.json` or any committed file (`npm run test:workspace` scans for them).
@@ -388,7 +410,7 @@ Allowed project references (enforced by `ChogGames.Architecture.Tests`): `Core` 
 |---|---|
 | Frontend (Nx) | `npm ci`, `npm run test:workspace`, `nx run-many -t lint,test,build` for all frontend projects |
 | Backend (.NET) | `dotnet restore/build/test` (Release) against a PostgreSQL 18.6 service, incl. integration tests; no model changes without a migration; migrations apply to an empty database; `.trx` results uploaded as an artifact |
-| Docker Compose | config validation and `npm run deps:verify` smoke test |
+| Docker Compose | dev and production config validation, `npm run deps:verify` and `npm run deploy:verify` smoke tests |
 
 Node.js and the .NET SDK come from `.nvmrc` and `backend/global.json`; actions are pinned to commit SHAs. `tools/ci.test.mjs` guards these rules.
 

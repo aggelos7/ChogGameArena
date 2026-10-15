@@ -1,0 +1,106 @@
+# Production-like stack on one Linux VM (STORY-045, DEC-049): nginx (web app + /api proxy), the API,
+# a one-shot migration job, PostgreSQL and Redis. Only nginx publishes a port; the rest share an
+# internal network. Data lives in named volumes, so recreating containers keeps it.
+# Usage: copy infrastructure/production/.env.example to infrastructure/production/.env (git-ignored,
+# chmod 600), set the values, then:
+#   docker compose -f infrastructure/production/docker-compose.yml up -d --build --wait
+# See docs/deployment.md.
+name: ${COMPOSE_PROJECT_NAME:-chog-game-arena-prod}
+
+x-database: &database
+  POSTGRES_DB: ${POSTGRES_DB:-choggames}
+  POSTGRES_USER: ${POSTGRES_USER:-choggames}
+
+services:
+  postgres:
+    image: postgres:18.6-alpine3.24
+    restart: unless-stopped
+    environment:
+      <<: *database
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in infrastructure/production/.env (see .env.example)}
+    volumes:
+      # PostgreSQL 18+ images keep PGDATA under /var/lib/postgresql/<major>/docker.
+      - postgres-data:/var/lib/postgresql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # Not used by the API yet (ADR-010: optional cache and future SignalR backplane); kept in the
+  # topology with persistence so adding it later changes no deployment shape.
+  redis:
+    image: redis:8.10.2-alpine3.23
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # Applies pending EF Core migrations, then exits; the API starts only after it succeeds.
+  migrate:
+    image: ${IMAGE_PREFIX:-chog-game-arena}/migrate:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infrastructure/production/api.Dockerfile
+      target: migrate
+    restart: "no"
+    environment:
+      Database__ConnectionString: Host=postgres;Port=5432;Database=${POSTGRES_DB:-choggames};Username=${POSTGRES_USER:-choggames};Password=${POSTGRES_PASSWORD}
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: ${IMAGE_PREFIX:-chog-game-arena}/api:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infrastructure/production/api.Dockerfile
+      target: api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Trusts X-Forwarded-For/-Proto from any sender: the API publishes no port, so only nginx,
+      # which overwrites both headers, can reach it.
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      Database__ConnectionString: Host=postgres;Port=5432;Database=${POSTGRES_DB:-choggames};Username=${POSTGRES_USER:-choggames};Password=${POSTGRES_PASSWORD}
+      WalletAuth__Domain: ${WALLET_AUTH_DOMAIN:?WALLET_AUTH_DOMAIN must be set in infrastructure/production/.env (see .env.example)}
+      WalletAuth__Uri: ${WALLET_AUTH_URI:?WALLET_AUTH_URI must be set in infrastructure/production/.env (see .env.example)}
+      Nfts__Monad__RpcUrl: ${MONAD_RPC_URL:-https://rpc.monad.xyz}
+      Games__Items__0__Status: ${CHOG_LIFE_STATUS:-ComingSoon}
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    image: ${IMAGE_PREFIX:-chog-game-arena}/web:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infrastructure/production/web.Dockerfile
+    restart: unless-stopped
+    ports:
+      # Loopback by default until HTTPS (STORY-046); set HTTP_BIND=0.0.0.0 to expose it.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80"
+    networks: [backend]
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  backend:
+
+volumes:
+  postgres-data:
+  redis-data:
