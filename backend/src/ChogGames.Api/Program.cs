@@ -5,6 +5,7 @@ using ChogGames.Api.ChogLife;
 using ChogGames.Api.Health;
 using ChogGames.Api.Identity;
 using ChogGames.Api.Matches;
+using ChogGames.Api.Monitoring;
 using ChogGames.Api.Profile;
 using ChogGames.Api.Realtime;
 using ChogGames.Api.Rooms;
@@ -23,10 +24,12 @@ builder.Services.AddRooms(builder.Configuration);
 builder.Services.AddRealtime();
 builder.Services.AddMatchTurns();
 builder.Services.AddChogLife();
+builder.Services.AddMonitoring();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
 
+app.UseRequestCorrelation();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -34,6 +37,7 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapHealthEndpoints();
+app.MapMonitoringEndpoints();
 app.MapGameCatalogEndpoints();
 app.MapIdentityEndpoints();
 app.MapProfileEndpoints();

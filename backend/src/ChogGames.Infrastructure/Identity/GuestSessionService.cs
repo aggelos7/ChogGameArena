@@ -1,4 +1,5 @@
 using ChogGames.Core.Players;
+using ChogGames.Infrastructure.Monitoring;
 using ChogGames.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -9,7 +10,11 @@ public sealed record IssuedGuestSession(Player Player, string Token, DateTimeOff
 
 public sealed record ActiveGuestSession(Player Player, DateTimeOffset ExpiresAt, bool Renewed);
 
-public sealed class GuestSessionService(ChogGamesDbContext dbContext, TimeProvider timeProvider, IOptions<GuestSessionOptions> options)
+public sealed class GuestSessionService(
+    ChogGamesDbContext dbContext,
+    TimeProvider timeProvider,
+    IOptions<GuestSessionOptions> options,
+    ChogGamesMetrics metrics)
 {
     private GuestSessionOptions Options => options.Value;
 
@@ -25,6 +30,7 @@ public sealed class GuestSessionService(ChogGamesDbContext dbContext, TimeProvid
         dbContext.Players.Add(player);
         dbContext.GuestSessions.Add(session);
         await dbContext.SaveChangesAsync(cancellationToken);
+        metrics.GuestSessionCreated();
 
         return new IssuedGuestSession(player, token, session.ExpiresAt);
     }

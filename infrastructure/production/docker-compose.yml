@@ -10,6 +10,14 @@
 # See docs/deployment.md.
 name: ${COMPOSE_PROJECT_NAME:-chog-game-arena-prod}
 
+# Every service logs to Docker's json-file driver, rotated so logs can't fill the disk: at most 5 files
+# of 10 MB each per container (STORY-048, DEC-052). The API writes one JSON object per line.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
 x-database: &database
   POSTGRES_DB: ${POSTGRES_DB:-choggames}
   POSTGRES_USER: ${POSTGRES_USER:-choggames}
@@ -18,6 +26,7 @@ services:
   postgres:
     image: postgres:18.6-alpine3.24
     restart: unless-stopped
+    logging: *logging
     environment:
       <<: *database
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in infrastructure/production/.env (see .env.example)}
@@ -37,6 +46,7 @@ services:
   redis:
     image: redis:8.10.2-alpine3.23
     restart: unless-stopped
+    logging: *logging
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
@@ -56,6 +66,7 @@ services:
       dockerfile: infrastructure/production/api.Dockerfile
       target: migrate
     restart: "no"
+    logging: *logging
     environment:
       Database__ConnectionString: Host=postgres;Port=5432;Database=${POSTGRES_DB:-choggames};Username=${POSTGRES_USER:-choggames};Password=${POSTGRES_PASSWORD}
     networks: [backend]
@@ -70,6 +81,7 @@ services:
       dockerfile: infrastructure/production/api.Dockerfile
       target: api
     restart: unless-stopped
+    logging: *logging
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       # Trusts X-Forwarded-For/-Proto from any sender: the API publishes no port, so only nginx,
@@ -95,6 +107,7 @@ services:
       context: ../..
       dockerfile: infrastructure/production/web.Dockerfile
     restart: unless-stopped
+    logging: *logging
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}
     ports:
@@ -117,6 +130,7 @@ services:
     image: certbot/certbot:v5.8.0
     profiles: [letsencrypt]
     restart: unless-stopped
+    logging: *logging
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}
       CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
@@ -152,6 +166,7 @@ services:
       dockerfile: infrastructure/production/backup.Dockerfile
     profiles: [backup]
     restart: unless-stopped
+    logging: *logging
     environment:
       PGHOST: postgres
       PGDATABASE: ${POSTGRES_DB:-choggames}
@@ -163,6 +178,10 @@ services:
       BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
       BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
       BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-chog-game-arena}
+      # Alerting (STORY-048, DEC-052): pinged after every successful backup, so a missed one raises an alert at
+      # the monitor (e.g. healthchecks.io); the fail URL, if set, is pinged when a scheduled backup fails.
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
+      BACKUP_HEARTBEAT_FAIL_URL: ${BACKUP_HEARTBEAT_FAIL_URL:-}
       # The off-VM copy: any S3-compatible store through rclone, configured from the environment only.
       RCLONE_CONFIG_OFFSITE_TYPE: ${BACKUP_REMOTE_TYPE:-s3}
       RCLONE_CONFIG_OFFSITE_PROVIDER: ${BACKUP_S3_PROVIDER:-Other}

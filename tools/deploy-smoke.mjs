@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// STORY-045/046 deployment smoke test (DEC-049, DEC-050): builds and starts the production-like stack
+// STORY-045/046/048 deployment smoke test (DEC-049, DEC-050, DEC-052): builds and starts the production-like stack
 // as an isolated Compose project on spare ports, then checks through nginx, over TLS verified against
 // the certificate nginx serves, that the web app, the API and the WebSocket hub (wss) answer with the
 // HTTPS headers, that plain HTTP redirects and other host names are refused. It installs a stand-in
 // "issued" certificate where certbot would write one and checks nginx switches to it. It creates a
-// guest, recreates every container (volumes kept) and checks the session, its player and the
+// guest, checks readiness is public while metrics stay internal, that the API returns the request id nginx
+// logged and logs JSON lines, recreates every container (volumes kept) and checks the session, its player and the
 // certificate survived. Finally it removes the project and its volumes. It does not touch a running
 // deployment or the dev stack, and it never contacts Let's Encrypt (the letsencrypt profile is off).
 import { execFileSync } from 'node:child_process';
@@ -195,6 +196,31 @@ async function main() {
   step('the room hub accepts a WebSocket upgrade over wss');
   const hub = await upgrade('/api/hubs/rooms', cookie);
   check(hub === 101, `hub upgrade returned ${hub}`);
+
+  step('readiness is public; metrics and liveness are not (they get the web app)');
+  const ready = await get('/api/health/ready');
+  check(ready.status === 200 && JSON.parse(ready.body).status === 'Healthy', `GET /api/health/ready returned ${ready.status}`);
+  for (const path of ['/metrics', '/health/live', '/health/ready']) {
+    const internal = await get(path);
+    check(internal.body.includes('<app-root>') && !internal.body.includes('# TYPE'), `${path} must not reach the API`);
+  }
+
+  step('nginx sets and logs every request id, the API returns it, and API logs are JSON without secrets');
+  const traced = await send(`${origin}/api/games`, { headers: { 'x-request-id': 'chosen-by-the-client' } });
+  const requestId = traced.headers['x-request-id'];
+  check(/^[0-9a-f]{32}$/.test(requestId ?? ''), `the request id must be nginx's, not ${requestId}`);
+  const accessLog = compose('logs', '--no-log-prefix', '--no-color', 'web').split('\n').filter((line) => line.startsWith('{'));
+  const entry = accessLog.map((line) => JSON.parse(line)).find((logged) => logged.requestId === requestId);
+  check(entry?.path === '/api/games' && entry.status === 200, 'the access log must hold the request with its id');
+  const apiLog = compose('logs', '--no-log-prefix', '--no-color', 'api').split('\n').filter(Boolean);
+  check(apiLog.length > 0 && apiLog.every((line) => JSON.parse(line).Timestamp && JSON.parse(line).Category), 'API logs must be JSON lines');
+  check(!apiLog.join('\n').includes(cookie.split('=')[1]), 'the session token must never be logged');
+
+  step('metrics are readable inside the network');
+  const metrics = compose('exec', '-T', 'api', 'bash', '-c',
+    "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /metrics HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3");
+  check(/^choggames_guest_sessions_created_total 1$/m.test(metrics), 'metrics must count the guest');
+  check(/^http_server_request_duration_seconds_count\{[^}]*http_route="\/api\/games"[^}]*\} \d+$/m.test(metrics), 'metrics must time requests by route');
 
   step('nginx switches to the issued certificate once it appears (checked every minute)');
   const issued = installIssuedCertificate();

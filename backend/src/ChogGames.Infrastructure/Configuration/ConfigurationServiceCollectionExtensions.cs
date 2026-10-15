@@ -6,6 +6,7 @@ using ChogGames.Core.Nfts;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Matches;
+using ChogGames.Infrastructure.Monitoring;
 using ChogGames.Infrastructure.Nfts;
 using ChogGames.Infrastructure.Nfts.Cache;
 using ChogGames.Infrastructure.Nfts.Metadata;
@@ -47,8 +48,13 @@ public static class ConfigurationServiceCollectionExtensions
     {
         services.AddInfrastructureOptions(configuration);
 
-        services.AddDbContext<ChogGamesDbContext>((provider, options) =>
-            options.UseNpgsql(provider.GetRequiredService<IOptions<DatabaseOptions>>().Value.ConnectionString));
+        // Game and session metrics (STORY-048); room status changes are counted as they are committed.
+        services.AddMetrics();
+        services.AddSingleton<ChogGamesMetrics>();
+        services.AddSingleton<RoomLifecycleMetricsInterceptor>();
+        services.AddDbContext<ChogGamesDbContext>((provider, options) => options
+            .UseNpgsql(provider.GetRequiredService<IOptions<DatabaseOptions>>().Value.ConnectionString)
+            .AddInterceptors(provider.GetRequiredService<RoomLifecycleMetricsInterceptor>()));
 
         services.AddOptions<GuestSessionOptions>()
             .Bind(configuration.GetSection(GuestSessionOptions.SectionName))

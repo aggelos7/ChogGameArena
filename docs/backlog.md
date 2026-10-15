@@ -729,7 +729,7 @@
 
 #### STORY-048 — Operational monitoring
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E07
 - **Implementation:** Add structured logs, request correlation, readiness and basic game/session metrics.
