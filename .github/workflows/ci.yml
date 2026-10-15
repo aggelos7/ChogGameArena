@@ -131,8 +131,11 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-only-password
           PUBLIC_HOSTNAME: play.example.com
-          COMPOSE_PROFILES: letsencrypt
+          COMPOSE_PROFILES: letsencrypt,backup
         run: docker compose -f infrastructure/production/docker-compose.yml config --quiet
 
       - name: Production stack smoke test (build, serve over HTTPS through nginx, data survives restart)
         run: npm run deploy:verify
+
+      - name: Backup and restore smoke test (encrypted backup, off-VM copy, restore into a clean stack)
+        run: npm run backup:verify

@@ -1,6 +1,7 @@
 # Production-like stack on one Linux VM (STORY-045, DEC-049): nginx (web app + /api proxy over HTTPS),
 # the API, a one-shot migration job, PostgreSQL and Redis, plus certbot for the Let's Encrypt
-# certificate in the `letsencrypt` profile (STORY-046, DEC-050; .env.example turns it on). Only nginx
+# certificate in the `letsencrypt` profile (STORY-046, DEC-050) and encrypted database backups in the
+# `backup` profile (STORY-047, DEC-051); .env.example turns both on. Only nginx
 # publishes ports (80 and 443); the rest share an internal network. Data lives in named volumes, so
 # recreating containers keeps it.
 # Usage: copy infrastructure/production/.env.example to infrastructure/production/.env (git-ignored,
@@ -140,6 +141,52 @@ services:
       web:
         condition: service_healthy
 
+  # Encrypted PostgreSQL backups (STORY-047, DEC-051), in the `backup` profile (.env.example turns it on):
+  # daily at BACKUP_TIME (UTC), pg_dump encrypted with age to BACKUP_AGE_RECIPIENT, kept in the `backups`
+  # volume and copied to the S3-compatible bucket; 7 daily + 4 weekly kept in both places. Also runs a
+  # backup on demand (`run --rm backup now`), lists archives and restores (see docs/deployment.md).
+  backup:
+    image: ${IMAGE_PREFIX:-chog-game-arena}/backup:${IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: infrastructure/production/backup.Dockerfile
+    profiles: [backup]
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-choggames}
+      PGUSER: ${POSTGRES_USER:-choggames}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_TIME: ${BACKUP_TIME:-03:00}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-chog-game-arena}
+      # The off-VM copy: any S3-compatible store through rclone, configured from the environment only.
+      RCLONE_CONFIG_OFFSITE_TYPE: ${BACKUP_REMOTE_TYPE:-s3}
+      RCLONE_CONFIG_OFFSITE_PROVIDER: ${BACKUP_S3_PROVIDER:-Other}
+      RCLONE_CONFIG_OFFSITE_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      RCLONE_CONFIG_OFFSITE_REGION: ${BACKUP_S3_REGION:-}
+      RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      # The key may write objects without being allowed to create or list buckets.
+      RCLONE_CONFIG_OFFSITE_NO_CHECK_BUCKET: "true"
+    volumes:
+      - backups:/backups
+    networks: [backend]
+    # Healthy once the scheduler has checked its key and bucket settings; without them it never is, so
+    # `up --wait` fails instead of starting the stack without backups.
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/chog-backup-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 networks:
   backend:
 
@@ -148,3 +195,4 @@ volumes:
   redis-data:
   letsencrypt:
   acme-webroot:
+  backups:

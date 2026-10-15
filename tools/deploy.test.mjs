@@ -36,7 +36,7 @@ const LONG_RUNNING = ['api', 'postgres', 'redis', 'web'];
 test('defines the web, api, migrate, postgres and redis services, and certbot in the letsencrypt profile', { skip }, () => {
   assert.deepEqual(Object.keys(config().services).sort(), ['api', 'migrate', 'postgres', 'redis', 'web']);
   assert.deepEqual(Object.keys(config(WITH_CERTBOT).services).sort(), ['api', 'certbot', 'migrate', 'postgres', 'redis', 'web']);
-  assert.match(read(production, '.env.example'), /^COMPOSE_PROFILES=letsencrypt$/m, 'the VM template turns certbot on');
+  assert.match(read(production, '.env.example'), /^COMPOSE_PROFILES=letsencrypt(,|$)/m, 'the VM template turns certbot on');
 });
 
 test('only nginx publishes ports: 80 and 443 on every interface by default', { skip }, () => {
