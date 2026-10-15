@@ -1,150 +1,181 @@
 <div class="life-board" data-board>
-  <ul class="players" aria-label="Players and pawns" data-list="pawns">
-    @for (member of players(); track member.seat) {
-      <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
-        <span class="pawn" [style.background]="color(member.seat)" aria-hidden="true">{{ member.seat }}</span>
-        <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="1.75" />
-        <span class="who">
-          <span class="name">{{ member.displayName }}</span>
-          @if (member.isYou) {
-            <span class="tag">You</span>
-          }
-          @if (member.isTurn) {
-            <span class="tag turn" data-turn>Turn</span>
-          }
-          @if (pawnBySeat().get(member.seat)?.place; as place) {
-            <span class="tag finished" data-finished>Finished {{ ordinal(place) }}</span>
-          }
-          @if (armedName(member.seat); as armed) {
-            <span class="tag armed" data-armed>{{ armed }} armed</span>
-          }
-        </span>
-        @if (pawnBySeat().get(member.seat); as pawn) {
-          <span class="portfolio" [class.negative]="pawn.portfolio < 0" data-portfolio>{{ pawn.portfolio }} MON</span>
-          <span class="breakdown" data-breakdown>
-            Liquid {{ pawn.mon }} · Assets {{ pawn.assets }} · Bonus {{ pawn.bonuses }} · Debt {{ pawn.liabilities }}
+  <div class="side">
+    <ng-content select="[boardHeader]" />
+    <ul class="players" aria-label="Players and pawns" data-list="pawns">
+      @for (member of players(); track member.seat) {
+        <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
+          <span class="pawn" [style.background]="color(member.seat)" aria-hidden="true">{{ member.seat }}</span>
+          <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="1.75" />
+          <span class="who">
+            <span class="name">{{ member.displayName }}</span>
+            @if (member.isYou) {
+              <span class="tag">You</span>
+            }
+            @if (member.isTurn) {
+              <span class="tag turn" data-turn>Turn</span>
+            }
+            @if (pawnBySeat().get(member.seat)?.place; as place) {
+              <span class="tag finished" data-finished>Finished {{ ordinal(place) }}</span>
+            }
+            @if (armedName(member.seat); as armed) {
+              <span class="tag armed" data-armed>{{ armed }} armed</span>
+            }
           </span>
-        }
-      </li>
-    }
-  </ul>
-  @if (clock(); as left) {
-    <p class="clock" data-clock>Time left <strong role="timer">{{ left }}</strong></p>
-  }
-  @if (ending(); as text) {
-    <p class="ending" role="status" data-ending>{{ text }}</p>
-  }
-  <p class="turn-line" role="status" data-turn-line>
-    @if (decider(); as current) {
-      @if (current.isYou) {
-        Keep your route or switch?
-      } @else {
-        {{ current.displayName }} is deciding whether to keep their route…
-      }
-    } @else if (chooser(); as current) {
-      @if (current.isYou) {
-        Choose your route.
-      } @else {
-        {{ current.displayName }} is choosing a route…
-      }
-    } @else if (turnOf(); as current) {
-      @if (current.isYou) {
-        It’s your turn.
-      } @else {
-        It’s {{ current.displayName }}’s turn.
-      }
-    }
-  </p>
-  @if (lastMove(); as move) {
-    <p class="last-move" data-last-move>{{ move }}</p>
-  }
-  @if (routes().length > 0) {
-    <div class="routes" role="group" aria-label="Choose your route" data-routes>
-      @for (option of routes(); track option.route) {
-        <button
-          type="button"
-          [class]="'route ' + option.name"
-          [disabled]="rolling()"
-          (click)="chooseLane.emit(option.route)"
-          [attr.data-route]="option.route"
-        >
-          <span class="route-name">Take the {{ option.name }} route</span>
-          <span class="route-summary">{{ option.summary }}</span>
-          @if (option.stake) {
-            <span class="route-stake" data-route-stake>{{ option.stake }}</span>
+          @if (pawnBySeat().get(member.seat); as pawn) {
+            <span class="portfolio" [class.negative]="pawn.portfolio < 0" data-portfolio>{{ pawn.portfolio }} MON</span>
+            <span class="breakdown" data-breakdown>
+              Liquid {{ pawn.mon }} · Assets {{ pawn.assets }} · Bonus {{ pawn.bonuses }} · Debt {{ pawn.liabilities }}
+            </span>
           }
-        </button>
+        </li>
       }
-      @if (forkAbility(); as ability) {
-        <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
-          Use {{ ability.name }}
-          <span class="ability-description">{{ ability.description }}</span>
-        </button>
-      }
-      @if (previewArmed()) {
-        <p class="route-hint" data-preview-armed>Event Preview is on: choose a route to see your next move there.</p>
-      }
-      <p class="route-hint" data-route-hint>If time runs out, you take the {{ defaultRoute() }} route.</p>
-    </div>
-  } @else if (keepOrSwitch(); as choice) {
-    <div class="routes" role="group" aria-label="Keep your route or switch" data-keep-or-switch>
-      <p class="preview" data-preview>Your next move: {{ previewText() }}.</p>
-      <button type="button" [class]="'route ' + choice.keepName" [disabled]="rolling()" (click)="chooseLane.emit(choice.keep)" data-keep>
-        <span class="route-name">Keep the {{ choice.keepName }} route</span>
-        <span class="route-summary">Your next roll plays out as shown.</span>
-      </button>
-      <button type="button" [class]="'route ' + choice.otherName" [disabled]="rolling()" (click)="chooseLane.emit(choice.other)" data-switch>
-        <span class="route-name">Switch to the {{ choice.otherName }} route</span>
-        <span class="route-summary">Your next roll is drawn again, unseen.</span>
-      </button>
-      <p class="route-hint">If time runs out, you keep the {{ choice.keepName }} route.</p>
-    </div>
-  } @else if (turnOf()?.isYou && !chooser() && !decider()) {
-    @if (previewText(); as preview) {
-      <p class="preview" data-preview>Previewed: {{ preview }}.</p>
+    </ul>
+    @if (clock(); as left) {
+      <p class="clock" data-clock>Time left <strong role="timer">{{ left }}</strong></p>
     }
-    <div class="actions">
-      <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
-      @if (rollAbility(); as ability) {
-        <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
-          Use {{ ability.name }}
-          <span class="ability-description">{{ ability.description }}</span>
-        </button>
+    @if (ending(); as text) {
+      <p class="ending" role="status" data-ending>{{ text }}</p>
+    }
+    <p class="turn-line" role="status" data-turn-line>
+      @if (decider(); as current) {
+        @if (current.isYou) {
+          Keep your route or switch?
+        } @else {
+          {{ current.displayName }} is deciding whether to keep their route…
+        }
+      } @else if (chooser(); as current) {
+        @if (current.isYou) {
+          Choose your route.
+        } @else {
+          {{ current.displayName }} is choosing a route…
+        }
+      } @else if (turnOf(); as current) {
+        @if (current.isYou) {
+          It’s your turn.
+        } @else {
+          It’s {{ current.displayName }}’s turn.
+        }
       }
-    </div>
-  }
+    </p>
+    @if (lastMove(); as move) {
+      <p class="last-move" data-last-move>{{ move }}</p>
+    }
+  </div>
 
-  <ol class="track" aria-label="Board, from start to finish">
-    @for (row of rows(); track $index) {
-      @switch (row.kind) {
-        @case ('main') {
-          <li class="row main">
-            <ng-container *ngTemplateOutlet="tileView; context: { $implicit: row.tile }" />
-          </li>
-        }
-        @case ('lanes') {
-          <li class="row lanes" aria-hidden="true">
-            <span class="lane-name safe">Safe route</span>
-            <span class="lane-name degen">Degen route</span>
-          </li>
-        }
-        @case ('fork') {
-          <li class="row fork">
-            @if (row.safe; as tile) {
-              <ng-container *ngTemplateOutlet="tileView; context: { $implicit: tile }" />
-            } @else {
-              <span class="gap"></span>
+  <div class="controls">
+    @if (routes().length > 0) {
+      <div class="routes" role="group" aria-label="Choose your route" data-routes>
+        @for (option of routes(); track option.route) {
+          <button
+            type="button"
+            [class]="'route ' + option.name"
+            [disabled]="rolling()"
+            (click)="chooseLane.emit(option.route)"
+            [attr.data-route]="option.route"
+          >
+            <span class="route-name">Take the {{ option.name }} route</span>
+            <span class="route-summary">{{ option.summary }}</span>
+            @if (option.stake) {
+              <span class="route-stake" data-route-stake>{{ option.stake }}</span>
             }
-            @if (row.degen; as tile) {
-              <ng-container *ngTemplateOutlet="tileView; context: { $implicit: tile }" />
-            } @else {
-              <span class="gap"></span>
-            }
-          </li>
+          </button>
         }
+        @if (forkAbility(); as ability) {
+          <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
+            Use {{ ability.name }}
+            <span class="ability-description">{{ ability.description }}</span>
+          </button>
+        }
+        @if (previewArmed()) {
+          <p class="route-hint" data-preview-armed>Event Preview is on: choose a route to see your next move there.</p>
+        }
+        <p class="route-hint" data-route-hint>If time runs out, you take the {{ defaultRoute() }} route.</p>
+      </div>
+    } @else if (keepOrSwitch(); as choice) {
+      <div class="routes" role="group" aria-label="Keep your route or switch" data-keep-or-switch>
+        <p class="preview" data-preview>Your next move: {{ previewText() }}.</p>
+        <button type="button" [class]="'route ' + choice.keepName" [disabled]="rolling()" (click)="chooseLane.emit(choice.keep)" data-keep>
+          <span class="route-name">Keep the {{ choice.keepName }} route</span>
+          <span class="route-summary">Your next roll plays out as shown.</span>
+        </button>
+        <button type="button" [class]="'route ' + choice.otherName" [disabled]="rolling()" (click)="chooseLane.emit(choice.other)" data-switch>
+          <span class="route-name">Switch to the {{ choice.otherName }} route</span>
+          <span class="route-summary">Your next roll is drawn again, unseen.</span>
+        </button>
+        <p class="route-hint">If time runs out, you keep the {{ choice.keepName }} route.</p>
+      </div>
+    } @else if (turnOf()?.isYou && !chooser() && !decider()) {
+      @if (previewText(); as preview) {
+        <p class="preview" data-preview>Previewed: {{ preview }}.</p>
+      }
+      <div class="actions">
+        <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
+        @if (rollAbility(); as ability) {
+          <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
+            Use {{ ability.name }}
+            <span class="ability-description">{{ ability.description }}</span>
+          </button>
+        }
+      </div>
+    }
+    @if (layout()) {
+      <div class="view-switch">
+        <button type="button" class="view-toggle" (click)="toggleView()" data-view-toggle>
+          {{ view() === 'drawing' ? 'Show as list' : 'Show illustrated board' }}
+        </button>
+      </div>
+    }
+    <ng-content select="[boardMessages]" />
+  </div>
+
+  <div class="stage">
+    <ng-content select="[boardTimer]" />
+    @if (layout(); as plan) {
+      @if (view() === 'drawing') {
+        <div class="board-box" #box [style.height.px]="fitHeight()">
+          <app-life-drawing
+            [class.fill]="fitHeight() !== null"
+            [layout]="plan"
+            [pawns]="boardPawns()"
+            [lastStop]="lastStop()"
+            [choice]="choiceTiles()"
+          />
+        </div>
       }
     }
-  </ol>
+
+    <ol class="track" [class.behind]="layout() && view() === 'drawing'" aria-label="Board, from start to finish" data-track>
+      @for (row of rows(); track $index) {
+        @switch (row.kind) {
+          @case ('main') {
+            <li class="row main">
+              <ng-container *ngTemplateOutlet="tileView; context: { $implicit: row.tile }" />
+            </li>
+          }
+          @case ('lanes') {
+            <li class="row lanes" aria-hidden="true">
+              <span class="lane-name safe">Safe route</span>
+              <span class="lane-name degen">Degen route</span>
+            </li>
+          }
+          @case ('fork') {
+            <li class="row fork">
+              @if (row.safe; as tile) {
+                <ng-container *ngTemplateOutlet="tileView; context: { $implicit: tile }" />
+              } @else {
+                <span class="gap"></span>
+              }
+              @if (row.degen; as tile) {
+                <ng-container *ngTemplateOutlet="tileView; context: { $implicit: tile }" />
+              } @else {
+                <span class="gap"></span>
+              }
+            </li>
+          }
+        }
+      }
+    </ol>
+  </div>
 </div>
 
 <ng-template #tileView let-tile>

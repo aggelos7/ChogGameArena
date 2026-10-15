@@ -1,18 +1,37 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterEveryRender,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
+import { DrawingPawn, LifeDrawing } from './life-drawing';
 import {
   FORK_ABILITIES,
   LifeBoard,
+  LifeMove,
   LifePawn,
   LifeRoute,
   LifeTile,
   laneSummary,
   laneTiles,
+  fittedLayout,
+  lifeLayout,
   lifeRows,
   ordinal,
+  pawnOffset,
   previewSummary,
   seatColor,
   signedMon,
@@ -45,6 +64,38 @@ interface RouteOption {
 
 const ROUTE_NAMES: Record<LifeRoute, string> = { Safe: 'safe', Degen: 'degen' };
 
+/** A pawn on the illustrated board, where it's drawn: on its tile, or on the way there while it hops. */
+interface BoardPawn extends DrawnPawn, DrawingPawn {}
+
+/** How long a pawn takes to hop one tile when a move is shown (DEC-048). */
+export const HOP_MS = 200;
+
+/** The board's width from which the illustrated board runs across the screen instead of down it (DEC-048). */
+export const WIDE_BOARD = 760;
+
+/** The board's width from which the players sit beside the board, which then takes the height left on screen (DEC-048). */
+export const SIDE_BY_SIDE = 1200;
+
+/** The least height the board is given beside the players, however little is left on screen. */
+const LEAST_HEIGHT = 360;
+
+/** Where this device keeps the board view its player chose. */
+const VIEW_KEY = 'chogLife.boardView';
+
+type BoardView = 'drawing' | 'list';
+
+function savedView(): BoardView {
+  try {
+    return globalThis.localStorage?.getItem(VIEW_KEY) === 'list' ? 'list' : 'drawing';
+  } catch {
+    return 'drawing';
+  }
+}
+
+function reducedMotion(): boolean {
+  return typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 /**
  * The Chog Life board (STORY-036, DEC-038): a vertical track from start to finish, with each fork's Safe and Degen lanes
  * side by side, every tile's type and the pawns standing on it. Pawns are numbered and coloured by seat, and the legend
@@ -62,10 +113,15 @@ const ROUTE_NAMES: Record<LifeRoute, string> = { Safe: 'safe', Degen: 'degen' };
  * ability and the last move says what it did (for Lucky Reroll, both outcomes drawn). After Event Preview, choosing a
  * route shows only you your next move there, and you keep that route or switch to the other one blind (STORY-042,
  * DEC-044).
+ * The track is drawn as an illustrated board laid out from the server's tile graph: a winding road in rows, with each
+ * fork's lanes side by side, tile icons by type and event kind, and pawns that hop along the route of each new move. The
+ * vertical track stays as the list view, for screen readers, on narrow screens and when the graph can't be laid out.
+ * From a 760 px width the board runs across the screen, and from 1200 px the players sit beside it with the controls
+ * under it, so the whole game fits a 1080p screen (STORY-064, DEC-048).
  */
 @Component({
   selector: 'app-life-board',
-  imports: [AvatarBadge, NgTemplateOutlet],
+  imports: [AvatarBadge, LifeDrawing, NgTemplateOutlet],
   templateUrl: './life-board.html',
   styleUrl: './life-board.scss',
 })
@@ -87,9 +143,109 @@ export class LifeBoardView {
   /** The time now, ticking every second for the clock. */
   private readonly now = signal(Date.now());
 
+  /** The illustrated board, or null when the tile graph can't be laid out and only the list is shown. */
+  protected readonly layout = computed(() => {
+    const tiles = this.board().tiles;
+    const space = this.space();
+    if (space) {
+      return fittedLayout(tiles, space.width, space.height);
+    }
+    return lifeLayout(tiles, this.width() >= WIDE_BOARD ? 'horizontal' : 'vertical');
+  });
+  /** The board's width, once measured. */
+  private readonly width = signal(0);
+  /** Beside the players: the width of the board and the height left for it on screen, in pixels; null otherwise. */
+  private readonly space = signal<{ width: number; height: number } | null>(null);
+  private readonly box = viewChild<ElementRef<HTMLElement>>('box');
+  /** The drawing's height beside the players: the space left, or less when the board is wider than it is tall. */
+  protected readonly fitHeight = computed(() => {
+    const space = this.space();
+    const plan = this.layout();
+    return space && plan ? Math.min(space.height, (space.width * plan.height) / plan.width) : null;
+  });
+  protected readonly view = signal<BoardView>(savedView());
+
+  /** The pawn hopping along the latest move and the tile it's on now; null when no move is being shown. */
+  private readonly hop = signal<{ seat: number; tile: number } | null>(null);
+  /** The latest move already seen; undefined before the first board, whose move is never replayed. */
+  private seenMove: string | null | undefined = undefined;
+  private hopTimer: ReturnType<typeof setTimeout> | undefined;
+
   constructor() {
     const tick = setInterval(() => this.now.set(Date.now()), 1000);
-    inject(DestroyRef).onDestroy(() => clearInterval(tick));
+    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    let resize: ResizeObserver | undefined;
+    afterNextRender(() => {
+      if (typeof ResizeObserver === 'function') {
+        resize = new ResizeObserver(([entry]) => this.width.set(entry.contentRect.width));
+        resize.observe(host);
+      }
+    });
+    // Beside the players, the board takes the height left below its top; measured after each render, as the page moves.
+    afterEveryRender(() => this.measure());
+    const onResize = (): void => this.measure();
+    globalThis.addEventListener?.('resize', onResize);
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(tick);
+      clearTimeout(this.hopTimer);
+      resize?.disconnect();
+      globalThis.removeEventListener?.('resize', onResize);
+    });
+    effect(() => {
+      const move = this.board().lastMove;
+      untracked(() => this.follow(move));
+    });
+  }
+
+  private measure(): void {
+    const box = this.box()?.nativeElement;
+    let space: { width: number; height: number } | null = null;
+    const rect = box?.getBoundingClientRect();
+    if (rect && rect.width > 0 && this.width() >= SIDE_BY_SIDE) {
+      const top = rect.top + (globalThis.scrollY ?? 0);
+      space = { width: Math.round(rect.width), height: Math.round(Math.max(LEAST_HEIGHT, (globalThis.innerHeight ?? 0) - top - 16)) };
+    }
+    const current = this.space();
+    if (space?.width !== current?.width || space?.height !== current?.height) {
+      this.space.set(space);
+    }
+  }
+
+  protected toggleView(): void {
+    const view: BoardView = this.view() === 'drawing' ? 'list' : 'drawing';
+    this.view.set(view);
+    try {
+      globalThis.localStorage?.setItem(VIEW_KEY, view);
+    } catch {
+      // Without storage the choice lasts until the page closes.
+    }
+  }
+
+  /**
+   * Shows a new move: its pawn hops from where it was along the route the server resolved, a tile at a time, and then
+   * stands where the server put it. The first board's move, a pass at the finish and reduced motion show no hops.
+   */
+  private follow(move: LifeMove | undefined): void {
+    const key = move ? JSON.stringify([move.seat, move.roll, move.from, move.to, move.path]) : null;
+    if (key === this.seenMove) {
+      return;
+    }
+    const first = this.seenMove === undefined;
+    this.seenMove = key;
+    clearTimeout(this.hopTimer);
+    this.hop.set(null);
+    if (first || !move || move.roll === undefined || move.path.length === 0 || reducedMotion()) {
+      return;
+    }
+    const route = [move.from, ...move.path];
+    let step = 0;
+    const next = (): void => {
+      this.hop.set(step < route.length ? { seat: move.seat, tile: route[step++] } : null);
+      if (this.hop()) {
+        this.hopTimer = setTimeout(next, HOP_MS);
+      }
+    };
+    next();
   }
 
   /** The time left as "12:05", while the match runs and has a time limit. */
@@ -120,23 +276,47 @@ export class LifeBoardView {
       .sort((a, b) => a.seat - b.seat);
   });
 
-  /** The pawns standing on each tile, in seat order. */
-  protected readonly pawnsByTile = computed(() => {
+  /** Every pawn as drawn, in seat order. */
+  private readonly drawnPawns = computed(() => {
     const bySeat = new Map(this.players().map((member) => [member.seat, member]));
+    return [...this.board().pawns]
+      .sort((a, b) => a.seat - b.seat)
+      .map((pawn): DrawnPawn & { tile: number } => {
+        const member = bySeat.get(pawn.seat);
+        return {
+          seat: pawn.seat,
+          tile: pawn.tile,
+          color: seatColor(pawn.seat),
+          name: member?.displayName ?? `Seat ${pawn.seat}`,
+          isYou: !!member?.isYou,
+          isTurn: !!member?.isTurn,
+          lane: pawn.lane,
+        };
+      });
+  });
+
+  /** The pawns standing on each tile, in seat order, where the server put them. */
+  protected readonly pawnsByTile = computed(() => {
     const byTile = new Map<number, DrawnPawn[]>();
-    for (const pawn of [...this.board().pawns].sort((a, b) => a.seat - b.seat)) {
-      const member = bySeat.get(pawn.seat);
-      const drawn: DrawnPawn = {
-        seat: pawn.seat,
-        color: seatColor(pawn.seat),
-        name: member?.displayName ?? `Seat ${pawn.seat}`,
-        isYou: !!member?.isYou,
-        isTurn: !!member?.isTurn,
-        lane: pawn.lane,
-      };
-      byTile.set(pawn.tile, [...(byTile.get(pawn.tile) ?? []), drawn]);
+    for (const pawn of this.drawnPawns()) {
+      byTile.set(pawn.tile, [...(byTile.get(pawn.tile) ?? []), pawn]);
     }
     return byTile;
+  });
+
+  /** The pawns on the illustrated board, sharing their tile's edges, with a hopping pawn on the tile it has reached. */
+  protected readonly boardPawns = computed<BoardPawn[]>(() => {
+    const spots = this.layout()?.spots;
+    if (!spots) {
+      return [];
+    }
+    const hop = this.hop();
+    const pawns = this.drawnPawns().map((pawn) => (hop?.seat === pawn.seat ? { ...pawn, tile: hop.tile } : pawn));
+    return pawns.map((pawn) => {
+      const together = pawns.filter((other) => other.tile === pawn.tile);
+      const offset = pawnOffset(together.indexOf(pawn), together.length);
+      return { ...pawn, x: spots[pawn.tile].x + offset.x, y: spots[pawn.tile].y + offset.y };
+    });
   });
 
   protected readonly turnOf = computed(() => this.players().find((member) => member.isTurn) ?? null);
@@ -236,7 +416,7 @@ export class LifeBoardView {
   protected readonly defaultRoute = computed(() => ROUTE_NAMES[this.board().defaultLane ?? 'Safe']);
 
   /** The tiles of both lanes of the fork being chosen at, which the board highlights. */
-  private readonly choiceTiles = computed(() => {
+  protected readonly choiceTiles = computed(() => {
     const fork = this.fork();
     const tiles = this.board().tiles;
     return new Set(fork === null ? [] : [...laneTiles(tiles, fork, 'Safe'), ...laneTiles(tiles, fork, 'Degen')].map((tile) => tile.index));
@@ -298,9 +478,14 @@ export class LifeBoardView {
     return this.choiceTiles().has(tile.index);
   }
 
-  protected isLastStop(tile: LifeTile): boolean {
+  /** The tile the latest roll stopped on, which the board marks; null before the first roll or after a pass. */
+  protected readonly lastStop = computed(() => {
     const move = this.board().lastMove;
-    return !!move && move.roll !== undefined && move.to === tile.index;
+    return move && move.roll !== undefined ? move.to : null;
+  });
+
+  protected isLastStop(tile: LifeTile): boolean {
+    return this.lastStop() === tile.index;
   }
 
   protected pawnsOn(tile: LifeTile): DrawnPawn[] {

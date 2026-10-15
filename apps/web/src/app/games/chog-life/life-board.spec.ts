@@ -1,14 +1,20 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RoomMember } from '../../rooms/rooms-api';
-import { LifeBoardView } from './life-board';
+import { HOP_MS, LifeBoardView, SIDE_BY_SIDE, WIDE_BOARD } from './life-board';
 import { FORK_BOARD, lifePawn } from '../../testing';
 import {
   LifeBoard,
   LifeStakeReturns,
+  LifeTile,
+  SPOT_HEIGHT,
+  SPOT_WIDTH,
   laneSummary,
   laneTiles,
+  fittedLayout,
+  lifeLayout,
   lifeRows,
   ordinal,
+  pawnOffset,
   outcomeRule,
   previewSummary,
   seatColor,
@@ -37,6 +43,39 @@ function member(displayName: string, seat: number, overrides: Partial<RoomMember
 }
 
 const NAMES = ['Alice', 'Bob', 'Carol', 'Dave', 'Erin', 'Frank'];
+
+/** A tile linking to `next`, or to `[safe, degen]` lanes for a branch. */
+function t(index: number, type: LifeTile['type'], lane: LifeTile['lane'], next?: number | [number, number]): LifeTile {
+  const links = Array.isArray(next) ? { safeNext: next[0], degenNext: next[1] } : next === undefined ? {} : { next };
+  return { index, type, lane, ...links, ...(type === 'Reward' || type === 'Loss' ? { amount: 10 } : {}), ...(type === 'Event' ? { event: 'Market' } : {}) };
+}
+
+/** The shape of the server's version 1 board: 36 tiles, a 4-tile and a 3-tile fork. */
+const FULL_TILES: LifeTile[] = [
+  ...Array.from({ length: 9 }, (_, i) => t(i, i === 0 ? 'Start' : 'Normal', 'Main', i + 1)),
+  t(9, 'Branch', 'Main', [10, 14]),
+  t(10, 'Reward', 'Safe', 11),
+  t(11, 'Normal', 'Safe', 12),
+  t(12, 'Reward', 'Safe', 13),
+  t(13, 'Normal', 'Safe', 18),
+  t(14, 'Event', 'Degen', 15),
+  t(15, 'Reward', 'Degen', 16),
+  t(16, 'Event', 'Degen', 17),
+  t(17, 'Event', 'Degen', 18),
+  ...Array.from({ length: 7 }, (_, i) => t(18 + i, 'Normal', 'Main', 19 + i)),
+  t(25, 'Branch', 'Main', [26, 29]),
+  t(26, 'Reward', 'Safe', 27),
+  t(27, 'Normal', 'Safe', 28),
+  t(28, 'Reward', 'Safe', 32),
+  t(29, 'Event', 'Degen', 30),
+  t(30, 'Reward', 'Degen', 31),
+  t(31, 'Event', 'Degen', 32),
+  t(32, 'Event', 'Main', 33),
+  t(33, 'Loss', 'Main', 34),
+  t(34, 'Reward', 'Main', 35),
+  t(35, 'Finish', 'Main'),
+];
+const FULL_BOARD: LifeBoard = { rulesVersion: 2, tiles: FULL_TILES, pawns: [lifePawn(1, 0), lifePawn(2, 9)] };
 
 describe('Chog Life board model', () => {
   it('reads a board from the room state and refuses anything else', () => {
@@ -192,6 +231,136 @@ describe('Chog Life board model', () => {
   });
 });
 
+describe('Chog Life illustrated board layout', () => {
+  const at = (tiles: LifeTile[]) => {
+    const layout = lifeLayout(tiles);
+    return (index: number) => ({ x: layout?.spots[index].x, y: layout?.spots[index].y });
+  };
+
+  it('winds the main track in rows of four, turning back at the end of each row', () => {
+    const tiles = Array.from({ length: 10 }, (_, i) => t(i, i === 0 ? 'Start' : i === 9 ? 'Finish' : 'Normal', 'Main', i < 9 ? i + 1 : undefined));
+    const layout = lifeLayout(tiles);
+    const spot = at(tiles);
+
+    expect(tiles.map((_, i) => spot(i).x)).toEqual([54, 138, 222, 306, 306, 222, 138, 54, 54, 138]);
+    expect(tiles.map((_, i) => spot(i).y)).toEqual([44, 44, 44, 44, 124, 124, 124, 124, 204, 204]);
+    expect(layout?.height).toBe(248);
+    const road = (from: number) => layout?.roads.find((r) => r.from === from)?.path;
+    expect(road(0)).toBe('M54 44 L138 44');
+    // U-turns bulge out past the side they turn at.
+    expect(road(3)).toBe('M306 44 C354 44 354 124 306 124');
+    expect(road(7)).toBe('M54 124 C6 124 6 204 54 204');
+  });
+
+  it('splits each fork into its two lanes side by side, which join the main track again', () => {
+    const layout = lifeLayout(FORK_BOARD.tiles);
+    const spot = at(FORK_BOARD.tiles);
+
+    expect([spot(2), spot(3), spot(4)]).toEqual([
+      { x: 222, y: 44 },
+      { x: 110, y: 132 },
+      { x: 110, y: 204 },
+    ]);
+    expect([spot(5), spot(6), spot(7)].map((s) => s.x)).toEqual([250, 250, 250]);
+    expect([spot(5), spot(6), spot(7)].map((s) => s.y)).toEqual([132, 204, 276]);
+    // After the fork the track starts a new row, still going the same way.
+    expect([spot(8), spot(9)]).toEqual([
+      { x: 54, y: 356 },
+      { x: 138, y: 356 },
+    ]);
+    expect(layout?.laneNames).toEqual([
+      { route: 'Safe', x: 110, y: 88 },
+      { route: 'Degen', x: 250, y: 88 },
+    ]);
+    expect(layout?.roads.map((r) => `${r.from}-${r.to} ${r.lane}`)).toEqual([
+      '0-1 Main',
+      '1-2 Main',
+      '2-3 Safe',
+      '2-5 Degen',
+      '3-4 Safe',
+      '4-8 Safe',
+      '5-6 Degen',
+      '6-7 Degen',
+      '7-8 Degen',
+      '8-9 Main',
+    ]);
+    expect(layout?.roads.find((r) => r.from === 2 && r.to === 5)?.path).toBe('M222 44 C222 88 250 88 250 132');
+    expect(layout?.roads.find((r) => r.from === 3)?.path).toBe('M110 132 L110 204');
+  });
+
+  it('turns the board on its side for wide screens, with each fork’s lane names between its lanes', () => {
+    const tall = lifeLayout(FORK_BOARD.tiles);
+    const wide = lifeLayout(FORK_BOARD.tiles, 'horizontal');
+
+    expect([wide?.width, wide?.height]).toEqual([tall?.height, tall?.width]);
+    expect(wide?.spots.map((s) => [s.x, s.y])).toEqual(tall?.spots.map((s) => [s.y, s.x]));
+    expect(wide?.roads.find((r) => r.from === 2 && r.to === 5)?.path).toBe('M44 222 C88 222 88 250 132 250');
+    // Safe runs above Degen; their names sit by each lane's first tile, between the two lanes.
+    expect(wide?.laneNames).toEqual([
+      { route: 'Safe', x: 132, y: 151 },
+      { route: 'Degen', x: 132, y: 216 },
+    ]);
+  });
+
+  it('fits the whole 36-tile board without tiles overlapping or leaving the board', () => {
+    const layout = lifeLayout(FULL_TILES);
+    expect(layout?.spots.map((s) => s.tile.index)).toEqual(FULL_TILES.map((tile) => tile.index));
+    const spots = layout?.spots ?? [];
+    for (const a of spots) {
+      expect(a.x - SPOT_WIDTH / 2).toBeGreaterThanOrEqual(0);
+      expect(a.x + SPOT_WIDTH / 2).toBeLessThanOrEqual(layout?.width ?? 0);
+      expect(a.y + SPOT_HEIGHT / 2).toBeLessThan(layout?.height ?? 0);
+      for (const b of spots.filter((other) => other !== a)) {
+        expect(Math.abs(a.x - b.x) >= SPOT_WIDTH || Math.abs(a.y - b.y) >= SPOT_HEIGHT).toBe(true);
+      }
+    }
+    // Every link of the graph is a road.
+    expect(layout?.roads.length).toBe(37);
+  });
+
+  it('fits the horizontal board to the space it has: taller columns for a taller space', () => {
+    const across = (columns: number) => lifeLayout(FULL_TILES, 'horizontal', columns);
+    // Eight tiles to a column on the whole board, still without overlaps, and the lanes spread further apart.
+    const eight = across(8);
+    expect(eight?.height).toBe(696);
+    const spots = eight?.spots ?? [];
+    for (const a of spots) {
+      for (const b of spots.filter((other) => other !== a)) {
+        expect(Math.abs(a.x - b.x) >= SPOT_WIDTH || Math.abs(a.y - b.y) >= SPOT_HEIGHT).toBe(true);
+      }
+    }
+    expect(new Set(spots.filter((s) => s.tile.lane !== 'Main').map((s) => s.y))).toEqual(new Set([201, 495]));
+
+    // A wide, low space keeps four to a column; a full-height space beside the players takes more.
+    expect(fittedLayout(FULL_TILES, 1044, 380)).toEqual(across(4));
+    expect(fittedLayout(FULL_TILES, 1044, 804)).toEqual(across(8));
+    // A wider space fills its height too, rather than keeping four to a column for bigger tiles.
+    const filled = fittedLayout(FULL_TILES, 1304, 730);
+    const scale = Math.min(1304 / (filled?.width ?? 1), 730 / (filled?.height ?? 1));
+    expect(scale).toBeGreaterThanOrEqual(0.9);
+    expect(scale * (filled?.height ?? 0)).toBeGreaterThan(650);
+    // Too little room for readable tiles in any shape: the one drawn largest.
+    expect(fittedLayout(FULL_TILES, 600, 300)).toEqual(across(4));
+    expect(fittedLayout([t(0, 'Start', 'Main', 2), t(1, 'Normal', 'Main', 2), t(2, 'Finish', 'Main')], 1044, 804)).toBeNull();
+  });
+
+  it('gives up when a tile can be reached by no route, so the list is shown instead', () => {
+    expect(lifeLayout([t(0, 'Start', 'Main', 2), t(1, 'Normal', 'Main', 2), t(2, 'Finish', 'Main')])).toBeNull();
+  });
+
+  it('spreads up to six pawns along the top and bottom edges of their tile', () => {
+    const offsets = (count: number) => Array.from({ length: count }, (_, i) => pawnOffset(i, count));
+
+    expect(offsets(1)).toEqual([{ x: 0, y: -27 }]);
+    expect(offsets(2)).toEqual([
+      { x: -12, y: -27 },
+      { x: 12, y: -27 },
+    ]);
+    expect(offsets(4).map((o) => `${o.x},${o.y}`)).toEqual(['-20,-27', '0,-27', '20,-27', '0,27']);
+    expect(offsets(6).map((o) => `${o.x},${o.y}`)).toEqual(['-20,-27', '0,-27', '20,-27', '-20,27', '0,27', '20,27']);
+  });
+});
+
 describe('Chog Life board', () => {
   let fixture: ComponentFixture<LifeBoardView>;
   let page: HTMLElement;
@@ -212,6 +381,7 @@ describe('Chog Life board', () => {
   const pawnsOn = (index: number) => Array.from(tile(index).querySelectorAll('[data-pawn]')).map((p) => p.textContent?.trim());
 
   beforeEach(() => {
+    localStorage.clear();
     TestBed.configureTestingModule({ imports: [LifeBoardView] });
     fixture = TestBed.createComponent(LifeBoardView);
     page = fixture.nativeElement as HTMLElement;
@@ -294,7 +464,8 @@ describe('Chog Life board', () => {
     render({ ...FORK_BOARD, pawns: [lifePawn(1, 2, 100), lifePawn(2, 0, 100)], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
 
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 2 and moved to tile 2 (Safe or Degen?).');
-    expect(Array.from(page.querySelectorAll('.last-stop')).map((t) => (t as HTMLElement).dataset['tile'])).toEqual(['2']);
+    expect(Array.from(page.querySelectorAll('[data-track] .last-stop')).map((t) => (t as HTMLElement).dataset['tile'])).toEqual(['2']);
+    expect(Array.from(page.querySelectorAll('[data-drawing] .last-stop')).map((t) => (t as HTMLElement).dataset['spot'])).toEqual(['2']);
 
     render({ ...FORK_BOARD, pawns: [lifePawn(1, 2, 100), lifePawn(2, 9, 100)], lastMove: { seat: 2, from: 9, to: 9, path: [] } }, members);
     expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob passed at the finish.');
@@ -672,6 +843,187 @@ describe('Chog Life board', () => {
       expect(page.querySelector('[data-ending]')?.textContent).toBe(text);
       expect(page.querySelector('[data-clock]')).toBeNull();
       expect(page.querySelector('[data-roll]')).toBeNull();
+    });
+  });
+  describe('illustrated', () => {
+    const boardPawn = (seat: number) => page.querySelector<SVGElement>(`[data-board-pawn="${seat}"]`);
+    const at = (seat: number) => Number(boardPawn(seat)?.getAttribute('data-at'));
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    /** A board made under fake timers, so the hops step with them. */
+    function underFakeTimers(): void {
+      fixture.destroy();
+      vi.useFakeTimers();
+      fixture = TestBed.createComponent(LifeBoardView);
+      page = fixture.nativeElement;
+    }
+
+    it('draws every tile, both lanes of each fork and the roads, with the list behind it for screen readers', () => {
+      render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+
+      const drawing = page.querySelector('[data-drawing]');
+      expect(drawing?.getAttribute('aria-hidden')).toBe('true');
+      const spots = Array.from(page.querySelectorAll<SVGElement>('[data-spot]'));
+      expect(spots.map((s) => Number(s.dataset['spot']))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      expect(spots.map((s) => s.dataset['lane'])).toEqual(['Main', 'Main', 'Main', 'Safe', 'Safe', 'Degen', 'Degen', 'Degen', 'Main', 'Main']);
+      expect(spots[1].textContent).toContain('+20 MON');
+      expect(spots[2].textContent).toContain('Fork');
+      expect(spots[5].textContent).toContain('Rug pull');
+      expect(Array.from(page.querySelectorAll('[data-road]')).map((r) => r.getAttribute('data-road'))).toContain('7-8');
+      expect(Array.from(drawing?.querySelectorAll('.lane-title') ?? []).map((n) => n.textContent?.trim())).toEqual(['Safe', 'Degen']);
+      // Each type and event kind has its own icon.
+      const icon = (index: number) => spots[index].querySelector('.icon')?.innerHTML;
+      expect(new Set([0, 1, 2, 4, 5, 7, 8, 9].map(icon)).size).toBe(8);
+      expect(page.querySelector('[data-track]')?.classList).toContain('behind');
+      expect(page.querySelectorAll('[data-tile]').length).toBe(10);
+    });
+
+    it('runs the board across a wide screen and down a narrow one', () => {
+      let width = WIDE_BOARD;
+      const observers: ((entries: { contentRect: { width: number } }[]) => void)[] = [];
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(private readonly callback: (entries: { contentRect: { width: number } }[]) => void) {
+            observers.push(callback);
+          }
+          observe(): void {
+            this.callback([{ contentRect: { width } }]);
+          }
+          disconnect(): void {
+            // Nothing to stop.
+          }
+        },
+      );
+      fixture.destroy();
+      fixture = TestBed.createComponent(LifeBoardView);
+      page = fixture.nativeElement;
+      render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2)]);
+      fixture.detectChanges();
+      const viewBox = () => page.querySelector('[data-drawing]')?.getAttribute('viewBox');
+
+      expect(viewBox()).toBe('0 0 400 360');
+      width = WIDE_BOARD - 1;
+      observers.forEach((callback) => callback([{ contentRect: { width } }]));
+      fixture.detectChanges();
+      expect(viewBox()).toBe('0 0 360 400');
+    });
+
+    it('beside the players, fills the height left on screen with the board', () => {
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(private readonly callback: (entries: { contentRect: { width: number } }[]) => void) {}
+          observe(): void {
+            this.callback([{ contentRect: { width: SIDE_BY_SIDE } }]);
+          }
+          disconnect(): void {
+            // Nothing to stop.
+          }
+        },
+      );
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 100, width: 1000 } as DOMRect);
+      fixture.destroy();
+      fixture = TestBed.createComponent(LifeBoardView);
+      page = fixture.nativeElement;
+      render(FULL_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2)]);
+      fixture.detectChanges();
+      fixture.detectChanges();
+
+      // jsdom's window is 768 pixels high: 652 are left below a board starting at 100, less a 16-pixel margin.
+      const fitted = fittedLayout(FULL_TILES, 1000, 652);
+      expect(page.querySelector('[data-drawing]')?.getAttribute('viewBox')).toBe(`0 0 ${fitted?.width} ${fitted?.height}`);
+      const box = page.querySelector<HTMLElement>('.board-box');
+      expect(box?.style.height).toBe(`${Math.min(652, (1000 * (fitted?.height ?? 0)) / (fitted?.width ?? 1))}px`);
+      expect(page.querySelector('app-life-drawing')?.classList).toContain('fill');
+      vi.restoreAllMocks();
+    });
+
+    it.each([2, 6])('draws all %i pawns where the server put them, ringing whose turn it is', (count) => {
+      const members = NAMES.slice(0, count).map((name, i) => member(name, i + 1, { isTurn: i === 1, isYou: i === 0 }));
+      render({ ...FORK_BOARD, pawns: members.map((_, i) => lifePawn(i + 1, i % 2 === 0 ? 0 : 5)) }, members);
+
+      const pawns = Array.from(page.querySelectorAll<SVGElement>('[data-board-pawn]'));
+      expect(pawns.map((p) => p.textContent?.trim())).toEqual(members.map((m) => String(m.seat)));
+      expect(pawns.map((p) => Number(p.dataset['at']))).toEqual(members.map((_, i) => (i % 2 === 0 ? 0 : 5)));
+      expect(page.querySelectorAll('[data-turn-ring]').length).toBe(1);
+      expect(boardPawn(2)?.querySelector('[data-turn-ring]')).not.toBeNull();
+      expect(boardPawn(1)?.querySelector('.pawn-body')?.classList).toContain('you');
+      // Pawns sharing a tile stand apart.
+      const places = pawns.map((p) => (p as SVGElement & { style: CSSStyleDeclaration }).style.transform);
+      expect(new Set(places).size).toBe(count);
+    });
+
+    it('switches to the list and back, and remembers the choice on this device', () => {
+      render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2)]);
+      const toggle = () => page.querySelector<HTMLButtonElement>('[data-view-toggle]');
+
+      expect(toggle()?.textContent?.trim()).toBe('Show as list');
+      toggle()?.click();
+      fixture.detectChanges();
+      expect(page.querySelector('[data-drawing]')).toBeNull();
+      expect(page.querySelector('[data-track]')?.classList).not.toContain('behind');
+      expect(toggle()?.textContent?.trim()).toBe('Show illustrated board');
+
+      fixture.destroy();
+      fixture = TestBed.createComponent(LifeBoardView);
+      page = fixture.nativeElement;
+      render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2)]);
+      expect(page.querySelector('[data-drawing]')).toBeNull();
+
+      toggle()?.click();
+      fixture.detectChanges();
+      expect(page.querySelector('[data-drawing]')).not.toBeNull();
+      expect(localStorage.getItem('chogLife.boardView')).toBe('drawing');
+    });
+
+    it('shows only the list when the tile graph can’t be laid out', () => {
+      const tiles = [t(0, 'Start', 'Main', 2), t(1, 'Normal', 'Main', 2), t(2, 'Finish', 'Main')];
+      render({ ...FORK_BOARD, tiles, pawns: [lifePawn(1, 0)] }, [member('Alice', 1, { isTurn: true })]);
+
+      expect(page.querySelector('[data-drawing]')).toBeNull();
+      expect(page.querySelector('[data-view-toggle]')).toBeNull();
+      expect(page.querySelector('[data-track]')?.classList).not.toContain('behind');
+      expect(pawnsOn(0)).toEqual(['1']);
+    });
+
+    it('hops a moved pawn along the route the server resolved, a tile at a time, and never further', () => {
+      underFakeTimers();
+      const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0)] }, members);
+      expect(at(1)).toBe(0);
+
+      const moved: LifeBoard = { ...FORK_BOARD, pawns: [lifePawn(1, 2), lifePawn(2, 0)], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } };
+      render(moved, members);
+      // The list always shows where the server put the pawn.
+      expect(pawnsOn(2)).toEqual(['1']);
+      const seen = [at(1)];
+      for (let i = 0; i < 4; i++) {
+        vi.advanceTimersByTime(HOP_MS);
+        fixture.detectChanges();
+        seen.push(at(1));
+      }
+      expect(seen).toEqual([0, 1, 2, 2, 2]);
+      expect(at(2)).toBe(0);
+
+      // The same move again, as when the page refetches after a command, doesn't hop again.
+      render({ ...moved, choosing: 1 }, members);
+      expect(at(1)).toBe(2);
+    });
+
+    it('shows a move without hops when the page loads, and with reduced motion', () => {
+      underFakeTimers();
+      const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 2), lifePawn(2, 0)], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
+      expect(at(1)).toBe(2);
+
+      vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 2), lifePawn(2, 5)], lastMove: { seat: 2, roll: 1, from: 2, to: 5, path: [5], lane: 'Degen' } }, members);
+      expect(at(2)).toBe(5);
     });
   });
 });

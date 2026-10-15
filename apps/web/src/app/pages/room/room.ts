@@ -1,4 +1,4 @@
-import { DOCUMENT } from '@angular/common';
+import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
 import { Component, DestroyRef, OnInit, computed, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
@@ -41,7 +41,7 @@ const NFT_COLOR = 'var(--brand)';
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, LoadingState, ErrorState, AvatarBadge, LifeBoardView, LifeResultsView, TurnTimer],
+  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, LifeBoardView, LifeResultsView, TurnTimer],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })
@@ -80,6 +80,18 @@ export class RoomPage implements OnInit {
     const room = this.room();
     return room?.gameType === 'chog-life' && (room.status === 'Active' || room.status === 'Completed') ? toLifeBoard(room.state) : null;
   });
+
+  /**
+   * A board is on the page: the live match you still play, or the final board. Its legend lists the players, so the
+   * lobby's player list is hidden (DEC-048).
+   */
+  protected readonly boardShown = computed(() => {
+    const room = this.room();
+    return !!this.lifeBoard() && (room?.status === 'Completed' || !this.you()?.hasLeft);
+  });
+
+  /** You're playing a live match with a board: its title and details go beside the board (DEC-048). */
+  protected readonly playing = computed(() => this.boardShown() && this.room()?.status === 'Active');
 
   /** A completed Chog Life match whose results the server stored (STORY-043, DEC-046), shown above the final board. */
   protected readonly hasLifeResults = computed(() => {
