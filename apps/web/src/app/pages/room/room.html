@@ -192,7 +192,7 @@
 
       @if (current.status === 'Active' && you(); as me) {
         @if (!me.hasLeft) {
-          <section class="match" [class.game-wide]="boardShown()" aria-labelledby="match-heading">
+          <section class="match" [class.game-wide]="!!lifeBoard()" aria-labelledby="match-heading">
             @if (lifeBoard(); as board) {
               <app-life-board
                 [board]="board"
@@ -221,6 +221,9 @@
               @if (turnTimer(); as timer) {
                 <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
               }
+              @if (raceBoard(); as board) {
+                <app-race-board [board]="board" [members]="current.members" [rolling]="busy()" (roll)="roll()" (endTurn)="endTurn()" />
+              }
             }
             <div class="leave" data-leave>
               @if (confirmingLeave()) {
@@ -244,6 +247,11 @@
         <section class="match game-wide" aria-labelledby="final-heading" data-final-board>
           <h2 id="final-heading">Final board</h2>
           <app-life-board [board]="board" [members]="current.members" />
+        </section>
+      } @else if (current.status === 'Completed' && raceBoard(); as board) {
+        <section class="match" aria-labelledby="final-heading" data-final-board>
+          <h2 id="final-heading">Final board</h2>
+          <app-race-board [board]="board" [members]="current.members" />
         </section>
       }
     }

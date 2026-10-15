@@ -1,0 +1,57 @@
+<div class="race-board" data-board="race">
+  <ul class="players" aria-label="Players and pawns" data-list="pawns">
+    @for (member of players(); track member.seat) {
+      <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
+        <span class="pawn" [style.background]="color(member.seat)" aria-hidden="true">{{ member.seat }}</span>
+        <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="1.75" />
+        <span class="name">{{ member.displayName }}</span>
+        @if (member.isYou) {
+          <span class="tag">You</span>
+        }
+        @if (member.isTurn) {
+          <span class="tag turn" data-turn>Turn</span>
+        }
+      </li>
+    }
+  </ul>
+  <p class="turn-line" role="status" data-turn-line>
+    @if (turnOf(); as current) {
+      @if (current.isYou) {
+        It’s your turn.
+      } @else {
+        It’s {{ current.displayName }}’s turn.
+      }
+    }
+  </p>
+  @if (lastMove(); as move) {
+    <p class="last-move" data-last-move>{{ move }}</p>
+  }
+  @if (yourPhase() === 'Move') {
+    <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
+  } @else if (yourPhase() === 'Play') {
+    <button type="button" class="action" [disabled]="rolling()" (click)="endTurn.emit()" data-end-turn>End turn</button>
+  }
+
+  <ol class="track" aria-label="Race track, from start to finish" [style.--columns]="columns()" [attr.data-columns]="columns()">
+    @for (spot of spots(); track spot.tile.index) {
+      <li
+        [class]="'tile type-' + spot.tile.type.toLowerCase()"
+        [style.grid-row]="spot.row"
+        [style.grid-column]="spot.column"
+        [attr.aria-label]="describe(spot.tile)"
+        [attr.data-tile]="spot.tile.index"
+        [attr.data-type]="spot.tile.type"
+      >
+        <span class="number" aria-hidden="true">{{ spot.tile.index }}</span>
+        <span class="label" aria-hidden="true">{{ label(spot.tile) }}</span>
+        <span class="pawns" aria-hidden="true">
+          @for (pawn of pawnsOn(spot.tile); track pawn.seat) {
+            <span class="pawn" [class.turn]="pawn.isTurn" [class.you]="pawn.isYou" [style.background]="pawn.color" [attr.data-pawn]="pawn.seat">
+              {{ pawn.seat }}
+            </span>
+          }
+        </span>
+      </li>
+    }
+  </ol>
+</div>

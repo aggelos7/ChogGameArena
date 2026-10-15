@@ -5,7 +5,7 @@ import { Router, provideRouter } from '@angular/router';
 import { Subject } from 'rxjs';
 import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { Room, RoomAbility, RoomMember } from '../../rooms/rooms-api';
-import { CATALOGUE, FORK_BOARD, lifePawn, lifeResult } from '../../testing';
+import { CATALOGUE, FORK_BOARD, RACE_BOARD, lifePawn, lifeResult } from '../../testing';
 import { RoomPage } from './room';
 
 /** Stands in for the hub connection: the spec pushes status changes and snapshots. */
@@ -860,6 +860,64 @@ describe('Room page', () => {
       fixture.detectChanges();
       expect(element().querySelector('[data-board]')).toBeNull();
       expect(element().querySelector('.match')?.textContent).toContain('You’re playing as Mint for this game.');
+    });
+
+    it('shows the Chog Race board with all six pawns under the room title once the game has started (STORY-050)', () => {
+      const names = ['Alice', 'Bob', 'Carol', 'Dave', 'Erin', 'Frank'];
+      load({
+        ...room,
+        gameType: 'chog-race',
+        status: 'Active',
+        state: { ...RACE_BOARD, pawns: [1, 2, 3, 4, 5, 6].map((seat) => ({ seat, tile: 0 })) },
+        turnEndsAt: new Date(Date.now() + 20_000).toISOString(),
+        turnSeconds: 25,
+        members: names.map((name, i) => member(name, { isHost: i === 0, isYou: i === 1, isTurn: i === 0, seat: i + 1 })),
+      });
+
+      const board = element().querySelector('.match [data-board="race"]');
+      expect(board?.querySelectorAll('[data-tile]').length).toBe(28);
+      expect(Array.from(board?.querySelectorAll('[data-tile="0"] [data-pawn]') ?? []).map((p) => p.textContent?.trim())).toEqual(['1', '2', '3', '4', '5', '6']);
+      expect(board?.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s Alice’s turn.');
+      expect(element().querySelector('h1')?.textContent).toBe('Chog Race room');
+      expect(element().querySelector('.match app-turn-timer')).not.toBeNull();
+      expect(element().querySelector('[data-list="members"]')).toBeNull();
+      expect(element().querySelector('.game-wide')).toBeNull();
+      expect(element().querySelector('[data-started]')?.classList).toContain('visually-hidden');
+    });
+
+    it('rolls and ends a Chog Race turn on your turn (STORY-051)', () => {
+      const started: Room = {
+        ...room,
+        version: 4,
+        gameType: 'chog-race',
+        status: 'Active',
+        state: { ...RACE_BOARD, phase: 'Move' },
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+      };
+      load(started);
+
+      element().querySelector<HTMLButtonElement>('[data-roll]')?.click();
+      const roll = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(roll.request.body).toMatchObject({ expectedVersion: 4, type: 'ROLL', payload: {} });
+      roll.flush({ actionId: roll.request.body.actionId, type: 'ROLL', version: 5, currentVersion: 5, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush({ ...started, version: 5, state: { ...RACE_BOARD, phase: 'Play' } });
+      fixture.detectChanges();
+
+      element().querySelector<HTMLButtonElement>('[data-end-turn]')?.click();
+      const ended = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(ended.request.body).toMatchObject({ expectedVersion: 5, type: 'END_TURN', payload: {} });
+    });
+
+    it('keeps the final Chog Race board once the game is over', () => {
+      load({
+        ...room,
+        gameType: 'chog-race',
+        status: 'Completed',
+        state: RACE_BOARD,
+        members: [member('Alice', { isHost: true, seat: 1, rank: 1 }), member('Bob', { isYou: true, seat: 2, rank: 2 })],
+      });
+
+      expect(element().querySelector('[data-final-board] [data-board="race"]')).not.toBeNull();
     });
 
     it('tells a player who left the game that they are out of it', () => {

@@ -1,6 +1,7 @@
 import { GameSummary } from './games/game-catalog';
 import { LifeBoard, LifePawn } from './games/chog-life/life-board-model';
 import { LifeResult } from './games/chog-life/life-results';
+import { RaceBoard, RaceTile } from './games/chog-race/race-board-model';
 
 /** Catalogue fixture covering every status. */
 export const CATALOGUE: GameSummary[] = [
@@ -58,3 +59,28 @@ export function lifeResult(portfolio: number, extra: Partial<LifeResult> = {}): 
     ...extra,
   };
 }
+
+/** The server's Chog Race version 1 track (STORY-050, DEC-054): 28 tiles with Card, Boost and Setback tiles. */
+export const RACE_TILES: RaceTile[] = Array.from({ length: 28 }, (_, index): RaceTile => {
+  const jumps: Record<number, RaceTile> = {
+    4: { index, type: 'Boost', to: 6 },
+    9: { index, type: 'Setback', to: 7 },
+    12: { index, type: 'Boost', to: 15 },
+    16: { index, type: 'Setback', to: 13 },
+    20: { index, type: 'Boost', to: 22 },
+    23: { index, type: 'Setback', to: 21 },
+  };
+  if (index === 0) return { index, type: 'Start' };
+  if (index === 27) return { index, type: 'Finish' };
+  if ([2, 7, 11, 14, 18, 22, 25].includes(index)) return { index, type: 'Card' };
+  return jumps[index] ?? { index, type: 'Normal' };
+});
+
+export const RACE_BOARD: RaceBoard = {
+  rulesVersion: 1,
+  tiles: RACE_TILES,
+  pawns: [
+    { seat: 1, tile: 0 },
+    { seat: 2, tile: 0 },
+  ],
+};

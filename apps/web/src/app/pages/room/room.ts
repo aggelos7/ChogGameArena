@@ -24,6 +24,8 @@ import { LifeResultsView, toLifeResult } from '../../games/chog-life/life-result
 import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
+import { RaceBoardView } from '../../games/chog-race/race-board';
+import { RACE_END_TURN, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -36,12 +38,13 @@ const NFT_COLOR = 'var(--brand)';
  * server pushes a versioned snapshot after every change and the page keeps the newest one it has seen, from the push or
  * a request alike, so an older answer never wins. A lost connection keeps retrying (STORY-027); Refresh is offered
  * while live updates are down. A started Chog Life game shows its board with every pawn (STORY-036, DEC-038), and the
- * player whose turn it is rolls from it (STORY-037, DEC-039).
+ * player whose turn it is rolls from it (STORY-037, DEC-039). Chog Race rolls the same way and ends a turn in its Play
+ * phase (STORY-051, DEC-055).
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, LifeBoardView, LifeResultsView, TurnTimer],
+  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, LifeBoardView, LifeResultsView, RaceBoardView, TurnTimer],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })
@@ -81,17 +84,26 @@ export class RoomPage implements OnInit {
     return room?.gameType === 'chog-life' && (room.status === 'Active' || room.status === 'Completed') ? toLifeBoard(room.state) : null;
   });
 
+  /** The Chog Race board in the room's game state, once the game has started (STORY-050, DEC-054); null otherwise. */
+  protected readonly raceBoard = computed(() => {
+    const room = this.room();
+    return room?.gameType === 'chog-race' && (room.status === 'Active' || room.status === 'Completed') ? toRaceBoard(room.state) : null;
+  });
+
   /**
    * A board is on the page: the live match you still play, or the final board. Its legend lists the players, so the
-   * lobby's player list is hidden (DEC-048).
+   * lobby's player list is hidden (DEC-048, DEC-054).
    */
   protected readonly boardShown = computed(() => {
     const room = this.room();
-    return !!this.lifeBoard() && (room?.status === 'Completed' || !this.you()?.hasLeft);
+    return !!(this.lifeBoard() || this.raceBoard()) && (room?.status === 'Completed' || !this.you()?.hasLeft);
   });
 
-  /** You're playing a live match with a board: its title and details go beside the board (DEC-048). */
-  protected readonly playing = computed(() => this.boardShown() && this.room()?.status === 'Active');
+  /**
+   * You're playing a live Chog Life match: its title and details go beside the board (DEC-048). The Chog Race board
+   * stays under the room's title.
+   */
+  protected readonly playing = computed(() => !!this.lifeBoard() && this.boardShown() && this.room()?.status === 'Active');
 
   /** A completed Chog Life match whose results the server stored (STORY-043, DEC-046), shown above the final board. */
   protected readonly hasLifeResults = computed(() => {
@@ -223,7 +235,12 @@ export class RoomPage implements OnInit {
    * updates are down. A refused roll (another player's turn, a turn that ran out, a stale view) shows the room as it is.
    */
   protected roll(): void {
-    this.command(LIFE_ROLL);
+    this.command(this.raceBoard() ? RACE_ROLL : LIFE_ROLL);
+  }
+
+  /** Ends a Chog Race turn in its Play phase without playing a card (STORY-051, DEC-055); refusals as for a roll. */
+  protected endTurn(): void {
+    this.command(RACE_END_TURN);
   }
 
   /** Chooses the route to leave a fork by, after a roll stopped there (STORY-039, DEC-041); refusals as for a roll. */

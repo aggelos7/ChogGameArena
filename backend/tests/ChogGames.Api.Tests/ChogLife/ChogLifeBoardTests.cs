@@ -165,18 +165,13 @@ public sealed class ChogLifeBoardTests(MigratedPostgresDatabase database) : ICla
     }
 
     [PostgresFact]
-    public async Task A_waiting_room_and_a_game_without_rules_show_no_board_or_time_limit()
+    public async Task A_waiting_room_shows_no_board_or_time_limit()
     {
-        var players = await GuestsAsync(4);
+        var players = await GuestsAsync(2);
         try
         {
-            var waiting = await WaitingAsync("chog-life", players[0], players[1]);
+            var waiting = await WaitingAsync("chog-life", players);
             Assert.Equal(((JsonElement?)null, (DateTimeOffset?)null), (waiting.State, waiting.MatchEndsAt));
-
-            var race = await StartedAsync("chog-race", players[2], players[3]);
-            Assert.Equal("Active", race.Status);
-            Assert.Equal(((JsonElement?)null, (DateTimeOffset?)null), (race.State, race.MatchEndsAt));
-            Assert.Null((await StoredAsync(race)).State);
         }
         finally
         {
