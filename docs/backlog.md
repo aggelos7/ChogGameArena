@@ -690,7 +690,7 @@
 
 #### STORY-045 — Production-like Compose deployment
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E07
 - **Implementation:** Create API, PostgreSQL, Redis, reverse proxy deployment config with persistent volumes.

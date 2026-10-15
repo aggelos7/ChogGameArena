@@ -37,6 +37,8 @@ test('runs frontend, native .NET and Compose checks', () => {
     'dotnet ef database update',
     'docker compose -f infrastructure/docker-compose.yml config',
     'npm run deps:verify',
+    'docker compose -f infrastructure/production/docker-compose.yml config',
+    'npm run deploy:verify',
   ]) {
     assert.ok(workflow.includes(step), `missing step: ${step}`);
   }

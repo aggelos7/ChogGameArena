@@ -111,7 +111,7 @@ jobs:
   compose:
     name: Docker Compose
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -126,3 +126,13 @@ jobs:
 
       - name: Smoke test (healthy services, data survives restart)
         run: npm run deps:verify
+
+      - name: Validate production Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          WALLET_AUTH_DOMAIN: localhost:8080
+          WALLET_AUTH_URI: http://localhost:8080
+        run: docker compose -f infrastructure/production/docker-compose.yml config --quiet
+
+      - name: Production stack smoke test (build, serve through nginx, data survives restart)
+        run: npm run deploy:verify
