@@ -54,6 +54,26 @@
   font-weight: 600;
 }
 
+.last-move {
+  margin-top: 0;
+}
+
+.action {
+  width: 100%;
+  min-height: var(--tap-target);
+  margin-bottom: 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--brand);
+}
+
+.action:disabled {
+  opacity: 0.5;
+}
+
 // Rows of --columns tiles; each tile is placed by the component so the track winds back and forth.
 .track {
   display: grid;

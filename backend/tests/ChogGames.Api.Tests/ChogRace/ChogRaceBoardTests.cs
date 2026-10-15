@@ -10,7 +10,7 @@ namespace ChogGames.Api.Tests.ChogRace;
 
 /// <summary>
 /// STORY-050, DEC-054: a started Chog Race match carries the track and every pawn in each player's snapshot, from the
-/// real rules. Pawns start on the start tile; nothing moves them yet, and the time cap isn't enforced until STORY-056.
+/// real rules. Pawns start on the start tile; the time cap isn't enforced until STORY-056.
 /// </summary>
 public sealed class ChogRaceBoardTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -191,15 +191,19 @@ public sealed class ChogRaceBoardTests(MigratedPostgresDatabase database) : ICla
             Assert.Equal(HttpStatusCode.NotFound, peek.StatusCode);
             Assert.Equal("room_not_found", (await peek.Content.ReadFromJsonAsync<ProblemDto>(Json))!.Code);
 
-            // Movement comes with STORY-051: until then a roll or a forged move to the finish is an unknown command.
-            foreach (var (type, payload) in new (string, object)[] { ("ROLL", new { }), ("MOVE", new { tile = 27 }) })
+            // An outsider can't roll, and a forged move to the finish is no command at all (STORY-051).
+            using (var rolled = await outsider.PostAsJsonAsync(
+                $"/api/rooms/{room.Code}/commands",
+                new { actionId = Guid.NewGuid(), matchId = room.MatchId, expectedVersion = room.Version, type = "ROLL", payload = new { } }))
             {
-                using var moved = await players[0].PostAsJsonAsync(
-                    $"/api/rooms/{room.Code}/commands",
-                    new { actionId = Guid.NewGuid(), matchId = room.MatchId, expectedVersion = room.Version, type, payload });
-                Assert.Equal(HttpStatusCode.BadRequest, moved.StatusCode);
-                Assert.Equal("unknown_command", (await moved.Content.ReadFromJsonAsync<ProblemDto>(Json))!.Code);
+                Assert.Equal(HttpStatusCode.NotFound, rolled.StatusCode);
             }
+
+            using var moved = await players[0].PostAsJsonAsync(
+                $"/api/rooms/{room.Code}/commands",
+                new { actionId = Guid.NewGuid(), matchId = room.MatchId, expectedVersion = room.Version, type = "MOVE", payload = new { tile = 27 } });
+            Assert.Equal(HttpStatusCode.BadRequest, moved.StatusCode);
+            Assert.Equal("unknown_command", (await moved.Content.ReadFromJsonAsync<ProblemDto>(Json))!.Code);
 
             Assert.Equal(before, await StoredAsync(room));
         }

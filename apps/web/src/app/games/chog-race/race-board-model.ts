@@ -14,12 +14,39 @@ export interface RacePawn {
   tile: number;
 }
 
-/** The Chog Race view in a room snapshot's `state` (STORY-050, DEC-054). */
+/**
+ * A seat's latest move (STORY-051, DEC-055): the server's roll, the tile it left, the tile it `landed` on and the tile it
+ * ended `to` after a Boost or Setback, and what the tile landed on does (absent for a Normal tile).
+ */
+export interface RaceMove {
+  seat: number;
+  roll: number;
+  from: number;
+  landed: number;
+  to: number;
+  effect?: Exclude<RaceTileType, 'Start' | 'Normal'>;
+}
+
+/** The current player's phase (DEC-055): rolling, or playing an optional card before ending the turn. */
+export type RacePhase = 'Move' | 'Play';
+
+/** The Chog Race view in a room snapshot's `state` (STORY-050, DEC-054; STORY-051, DEC-055). */
 export interface RaceBoard {
   rulesVersion: number;
   tiles: RaceTile[];
   pawns: RacePawn[];
+  lastMove?: RaceMove;
+  /** Absent once the match is over. */
+  phase?: RacePhase;
+  /** The winner's seat, once someone reached the Finish. */
+  winner?: number;
 }
+
+/** Rolls, moves and resolves the tile landed on, in the Move phase (DEC-055). */
+export const RACE_ROLL = 'ROLL';
+
+/** Ends the turn in the Play phase, without playing a card (DEC-055). */
+export const RACE_END_TURN = 'END_TURN';
 
 /** Where a tile sits on the drawn track: its grid row and column, from 1. */
 export interface RaceSpot {
@@ -55,7 +82,17 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       (jumps(tile['type']) ? isIndex(tile['to']) && tile['to'] < tiles.length : tile['to'] === undefined),
   );
   const validPawns = state['pawns'].every((pawn) => isRecord(pawn) && isIndex(pawn['seat']) && isIndex(pawn['tile']) && pawn['tile'] < tiles.length);
-  if (tiles.length === 0 || !validTiles || !validPawns) {
+  const move = state['lastMove'];
+  const validMove =
+    move === undefined ||
+    (isRecord(move) &&
+      isIndex(move['seat']) &&
+      isIndex(move['roll']) &&
+      [move['from'], move['landed'], move['to']].every((tile) => isIndex(tile) && tile < tiles.length) &&
+      (move['effect'] === undefined || ['Card', 'Boost', 'Setback', 'Finish'].includes(move['effect'] as string)));
+  const validPhase = state['phase'] === undefined || state['phase'] === 'Move' || state['phase'] === 'Play';
+  const validWinner = state['winner'] === undefined || isIndex(state['winner']);
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner) {
     return null;
   }
   return state as unknown as RaceBoard;

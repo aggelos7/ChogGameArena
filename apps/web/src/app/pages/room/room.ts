@@ -25,7 +25,7 @@ import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoa
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
 import { RaceBoardView } from '../../games/chog-race/race-board';
-import { toRaceBoard } from '../../games/chog-race/race-board-model';
+import { RACE_END_TURN, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -38,7 +38,8 @@ const NFT_COLOR = 'var(--brand)';
  * server pushes a versioned snapshot after every change and the page keeps the newest one it has seen, from the push or
  * a request alike, so an older answer never wins. A lost connection keeps retrying (STORY-027); Refresh is offered
  * while live updates are down. A started Chog Life game shows its board with every pawn (STORY-036, DEC-038), and the
- * player whose turn it is rolls from it (STORY-037, DEC-039).
+ * player whose turn it is rolls from it (STORY-037, DEC-039). Chog Race rolls the same way and ends a turn in its Play
+ * phase (STORY-051, DEC-055).
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
@@ -234,7 +235,12 @@ export class RoomPage implements OnInit {
    * updates are down. A refused roll (another player's turn, a turn that ran out, a stale view) shows the room as it is.
    */
   protected roll(): void {
-    this.command(LIFE_ROLL);
+    this.command(this.raceBoard() ? RACE_ROLL : LIFE_ROLL);
+  }
+
+  /** Ends a Chog Race turn in its Play phase without playing a card (STORY-051, DEC-055); refusals as for a roll. */
+  protected endTurn(): void {
+    this.command(RACE_END_TURN);
   }
 
   /** Chooses the route to leave a fork by, after a roll stopped there (STORY-039, DEC-041); refusals as for a roll. */
