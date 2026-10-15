@@ -716,7 +716,7 @@
 
 #### STORY-047 — Backup and restore runbook
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E07
 - **Implementation:** Schedule encrypted PostgreSQL backups and document restore with retention.

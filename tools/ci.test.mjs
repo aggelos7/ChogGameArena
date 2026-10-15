@@ -39,6 +39,7 @@ test('runs frontend, native .NET and Compose checks', () => {
     'npm run deps:verify',
     'docker compose -f infrastructure/production/docker-compose.yml config',
     'npm run deploy:verify',
+    'npm run backup:verify',
   ]) {
     assert.ok(workflow.includes(step), `missing step: ${step}`);
   }
