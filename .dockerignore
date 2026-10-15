@@ -1,0 +1,23 @@
+# Build context for the production images (STORY-045): the repository root. Only sources and
+# lockfiles go in; local builds, caches, secrets and git history stay out.
+.git
+.github
+.claude
+.angular
+.nx
+.vscode
+.idea
+**/node_modules
+**/dist
+**/coverage
+**/tmp
+**/bin
+**/obj
+**/TestResults
+**/.env
+**/.env.*
+**/*.user
+**/secrets.json
+docs
+infrastructure
+!infrastructure/production/nginx.conf

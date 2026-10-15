@@ -16,7 +16,8 @@
     "deps:up": "docker compose -f infrastructure/docker-compose.yml up -d --wait",
     "deps:down": "docker compose -f infrastructure/docker-compose.yml down",
     "deps:verify": "node tools/compose-smoke.mjs",
-    "db:migrate": "node tools/db-migrate.mjs"
+    "db:migrate": "node tools/db-migrate.mjs",
+    "deploy:verify": "node tools/deploy-smoke.mjs"
   },
   "dependencies": {
     "@angular/common": "22.2.1",
