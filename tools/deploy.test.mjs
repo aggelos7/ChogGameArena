@@ -1,5 +1,5 @@
-// STORY-045 production-like Compose deployment (DEC-049): validates the resolved configuration and
-// the image/proxy files without building or starting anything. Compose checks are skipped when the
+// STORY-045/046 production-like Compose deployment with HTTPS (DEC-049, DEC-050): validates the
+// resolved configuration and the image/proxy files without building or starting anything. Compose checks are skipped when the
 // Docker CLI is unavailable; `npm run deploy:verify` builds and runs the stack.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,7 +15,8 @@ const read = (...path) => readFileSync(join(...path), 'utf8');
 const hasDocker = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0;
 const skip = hasDocker ? false : 'Docker Compose CLI not available';
 
-const REQUIRED = { POSTGRES_PASSWORD: 'test-only', WALLET_AUTH_DOMAIN: 'app.example.com', WALLET_AUTH_URI: 'https://app.example.com' };
+const REQUIRED = { POSTGRES_PASSWORD: 'test-only', PUBLIC_HOSTNAME: 'app.example.com' };
+const WITH_CERTBOT = { ...REQUIRED, COMPOSE_PROFILES: 'letsencrypt' };
 
 // Resolve config with explicit test values only, ignoring any local infrastructure/production/.env.
 const resolveConfig = (env) =>
@@ -32,22 +33,52 @@ const config = (env = REQUIRED) => {
 
 const LONG_RUNNING = ['api', 'postgres', 'redis', 'web'];
 
-test('defines the web, api, migrate, postgres and redis services', { skip }, () => {
+test('defines the web, api, migrate, postgres and redis services, and certbot in the letsencrypt profile', { skip }, () => {
   assert.deepEqual(Object.keys(config().services).sort(), ['api', 'migrate', 'postgres', 'redis', 'web']);
+  assert.deepEqual(Object.keys(config(WITH_CERTBOT).services).sort(), ['api', 'certbot', 'migrate', 'postgres', 'redis', 'web']);
+  assert.match(read(production, '.env.example'), /^COMPOSE_PROFILES=letsencrypt$/m, 'the VM template turns certbot on');
 });
 
-test('only nginx publishes a port, on loopback 8080 by default', { skip }, () => {
-  const { services } = config();
+test('only nginx publishes ports: 80 and 443 on every interface by default', { skip }, () => {
+  const { services } = config(WITH_CERTBOT);
   for (const [name, service] of Object.entries(services)) {
     if (name !== 'web') assert.equal(service.ports, undefined, `${name} must not publish a port`);
   }
-  assert.deepEqual(
-    services.web.ports.map(({ host_ip, published, target }) => ({ host_ip, published, target })),
-    [{ host_ip: '127.0.0.1', published: '8080', target: 80 }],
-  );
-  const exposed = config({ ...REQUIRED, HTTP_BIND: '0.0.0.0', HTTP_PORT: '80' }).services.web.ports[0];
-  assert.equal(exposed.host_ip, '0.0.0.0');
-  assert.equal(exposed.published, '80');
+  const ports = (env) => config(env).services.web.ports.map(({ host_ip, published, target }) => ({ host_ip, published, target }));
+  assert.deepEqual(ports(REQUIRED), [
+    { host_ip: '0.0.0.0', published: '80', target: 80 },
+    { host_ip: '0.0.0.0', published: '443', target: 443 },
+  ]);
+  assert.deepEqual(ports({ ...REQUIRED, HTTP_BIND: '127.0.0.1', HTTP_PORT: '18081', HTTPS_PORT: '18443' }), [
+    { host_ip: '127.0.0.1', published: '18081', target: 80 },
+    { host_ip: '127.0.0.1', published: '18443', target: 443 },
+  ]);
+});
+
+test('certbot alone writes the certificate; nginx reads it and the challenge tokens', { skip }, () => {
+  const { services, volumes } = config(WITH_CERTBOT);
+  const mounts = (name) => Object.fromEntries(services[name].volumes.map((v) => [v.target, { source: v.source, readOnly: v.read_only === true }]));
+  assert.deepEqual(mounts('certbot'), {
+    '/etc/letsencrypt': { source: 'letsencrypt', readOnly: false },
+    '/var/www/certbot': { source: 'acme-webroot', readOnly: false },
+  });
+  assert.deepEqual(mounts('web'), {
+    '/etc/letsencrypt': { source: 'letsencrypt', readOnly: true },
+    '/var/www/certbot': { source: 'acme-webroot', readOnly: true },
+  });
+  for (const volume of ['letsencrypt', 'acme-webroot']) assert.ok(volume in volumes, volume);
+  assert.equal(services.web.environment.PUBLIC_HOSTNAME, 'app.example.com');
+  assert.equal(services.certbot.environment.PUBLIC_HOSTNAME, 'app.example.com');
+  assert.equal(services.certbot.depends_on.web.condition, 'service_healthy');
+  assert.equal(services.certbot.networks?.backend, undefined, 'certbot needs no access to the API or the database');
+});
+
+test('certbot obtains and renews one certificate for the public host through the webroot', { skip }, () => {
+  const script = config(WITH_CERTBOT).services.certbot.command.join(' ');
+  for (const part of ['certbot certonly', '--webroot -w /var/www/certbot', '--cert-name chog', '-d "$$PUBLIC_HOSTNAME"', '--non-interactive', '--keep-until-expiring']) {
+    assert.ok(script.includes(part), part);
+  }
+  assert.doesNotMatch(script, /--staging|--force-renewal|--dry-run/);
 });
 
 test('database and Redis data live in named volumes', { skip }, () => {
@@ -64,6 +95,7 @@ test('database and Redis data live in named volumes', { skip }, () => {
 test('long-running services restart; the migration job runs once', { skip }, () => {
   const { services } = config();
   for (const name of LONG_RUNNING) assert.equal(services[name].restart, 'unless-stopped', name);
+  assert.equal(config(WITH_CERTBOT).services.certbot.restart, 'unless-stopped');
   assert.equal(services.migrate.restart, 'no');
 });
 
@@ -81,8 +113,11 @@ test('the API runs in Production behind the proxy with settings from the environ
   assert.equal(env.ASPNETCORE_ENVIRONMENT, 'Production');
   assert.equal(env.ASPNETCORE_FORWARDEDHEADERS_ENABLED, 'true');
   assert.equal(env.Database__ConnectionString, 'Host=postgres;Port=5432;Database=choggames;Username=choggames;Password=test-only');
-  assert.equal(env.WalletAuth__Domain, 'app.example.com');
+  assert.equal(env.WalletAuth__Domain, 'app.example.com', 'the wallet sign-in domain defaults to the public host');
   assert.equal(env.WalletAuth__Uri, 'https://app.example.com');
+  const smoke = config({ ...REQUIRED, WALLET_AUTH_DOMAIN: 'localhost:18443', WALLET_AUTH_URI: 'https://localhost:18443' }).services.api.environment;
+  assert.equal(smoke.WalletAuth__Domain, 'localhost:18443');
+  assert.equal(smoke.WalletAuth__Uri, 'https://localhost:18443');
   assert.equal(env.Games__Items__0__Status, 'ComingSoon');
   assert.equal(config().services.migrate.environment.Database__ConnectionString, env.Database__ConnectionString);
 });
@@ -101,8 +136,9 @@ test('base images are pinned to exact versions', () => {
     ...['api.Dockerfile', 'web.Dockerfile'].flatMap((file) => [...read(production, file).matchAll(/^ARG \w+=(\S+)$/gm)].map((m) => m[1])),
     ...[...read(composeFile).matchAll(/^\s+image: ([^$\s]+)$/gm)].map((m) => m[1]),
   ];
-  assert.equal(images.length, 6, images.join(', '));
-  for (const image of images) assert.match(image, /:\d+\.\d+(\.\d+)?(-[a-z0-9.-]+)?$/, `${image} must be pinned`);
+  assert.equal(images.length, 7, images.join(', '));
+  for (const image of images) assert.match(image, /:v?\d+\.\d+(\.\d+)?(-[a-z0-9.-]+)?$/, `${image} must be pinned`);
+  assert.ok(images.includes('certbot/certbot:v5.8.0'));
 });
 
 test('runtime images run as a non-root user and build no secrets in', () => {
@@ -115,8 +151,23 @@ test('runtime images run as a non-root user and build no secrets in', () => {
   for (const pattern of ['.git', '**/.env', '**/.env.*', '**/node_modules', '**/bin', '**/obj']) assert.ok(ignored.includes(pattern), pattern);
 });
 
+// The server block for the public host on a port, without its nested location blocks' bodies.
+const serverBlock = (nginx, port) => {
+  const start = nginx.search(new RegExp(`server \\{\\s*listen ${port}( ssl)?;[^}]*?server_name \\$\\{PUBLIC_HOSTNAME\\};`));
+  assert.ok(start >= 0, `no server for PUBLIC_HOSTNAME on ${port}`);
+  let depth = 0;
+  for (let i = nginx.indexOf('{', start); i < nginx.length; i++) {
+    if (nginx[i] === '{') depth++;
+    if (nginx[i] === '}' && --depth === 0) return nginx.slice(start, i + 1);
+  }
+  assert.fail('unbalanced server block');
+};
+// A location's body ends at the line holding only its closing brace (a body may contain ${...}).
+const LOCATION = /location ([^{\n]+)\{([\s\S]*?)\n\s*\}/g;
+const locations = (block) => [...block.matchAll(LOCATION)].map(([, path, body]) => ({ path: path.trim(), body }));
+
 test('nginx serves the app and proxies the API and its WebSocket hub on one origin', () => {
-  const nginx = read(production, 'nginx.conf');
+  const nginx = read(production, 'nginx.conf.template');
   assert.match(nginx, /resolver 127\.0\.0\.11 /, 'the API address must be re-resolved after it is recreated');
   assert.match(nginx, /set \$api http:\/\/api:8080;/);
   // proxy_set_header isn't inherited into a location that sets its own, so each API location must set it.
@@ -130,6 +181,58 @@ test('nginx serves the app and proxies the API and its WebSocket hub on one orig
   assert.match(nginx, /location \/api\/ \{[^}]*proxy_pass \$api;/s);
   assert.match(nginx, /try_files \$uri \$uri\/ \/index\.html;/);
   assert.match(nginx, /server_tokens off;/);
+  const web = read(production, 'web.Dockerfile');
+  assert.match(web, /COPY infrastructure\/production\/nginx\.conf\.template \/etc\/nginx\/templates\/default\.conf\.template/);
+  assert.match(web, /^ENV NGINX_ENVSUBST_FILTER=\^PUBLIC_HOSTNAME\$$/m, 'only PUBLIC_HOSTNAME may be substituted, never nginx variables');
+  const ignored = read(root, '.dockerignore').split('\n');
+  for (const file of ['nginx.conf.template', 'security-headers.conf', 'nginx-tls.sh']) {
+    assert.ok(ignored.includes(`!infrastructure/production/${file}`), `${file} must be in the build context`);
+    assert.ok(web.includes(`infrastructure/production/${file}`), `${file} must be copied into the image`);
+  }
+});
+
+test('nginx serves only the public host, and only over TLS 1.2+', () => {
+  const nginx = read(production, 'nginx.conf.template');
+  assert.match(nginx, /server \{\s*listen 80 default_server;\s*return 444;\s*\}/, 'other hosts over HTTP get no answer');
+  assert.match(nginx, /server \{\s*listen 443 ssl default_server;\s*ssl_reject_handshake on;\s*\}/, 'other hosts over TLS get no certificate');
+  const https = serverBlock(nginx, 443);
+  assert.match(https, /ssl_certificate\s+\/etc\/nginx\/tls\/current\/fullchain\.pem;/);
+  assert.match(https, /ssl_certificate_key \/etc\/nginx\/tls\/current\/privkey\.pem;/);
+  assert.match(https, /ssl_protocols TLSv1\.2 TLSv1\.3;/);
+  assert.match(https, /ssl_session_tickets off;/);
+  assert.match(https, /location \/api\/hubs\//, 'the hub is proxied over TLS (wss)');
+  assert.doesNotMatch(nginx, /\$\{(?!PUBLIC_HOSTNAME\})/, 'PUBLIC_HOSTNAME is the only template variable');
+});
+
+test('plain HTTP serves the ACME challenge and redirects everything else to HTTPS', () => {
+  const http = locations(serverBlock(read(production, 'nginx.conf.template'), 80));
+  assert.deepEqual(http.map((l) => l.path), ['/.well-known/acme-challenge/', '/']);
+  assert.match(http[0].body, /root \/var\/www\/certbot;/);
+  assert.match(http[1].body, /return 301 https:\/\/\$\{PUBLIC_HOSTNAME\}\$request_uri;/, 'redirect to the public host, never the client-sent Host');
+  assert.doesNotMatch(serverBlock(read(production, 'nginx.conf.template'), 80), /proxy_pass|Strict-Transport-Security/);
+});
+
+test('every HTTPS response sends HSTS for one year and upgrade-insecure-requests', () => {
+  const headers = read(production, 'security-headers.conf');
+  assert.match(headers, /^add_header Strict-Transport-Security "max-age=31536000" always;$/m, 'one year, no includeSubDomains or preload');
+  assert.match(headers, /^add_header Content-Security-Policy "upgrade-insecure-requests" always;$/m);
+  for (const header of ['X-Content-Type-Options nosniff', 'X-Frame-Options DENY', 'Referrer-Policy same-origin']) assert.ok(headers.includes(`add_header ${header} always;`), header);
+  const https = serverBlock(read(production, 'nginx.conf.template'), 443);
+  const include = 'include /etc/nginx/snippets/security-headers.conf;';
+  assert.ok(https.replace(LOCATION, '').includes(include), 'the server sends them');
+  // A location with its own add_header inherits none from the server, so it must include them again.
+  for (const { path, body } of locations(https)) {
+    if (body.includes('add_header')) assert.ok(body.includes(include), `${path} drops the security headers`);
+  }
+});
+
+test('nginx starts on a self-signed certificate and switches to the issued one', () => {
+  const script = read(production, 'nginx-tls.sh');
+  assert.match(script, /^live=\/etc\/letsencrypt\/live\/chog$/m, 'the --cert-name certbot uses');
+  assert.match(script, /subjectAltName=DNS:\$\{PUBLIC_HOSTNAME\}/);
+  assert.match(script, /readlink -f "\$live\/fullchain\.pem"/, 'a renewal (new archive file) counts as a change');
+  assert.match(script, /nginx -s reload/);
+  assert.match(read(production, 'web.Dockerfile'), /COPY --chmod=755 infrastructure\/production\/nginx-tls\.sh \/docker-entrypoint\.d\/40-chog-tls\.sh/);
 });
 
 test('the env template holds placeholders only', () => {
