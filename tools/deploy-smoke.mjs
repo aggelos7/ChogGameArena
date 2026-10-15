@@ -40,6 +40,18 @@ async function get(path, cookie) {
   return { status: response.status, headers: response.headers, body: await response.text() };
 }
 
+async function retry(attempt, seconds = 60) {
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (Date.now() > deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+}
+
 // A raw WebSocket handshake: Node's fetch can't upgrade, and the hub accepts WebSockets only.
 const upgrade = (path, cookie) =>
   new Promise((resolve, reject) => {
@@ -102,7 +114,8 @@ async function main() {
   compose('down');
   compose('up', '-d', '--wait');
 
-  const me = await get('/api/me', cookie);
+  // fetch keeps connections alive, and one to the removed nginx fails once; a fresh one succeeds.
+  const me = await retry(() => get('/api/me', cookie));
   check(me.status === 200, `GET /api/me after restart returned ${me.status}`);
   const after = JSON.parse(me.body);
   check(after.playerId === player.playerId && after.displayName === 'Smoke Chog', 'the player changed across the restart');
@@ -113,7 +126,8 @@ async function main() {
 try {
   await main();
 } catch (error) {
-  console.error(`Deployment smoke test failed: ${error.message}`);
+  const cause = error.cause ? ` (${error.cause.code ?? error.cause.message})` : '';
+  console.error(`Deployment smoke test failed: ${error.message}${cause}`);
   try {
     console.error(compose('logs', '--no-color', '--tail', '80'));
   } catch {
