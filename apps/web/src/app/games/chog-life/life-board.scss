@@ -8,6 +8,8 @@
   --event: #5b2bd6;
 
   display: block;
+  // The illustrated board needs room; narrower than this, the list is shown instead (DEC-048).
+  container-type: inline-size;
 }
 
 .players {
@@ -370,4 +372,92 @@
 
 .tile.choice {
   box-shadow: 0 0 0 2px var(--focus);
+}
+
+// The illustrated board (STORY-064, DEC-048). Hidden in narrow containers, where the list takes its place.
+.view-switch,
+app-life-drawing {
+  display: none;
+}
+
+.view-toggle {
+  min-height: var(--tap-target);
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--text);
+  background: var(--surface);
+}
+
+@container (min-width: 300px) {
+  .view-switch {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.5rem;
+  }
+
+  app-life-drawing {
+    display: block;
+  }
+
+  // Behind the drawing, the list is still read by screen readers.
+  .track.behind {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+// Wide screens: players in three columns and the actions side by side, so the whole game fits one screen (DEC-048).
+@container (min-width: 760px) {
+  .players {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .actions {
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+  }
+}
+
+// Wider still: the players and the controls in a column beside the board, which takes the height left on screen.
+@container (min-width: 1200px) {
+  .life-board {
+    display: grid;
+    grid-template-areas:
+      'side stage'
+      'controls stage';
+    grid-template-rows: auto 1fr;
+    grid-template-columns: 340px minmax(0, 1fr);
+    column-gap: 1.5rem;
+    align-items: start;
+  }
+
+  .side {
+    grid-area: side;
+  }
+
+  .controls {
+    grid-area: controls;
+  }
+
+  .stage {
+    grid-area: stage;
+  }
+
+  .players {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .actions {
+    grid-auto-flow: row;
+  }
 }

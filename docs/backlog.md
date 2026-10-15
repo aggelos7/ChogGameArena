@@ -671,7 +671,7 @@
 
 #### STORY-064 — Chog Life illustrated board
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E06
 - **Implementation:** Replace the functional vertical track of STORY-036 with an illustrated Chog Life board in the web app, once the rules are final (requirements §15, after STORY-044). Draw the route as a winding SVG path with each Safe/Degen fork as a visible split that joins again, tile icons and artwork by type and event kind, and pawns that animate from tile to tile along the route the server resolved (STORY-037). Lay the board out from the server's tile graph (`state.tiles`, DEC-038), never from a copy in the client, so a new rules version needs no web change. Keep the STORY-036 vertical track as the accessible fallback (screen readers, reduced motion) and wherever the illustrated board doesn't fit. No API, rules or server change. Implement after STORY-044.

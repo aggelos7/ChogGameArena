@@ -16,31 +16,36 @@
   }
   @case ('ready') {
     @if (room(); as current) {
-      <h1>{{ gameName() ?? current.gameType }} room</h1>
+      <!-- In a live game the title goes beside the board, with the rest of the game's details. -->
+      @if (!playing()) {
+        <h1>{{ gameName() ?? current.gameType }} room</h1>
+      }
 
-      <section class="invite" aria-labelledby="invite-heading">
-        <h2 id="invite-heading">Invite friends</h2>
-        <p class="code-line">
-          Code <strong class="code" data-room-code>{{ current.code }}</strong>
-        </p>
-        <p class="link-line">
-          <span class="link" data-invite-link>{{ inviteLink() }}</span>
-        </p>
-        <button type="button" (click)="copyLink()">Copy invite link</button>
-        <span role="status" class="copy-status">
-          @switch (copyState()) {
-            @case ('copied') { Link copied. }
-            @case ('failed') { Copy failed; select the link above instead. }
-          }
-        </span>
-      </section>
+      @if (current.status === 'Waiting') {
+        <section class="invite" aria-labelledby="invite-heading">
+          <h2 id="invite-heading">Invite friends</h2>
+          <p class="code-line">
+            Code <strong class="code" data-room-code>{{ current.code }}</strong>
+          </p>
+          <p class="link-line">
+            <span class="link" data-invite-link>{{ inviteLink() }}</span>
+          </p>
+          <button type="button" (click)="copyLink()">Copy invite link</button>
+          <span role="status" class="copy-status">
+            @switch (copyState()) {
+              @case ('copied') { Link copied. }
+              @case ('failed') { Copy failed; select the link above instead. }
+            }
+          </span>
+        </section>
+      }
 
       @if (current.status === 'Active' && you()?.hasLeft) {
         <p class="started" role="status" data-left>
           You left this game. <a routerLink="/games">Find another game</a>
         </p>
       } @else if (current.status === 'Active') {
-        <p class="started" role="status" data-started>The game has started.</p>
+        <p class="started" [class.visually-hidden]="boardShown()" role="status" data-started>The game has started.</p>
       } @else if (current.status === 'Completed') {
         <p class="started" role="status" data-result>
           @if (you()?.rank === 1) {
@@ -62,55 +67,61 @@
         </p>
       }
 
-      <section aria-labelledby="players-heading">
-        <h2 id="players-heading">Players {{ current.members.length }}/{{ current.capacity }}</h2>
-        <ul class="members" data-list="members">
-          @for (member of current.members; track $index) {
-            <li [attr.data-ready]="member.isReady">
-              <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="2.5" />
-              <div class="who">
-                <p class="line">
-                  <span class="name">{{ member.displayName }}</span>
-                  @if (member.isHost) {
-                    <span class="tag host">Host</span>
-                  }
-                  @if (member.isYou) {
-                    <span class="tag you">You</span>
-                  }
-                  @if (member.hasLeft) {
-                    <span class="tag left">Left</span>
-                  }
-                  @if (member.rank; as rank) {
-                    <span class="tag rank" [class.winner]="rank === 1" data-rank>{{ place(rank) }}</span>
-                  }
-                </p>
-                <p class="details">
-                  <span data-chog>{{ member.character.name }}</span>
-                  @if (hasAbilities()) {
-                    ·
-                    <span data-ability>{{ abilityLabel(member) }}</span>
-                  }
-                </p>
-              </div>
-              @if (current.status === 'Waiting') {
-                <span class="readiness" [class.ready]="member.isReady" data-readiness>
-                  {{ member.isReady ? 'Ready' : 'Not ready' }}
-                </span>
-              }
-            </li>
+      @if (!boardShown()) {
+        <section aria-labelledby="players-heading">
+          <h2 id="players-heading">Players {{ current.members.length }}/{{ current.capacity }}</h2>
+          <ul class="members" data-list="members">
+            @for (member of current.members; track $index) {
+              <li [attr.data-ready]="member.isReady">
+                <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="2.5" />
+                <div class="who">
+                  <p class="line">
+                    <span class="name">{{ member.displayName }}</span>
+                    @if (member.isHost) {
+                      <span class="tag host">Host</span>
+                    }
+                    @if (member.isYou) {
+                      <span class="tag you">You</span>
+                    }
+                    @if (member.hasLeft) {
+                      <span class="tag left">Left</span>
+                    }
+                    @if (member.rank; as rank) {
+                      <span class="tag rank" [class.winner]="rank === 1" data-rank>{{ place(rank) }}</span>
+                    }
+                  </p>
+                  <p class="details">
+                    <span data-chog>{{ member.character.name }}</span>
+                    @if (hasAbilities()) {
+                      ·
+                      <span data-ability>{{ abilityLabel(member) }}</span>
+                    }
+                  </p>
+                </div>
+                @if (current.status === 'Waiting') {
+                  <span class="readiness" [class.ready]="member.isReady" data-readiness>
+                    {{ member.isReady ? 'Ready' : 'Not ready' }}
+                  </span>
+                }
+              </li>
+            }
+          </ul>
+        </section>
+      }
+      <p class="hint live-status" role="status" [attr.data-live]="liveState()">
+        @switch (liveState()) {
+          @case ('live') {
+            @if (!boardShown()) {
+              Players appear and get ready here as it happens.
+            }
           }
-        </ul>
-        <p class="hint live-status" role="status" [attr.data-live]="liveState()">
-          @switch (liveState()) {
-            @case ('live') { Players appear and get ready here as it happens. }
-            @case ('connecting') { Connecting for live updates… }
-            @case ('offline') { Live updates are off; still trying to reconnect. Refresh to see the latest now. }
-          }
-        </p>
-        @if (liveState() === 'offline') {
-          <button type="button" (click)="reconnect()">Refresh</button>
+          @case ('connecting') { Connecting for live updates… }
+          @case ('offline') { Live updates are off; still trying to reconnect. Refresh to see the latest now. }
         }
-      </section>
+      </p>
+      @if (liveState() === 'offline') {
+        <button type="button" (click)="reconnect()">Refresh</button>
+      }
 
       @if (current.status === 'Waiting' && you(); as me) {
         <section class="lobby" aria-labelledby="lobby-heading">
@@ -181,22 +192,7 @@
 
       @if (current.status === 'Active' && you(); as me) {
         @if (!me.hasLeft) {
-          <section class="match" aria-labelledby="match-heading">
-            <h2 id="match-heading">Game</h2>
-            @if (me.ability; as ability) {
-              <p class="hint">
-                You’re playing as <strong>{{ me.character.name }}</strong> with
-                <strong data-locked-ability>{{ ability.name }}</strong> for this game.
-                @if (ability.usesLeft !== null) {
-                  <span data-uses-left>{{ usesLeftLabel(ability.usesLeft) }}</span>
-                }
-              </p>
-            } @else {
-              <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
-            }
-            @if (turnTimer(); as timer) {
-              <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
-            }
+          <section class="match" [class.game-wide]="boardShown()" aria-labelledby="match-heading">
             @if (lifeBoard(); as board) {
               <app-life-board
                 [board]="board"
@@ -206,7 +202,25 @@
                 (roll)="roll()"
                 (chooseLane)="chooseLane($event)"
                 (useAbility)="useAbility($event)"
-              />
+              >
+                <div class="game-header" boardHeader>
+                  <h1>{{ gameName() ?? current.gameType }} room</h1>
+                  <h2 id="match-heading" class="visually-hidden">Game</h2>
+                  <ng-container *ngTemplateOutlet="playingAs; context: { $implicit: me }" />
+                </div>
+                @if (turnTimer(); as timer) {
+                  <app-turn-timer boardTimer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
+                }
+                @if (actionError(); as failure) {
+                  <p class="action-error" boardMessages role="alert" data-error="action">{{ message(failure) }}</p>
+                }
+              </app-life-board>
+            } @else {
+              <h2 id="match-heading">Game</h2>
+              <ng-container *ngTemplateOutlet="playingAs; context: { $implicit: me }" />
+              @if (turnTimer(); as timer) {
+                <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
+              }
             }
             <div class="leave" data-leave>
               @if (confirmingLeave()) {
@@ -218,7 +232,7 @@
               }
             </div>
 
-            @if (actionError(); as failure) {
+            @if (!lifeBoard() && actionError(); as failure) {
               <p class="action-error" role="alert" data-error="action">{{ message(failure) }}</p>
             }
           </section>
@@ -227,7 +241,7 @@
         @if (hasLifeResults()) {
           <app-life-results [members]="current.members" />
         }
-        <section class="match" aria-labelledby="final-heading" data-final-board>
+        <section class="match game-wide" aria-labelledby="final-heading" data-final-board>
           <h2 id="final-heading">Final board</h2>
           <app-life-board [board]="board" [members]="current.members" />
         </section>
@@ -235,3 +249,17 @@
     }
   }
 }
+
+<ng-template #playingAs let-me>
+  @if (me.ability; as ability) {
+    <p class="hint">
+      You’re playing as <strong>{{ me.character.name }}</strong> with
+      <strong data-locked-ability>{{ ability.name }}</strong> for this game.
+      @if (ability.usesLeft !== null) {
+        <span data-uses-left>{{ usesLeftLabel(ability.usesLeft) }}</span>
+      }
+    </p>
+  } @else {
+    <p class="hint">You’re playing as <strong>{{ me.character.name }}</strong> for this game.</p>
+  }
+</ng-template>
