@@ -12,8 +12,9 @@ namespace ChogGames.Api.Tests;
 /// <summary>
 /// Hosts the API in-memory with an explicit database connection string and optional extra settings. Chance is scripted
 /// (STORY-029): matches seat players in join order, host first, unless <paramref name="configureServices"/> registers
-/// another <see cref="IRandomSource"/>. No game offers abilities (STORY-042): Chog Life's catalog is taken out, so its
-/// players ready without one; tests of abilities register a catalog again, such as with <c>AddChogLifeAbilities()</c>.
+/// another <see cref="IRandomSource"/>. No game offers abilities (STORY-042, STORY-055): Chog Life's and Chog Race's
+/// catalogs are taken out, so their players ready without one; tests of abilities register a catalog again, such as with
+/// <c>AddChogLifeAbilities()</c> or <c>AddChogRaceAbilities()</c>.
 /// </summary>
 public sealed class ApiFactory(
     string connectionString,

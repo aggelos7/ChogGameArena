@@ -826,7 +826,7 @@
 
 #### STORY-055 — Race abilities
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Implement Speed Boost, Shield, Card Vision and Card Steal.

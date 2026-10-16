@@ -14,7 +14,7 @@ namespace ChogGames.Api.Tests.Rooms;
 /// <summary>
 /// Lobby ability selection and lock (STORY-033, NFT-013, NFT-015, DEC-035): in a game with abilities each player chooses
 /// one from their pool before marking ready; others only see that they chose until the start, which locks it with the
-/// catalog version. Chog Life gets a test catalog here; Chog Race has none, like every game today.
+/// catalog version. Chog Life gets a test catalog here; Chog Race's is taken out, as by the test host.
 /// </summary>
 public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {

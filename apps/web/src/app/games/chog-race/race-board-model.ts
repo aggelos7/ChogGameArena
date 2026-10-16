@@ -23,6 +23,10 @@ export interface RacePawn {
   tile: number;
   /** How many cards the player holds (STORY-052); which ones only they see. */
   cards?: number;
+  /** The tiles an armed Speed Boost adds to the player's next roll (STORY-055, DEC-059). */
+  boost?: number;
+  /** A raised Shield, blocking the next Rug, Liquidated or Whale played on the player (DEC-059). */
+  shielded?: boolean;
 }
 
 /**
@@ -43,15 +47,23 @@ export interface RaceMove {
   reshuffled?: boolean;
   /** The card the player then played, if any (STORY-053, DEC-057). */
   play?: RacePlay;
+  /** The tiles Speed Boost added to the roll (STORY-055, DEC-059). */
+  boost?: number;
 }
 
-/** An opponent Reverse moved back: the tile it `landed` on, and `to` after a Boost or Setback there (the `effect`) sent it on. */
+/**
+ * An opponent Reverse or Rug moved back: the tile it `landed` on, and `to` after a Boost or Setback there (the `effect`)
+ * sent it on. Ending on a Card tile draws there (revised in STORY-055): the `card` is sent only to that pawn's player.
+ */
 export interface RacePush {
   seat: number;
   from: number;
   landed: number;
   to: number;
   effect?: 'Boost' | 'Setback';
+  draw?: RaceDraw;
+  card?: RaceCard;
+  reshuffled?: boolean;
 }
 
 /**
@@ -76,8 +88,22 @@ export interface RacePlay {
   reply?: RaceReply;
 }
 
-/** How an attack's target answered (DEC-058): blocked with HODL, let it land, or didn't answer in time. */
-export type RaceReply = 'Blocked' | 'Allowed' | 'TimedOut';
+/**
+ * How an attack's target answered (DEC-058): blocked with HODL, let it land, or didn't answer in time; or their Shield
+ * blocked it with no reply window (DEC-059).
+ */
+export type RaceReply = 'Blocked' | 'Allowed' | 'TimedOut' | 'Shielded';
+
+/**
+ * The latest ability used (STORY-055, DEC-059): who used which, and for Card Steal from whom and, only for those two
+ * players, the card.
+ */
+export interface RaceAbilityUse {
+  seat: number;
+  ability: string;
+  target?: number;
+  card?: RaceCard;
+}
 
 /** An attack waiting for its target's reply (DEC-058): the attacker's seat, the card and the target's seat. */
 export interface RaceAttack {
@@ -127,6 +153,10 @@ export interface RaceBoard {
   reply?: RaceAttack;
   /** The seats due to skip their next turn after a Liquidated (DEC-058). */
   skipping?: number[];
+  /** The deck's top card, sent only to the player who saw it with Card Vision, until it's drawn (DEC-059). */
+  next?: RaceCard;
+  /** The latest ability used, until another player rolls or uses one (DEC-059). */
+  ability?: RaceAbilityUse;
 }
 
 /** Rolls, moves and resolves the tile landed on, in the Move phase (DEC-055). */
@@ -140,6 +170,12 @@ export const RACE_PLAY_CARD = 'PLAY_CARD';
 
 /** Lets an attack on you land instead of blocking it (DEC-058). */
 export const RACE_PASS = 'PASS';
+
+/** Chog Race's abilities (STORY-055, DEC-059): only Speed Boost is limited to before the roll; Card Steal takes a target. */
+export const RACE_SPEED_BOOST = 'movement_boost';
+export const RACE_SHIELD = 'attack_block';
+export const RACE_CARD_VISION = 'card_preview';
+export const RACE_CARD_STEAL = 'card_steal';
 
 /** What a card does, in a short sentence, with the match's values when the server sent them (DEC-057). */
 export function raceCardDescription(card: RaceCard, values?: RaceCardValues): string {
@@ -201,7 +237,7 @@ const isIndex = (value: unknown): value is number => typeof value === 'number' &
 const isOptional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value);
 const EFFECTS: readonly string[] = ['Card', 'Boost', 'Setback', 'Finish'];
 const DRAWS: readonly string[] = ['Drawn', 'HandFull', 'NoCards'];
-const REPLIES: readonly string[] = ['Blocked', 'Allowed', 'TimedOut'];
+const REPLIES: readonly string[] = ['Blocked', 'Allowed', 'TimedOut', 'Shielded'];
 
 /** A card play as the server sends it, its tiles on a track of `tiles` tiles. */
 function isPlay(play: unknown, tiles: number): boolean {
@@ -226,7 +262,10 @@ function isPlay(play: unknown, tiles: number): boolean {
             isRecord(push) &&
             isIndex(push['seat']) &&
             ['from', 'landed', 'to'].every((key) => isTile(push[key])) &&
-            isOptional(push['effect'], (effect) => effect === 'Boost' || effect === 'Setback'),
+            isOptional(push['effect'], (effect) => effect === 'Boost' || effect === 'Setback') &&
+            isOptional(push['draw'], (draw) => DRAWS.includes(draw as string)) &&
+            isOptional(push['card'], isCard) &&
+            isOptional(push['reshuffled'], (reshuffled) => typeof reshuffled === 'boolean'),
         ),
     )
   );
@@ -255,7 +294,9 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       isIndex(pawn['seat']) &&
       isIndex(pawn['tile']) &&
       pawn['tile'] < tiles.length &&
-      (pawn['cards'] === undefined || isIndex(pawn['cards'])),
+      (pawn['cards'] === undefined || isIndex(pawn['cards'])) &&
+      isOptional(pawn['boost'], isIndex) &&
+      isOptional(pawn['shielded'], (shielded) => typeof shielded === 'boolean'),
   );
   const move = state['lastMove'];
   const validMove =
@@ -268,6 +309,7 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       (move['draw'] === undefined || DRAWS.includes(move['draw'] as string)) &&
       (move['card'] === undefined || isCard(move['card'])) &&
       (move['reshuffled'] === undefined || typeof move['reshuffled'] === 'boolean') &&
+      isOptional(move['boost'], isIndex) &&
       isOptional(move['play'], (play) => isPlay(play, tiles.length)));
   const validPhase = state['phase'] === undefined || ['Move', 'Play', 'Reply'].includes(state['phase'] as string);
   const reply = state['reply'];
@@ -275,11 +317,23 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
     reply === undefined || (isRecord(reply) && isIndex(reply['seat']) && isCard(reply['card']) && isIndex(reply['target']));
   const validSkipping = isOptional(state['skipping'], (seats) => Array.isArray(seats) && seats.every(isIndex));
   const validWinner = state['winner'] === undefined || isIndex(state['winner']);
+  const ability = state['ability'];
+  const validAbility =
+    isOptional(state['next'], isCard) &&
+    isOptional(
+      ability,
+      (used) =>
+        isRecord(used) &&
+        isIndex(used['seat']) &&
+        typeof used['ability'] === 'string' &&
+        isOptional(used['target'], isIndex) &&
+        isOptional(used['card'], isCard),
+    );
   const validCards =
     ['maxHand', 'deck', 'discard'].every((count) => state[count] === undefined || isIndex(state[count])) &&
     ['hand', 'playable'].every((cards) => isOptional(state[cards], (list) => Array.isArray(list) && list.every(isCard))) &&
     isOptional(state['cardValues'], isCardValues);
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner || !validCards || !validReply || !validSkipping) {
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner || !validCards || !validReply || !validSkipping || !validAbility) {
     return null;
   }
   return state as unknown as RaceBoard;

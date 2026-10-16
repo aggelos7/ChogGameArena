@@ -24,7 +24,7 @@ import { LifeResultsView, toLifeResult } from '../../games/chog-life/life-result
 import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
-import { RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
+import { RaceAbilityPlay, RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
 import { RACE_END_TURN, RACE_PASS, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
@@ -263,6 +263,11 @@ export class RoomPage implements OnInit {
   /** Uses the player's locked ability on their turn (STORY-042, DEC-044); refusals as for a roll. */
   protected useAbility(abilityId: string): void {
     this.command(USE_ABILITY, { abilityId });
+  }
+
+  /** Uses the player's locked Chog Race ability, on an opponent for Card Steal (STORY-055, DEC-059); refusals as for a roll. */
+  protected useRaceAbility(use: RaceAbilityPlay): void {
+    this.command(USE_ABILITY, use.target === undefined ? { abilityId: use.abilityId } : { abilityId: use.abilityId, target: use.target });
   }
 
   private command(type: string, payload: object = {}): void {
