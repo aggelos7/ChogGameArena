@@ -157,7 +157,12 @@ export interface RaceBoard {
   next?: RaceCard;
   /** The latest ability used, until another player rolls or uses one (DEC-059). */
   ability?: RaceAbilityUse;
+  /** How the race ended, once it's over: a pawn reached the Finish, or the 20-minute cap (STORY-056, DEC-060). */
+  ended?: RaceEnding;
 }
+
+/** How a race ended (DEC-060). */
+export type RaceEnding = 'Finish' | 'TimeUp';
 
 /** Rolls, moves and resolves the tile landed on, in the Move phase (DEC-055). */
 export const RACE_ROLL = 'ROLL';
@@ -316,7 +321,9 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
   const validReply =
     reply === undefined || (isRecord(reply) && isIndex(reply['seat']) && isCard(reply['card']) && isIndex(reply['target']));
   const validSkipping = isOptional(state['skipping'], (seats) => Array.isArray(seats) && seats.every(isIndex));
-  const validWinner = state['winner'] === undefined || isIndex(state['winner']);
+  const validWinner =
+    (state['winner'] === undefined || isIndex(state['winner'])) &&
+    isOptional(state['ended'], (ended) => ended === 'Finish' || ended === 'TimeUp');
   const ability = state['ability'];
   const validAbility =
     isOptional(state['next'], isCard) &&

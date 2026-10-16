@@ -136,7 +136,8 @@ public sealed class ChogRaceBoardTests(MigratedPostgresDatabase database) : ICla
             Assert.Equal(
                 $$"""{"deck":[{{deck}}],"pawns":[""" + string.Join(",", Enumerable.Range(1, count).Select(s => $$"""{"seat":{{s}},"tile":0}""")) + """],"discard":[],"rulesVersion":1}""",
                 (await StoredAsync(room)).State);
-            Assert.Equal(("Active", (DateTimeOffset?)null), (room.Status, room.MatchEndsAt));
+            // The 20-minute cap (STORY-056, DEC-060) runs from the start.
+            Assert.Equal(("Active", (DateTimeOffset?)_clock.GetUtcNow().AddMinutes(20)), (room.Status, room.MatchEndsAt));
             foreach (var player in players)
             {
                 var seen = await ViewAsync(player, room.Code);

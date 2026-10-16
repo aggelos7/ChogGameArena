@@ -977,6 +977,37 @@ describe('Room page', () => {
       expect(use.request.body).toMatchObject({ expectedVersion: 9, type: 'USE_ABILITY', payload: { abilityId: 'card_steal', target: 1 } });
     });
 
+    it('counts down a Chog Race to its time cap (STORY-056)', () => {
+      load({
+        ...room,
+        gameType: 'chog-race',
+        status: 'Active',
+        matchEndsAt: new Date(Date.now() + 754_000).toISOString(),
+        state: { ...RACE_BOARD, phase: 'Move' },
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      });
+
+      expect(element().querySelector('[data-board="race"] [data-clock]')?.textContent?.trim()).toBe('Time left 12:34');
+    });
+
+    it('shows the Chog Race results above the final board (STORY-056)', () => {
+      const result = (tile: number, extra = {}) => ({ tile, tilesLeft: 27 - tile, finished: tile === 27, cardsPlayed: 0, attacksLanded: 0, attacksBlocked: 0, ...extra });
+      load({
+        ...room,
+        gameType: 'chog-race',
+        status: 'Completed',
+        state: { ...RACE_BOARD, winner: 2, ended: 'Finish' },
+        members: [
+          member('Alice', { isHost: true, seat: 1, rank: 2, result: result(19, { cardsPlayed: 2 }) }),
+          member('Bob', { isYou: true, seat: 2, rank: 1, result: result(27) }),
+        ],
+      });
+
+      const results = element().querySelector('[data-results]');
+      expect(results?.querySelector('[data-winner]')?.textContent).toBe('You win the race!');
+      expect(results?.closest('app-race-results')?.nextElementSibling?.matches('[data-final-board]')).toBe(true);
+    });
+
     it('keeps the final Chog Race board once the game is over', () => {
       load({
         ...room,
@@ -987,6 +1018,8 @@ describe('Room page', () => {
       });
 
       expect(element().querySelector('[data-final-board] [data-board="race"]')).not.toBeNull();
+      // A match from before STORY-056 has no results.
+      expect(element().querySelector('[data-results]')).toBeNull();
     });
 
     it('tells a player who left the game that they are out of it', () => {

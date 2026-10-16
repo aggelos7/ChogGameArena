@@ -23,8 +23,9 @@ namespace ChogGames.Games.ChogRace;
 /// runs out. Commands out of phase are rejected. Cards (STORY-052, RACE-003,
 /// DEC-056) come from a deck the server shuffles at the start; a player with a full hand draws nothing, and an empty
 /// deck is refilled from the discard pile and the hands of players who left. The deck's order and each hand are
-/// hidden: a player sees only their own cards and how many everyone else holds. The first pawn to reach the Finish wins and ends the match, the others ranked by how far they got
-/// (tie-breakers, the time cap and results come with STORY-056). A turn that runs out before the roll is skipped; one
+/// hidden: a player sees only their own cards and how many everyone else holds. The first pawn to reach the Finish wins
+/// and ends the match; the 20-minute cap ends it with the furthest pawn first, and each player gets a result (STORY-056,
+/// DEC-060). A turn that runs out before the roll is skipped; one
 /// that runs out in the Play phase ends with no card played. Each player's ability (STORY-055, DEC-059) acts on this state:
 /// Speed Boost adds to a roll, a Shield blocks an attack with no reply window, Card Vision shows one player the deck's top
 /// card and Card Steal moves a card between hands.
@@ -156,7 +157,7 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
             Ability = state.Ability?.Seat == pawn.Seat ? state.Ability : null,
         };
         var (next, landing) = MoveBy(boosted, pawn.Seat, roll + (pawn.Boost ?? 0), rules, random, match);
-        next = next with
+        next = Arrived(state, next) with
         {
             LastMove = new RaceMove(
                 pawn.Seat, roll, landing.From, landing.Landed, landing.To, landing.Effect, landing.Draw, landing.Card, landing.Reshuffled)
@@ -176,9 +177,9 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
     }
 
     /// <summary>
-    /// The match won by the first of the <paramref name="seats"/> whose pawn stands on the Finish: the first to reach it
-    /// wins (DEC-055). The player whose turn it is comes first; a pawn a card pushed onto a Boost to the Finish wins after
-    /// them (DEC-057; STORY-056 settles simultaneous effects).
+    /// The match won by the first of the <paramref name="seats"/> whose pawn stands on the Finish, checked once the command
+    /// has resolved in full (DEC-060): the player whose turn it is comes first, then the pawns their card pushed, in the
+    /// order the pushes resolved (seat order). The match ends once, with every player still playing ranked.
     /// </summary>
     private static MatchRuleDecision? Won(RaceMatchState state, IEnumerable<int> seats, RaceRules rules, GameRoom match)
     {
@@ -188,8 +189,8 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
             return null;
         }
 
-        var won = state with { Winner = seat };
-        return MatchRuleDecision.Finish(JsonSerializer.SerializeToElement(won, Json), Standings(won, match));
+        var won = state with { Winner = seat, Ended = RaceEnding.Finish };
+        return MatchRuleDecision.Finish(JsonSerializer.SerializeToElement(won, Json), Standings(won, rules, match));
     }
 
     /// <summary>
@@ -317,12 +318,14 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
             Pawns = state.Pawns.Select(p => p.Seat == pawn.Seat ? p with { Hand = hand.Count == 0 ? null : hand } : p).ToArray(),
             Discard = [.. state.Discard ?? [], card],
         };
+        next = CardPlayed(next, pawn.Seat);
         // A Shield blocks the attack at once and is spent; the target keeps their cards (DEC-059).
         if (target is { Shielded: true })
         {
+            next = AttackBlocked(next, target.Seat);
             next = next with
             {
-                Pawns = Replace(next.Pawns, target with { Shielded = null }),
+                Pawns = next.Pawns.Select(p => p.Seat == target.Seat ? p with { Shielded = null } : p).ToArray(),
                 LastMove = move with { Play = new RacePlay(card, Target: target.Seat, Reply: RaceReply.Shielded) },
             };
             return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: true);
@@ -346,6 +349,7 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
         {
             case RaceCard.Whale or RaceCard.Rug or RaceCard.Liquidated:
                 (next, play, skips) = Attack(next, new RaceAttack(pawn.Seat, card, target!.Seat), rules, random, match);
+                next = AttackLanded(next, pawn.Seat);
                 break;
 
             case RaceCard.Reverse:
@@ -354,6 +358,7 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
                     .ToArray();
                 (next, var pushed) = PushAll(next, reversed, values.Reverse, rules, random, match);
                 play = new RacePlay(card, Pushed: pushed);
+                next = pushed.Count > 0 ? AttackLanded(next, pawn.Seat) : next;
                 break;
 
             default:
@@ -377,7 +382,7 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
                 break;
         }
 
-        next = next with { LastMove = move with { Play = play } };
+        next = Arrived(state, next) with { LastMove = move with { Play = play } };
         return Won(next, [pawn.Seat, .. play.Pushed?.Select(push => push.Seat) ?? []], rules, match)
             ?? MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: true, skipsNextTurnOf: skips);
     }
@@ -399,7 +404,7 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
         if (context.Type == Pass)
         {
             var (landed, play, skips) = Attack(state with { Reply = null }, attack, rules, context.Random, context.Match);
-            landed = landed with { LastMove = move with { Play = play with { Reply = RaceReply.Allowed } } };
+            landed = AttackLanded(Arrived(state, landed), attack.Seat) with { LastMove = move with { Play = play with { Reply = RaceReply.Allowed } } };
             return Won(landed, [attack.Seat, attack.Target], rules, context.Match)
                 ?? MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(landed, Json), endsTurn: true, skipsNextTurnOf: skips);
         }
@@ -433,6 +438,7 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
             Discard = [.. state.Discard ?? [], card],
             LastMove = move with { Play = pending with { Reply = RaceReply.Blocked } },
         };
+        blocked = AttackBlocked(CardPlayed(blocked, pawn.Seat), pawn.Seat);
         return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(blocked, Json), endsTurn: true);
     }
 
@@ -566,24 +572,6 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
             .ToHashSet();
 
     /// <summary>
-    /// A rank for every player still playing (DEC-055): the winner first, then everyone else by how far along the track
-    /// they are, players on the same tile sharing a rank (1, 2, 2, 4). STORY-056 adds the tie-breakers.
-    /// </summary>
-    private static IReadOnlyList<MatchStanding> Standings(RaceMatchState state, GameRoom match)
-    {
-        var tiles = state.Pawns.ToDictionary(pawn => pawn.Seat, pawn => pawn.Tile);
-        var players = match.Members
-            .Where(member => member is { HasLeft: false, Seat: not null })
-            .Select(member => (member.PlayerId, Seat: member.Seat!.Value, Tile: tiles.GetValueOrDefault(member.Seat!.Value, -1)))
-            .ToArray();
-        bool Beats((Guid, int Seat, int Tile) a, (Guid, int Seat, int Tile) b) =>
-            a.Seat != b.Seat && (a.Seat == state.Winner || (b.Seat != state.Winner && a.Tile > b.Tile));
-        return players
-            .Select(player => new MatchStanding(player.PlayerId, 1 + players.Count(other => Beats(other, player))))
-            .ToArray();
-    }
-
-    /// <summary>
     /// The attack's target didn't reply in time (DEC-058): the attack lands as if they had passed, and their HODL, if
     /// they hold one, stays in their hand. A Rug that pushes its target onto a Boost to the Finish wins the race for
     /// them. A state this server can't play, or no live attack, changes nothing.
@@ -602,7 +590,7 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
         }
 
         var (landed, play, skips) = Attack(state with { Reply = null }, attack, rules, context.Random, context.Match);
-        landed = landed with { LastMove = move with { Play = play with { Reply = RaceReply.TimedOut } } };
+        landed = AttackLanded(Arrived(state, landed), attack.Seat) with { LastMove = move with { Play = play with { Reply = RaceReply.TimedOut } } };
         return Won(landed, [attack.Seat, attack.Target], rules, context.Match)
             ?? MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(landed, Json), skipsNextTurnOf: skips);
     }
@@ -672,7 +660,8 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
             reply,
             skipping.Length > 0 ? skipping : null,
             viewer is { } seer && state.Pawns.First(pawn => pawn.Seat == seer).Sees == true && state.Deck is [var top, ..] ? top : null,
-            state.Ability is { } used && used.Seat != viewer && used.Target != viewer ? used with { Card = null } : state.Ability);
+            state.Ability is { } used && used.Seat != viewer && used.Target != viewer ? used with { Card = null } : state.Ability,
+            state.Ended);
         return JsonSerializer.SerializeToElement(view, Json);
     }
 
@@ -697,14 +686,16 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
 
     /// <summary>
     /// Every pawn stands on the track, once per seat, holding no more than a full hand of known cards, with a Speed Boost of
-    /// a card move's size if armed.
+    /// a card move's size if armed, moved last by a command the match counted and with no negative statistics.
     /// </summary>
     private static bool IsPlayable(RaceMatchState state, RaceRules rules) =>
         state.Pawns.All(pawn =>
             pawn.Tile >= 0
             && pawn.Tile < rules.Tiles.Count
             && (pawn.Hand?.Count ?? 0) <= rules.MaxHand
-            && pawn.Boost is null or (>= 1 and <= RaceRules.CardMoveLimit))
+            && pawn.Boost is null or (>= 1 and <= RaceRules.CardMoveLimit)
+            && (pawn.Since is null || (pawn.Since >= 1 && pawn.Since <= (state.Moves ?? 0)))
+            && pawn.Stats?.IsValid() != false)
         && state.Pawns.DistinctBy(pawn => pawn.Seat).Count() == state.Pawns.Count
         && state.Pawns.SelectMany(pawn => pawn.Hand ?? []).Concat(state.Deck ?? []).Concat(state.Discard ?? []).All(Enum.IsDefined);
 
@@ -724,7 +715,8 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
     /// The stored state: the rules version the match started with, where each seat's pawn stands and the cards it holds,
     /// the latest move, the seat whose turn is in the Play phase (null in the Move phase), once the race is won the
     /// winner's seat, and the deck, top card first, and discard pile. A match started before cards (STORY-052) has
-    /// neither and draws nothing. The attack awaiting a reply (DEC-058) and the latest ability used (DEC-059).
+    /// neither and draws nothing. The attack awaiting a reply (DEC-058) and the latest ability used (DEC-059). How many
+    /// commands have moved a pawn, and once the match is over how it ended (DEC-060).
     /// </summary>
     private sealed record RaceMatchState(
         int RulesVersion,
@@ -735,7 +727,9 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
         IReadOnlyList<RaceCard>? Deck = null,
         IReadOnlyList<RaceCard>? Discard = null,
         RaceAttack? Reply = null,
-        RaceAbilityUse? Ability = null);
+        RaceAbilityUse? Ability = null,
+        int? Moves = null,
+        RaceEnding? Ended = null);
 
     /// <summary>
     /// An attack waiting for its target's reply (DEC-058): the attacker's seat, the card, already on the discard pile, and
@@ -761,10 +755,19 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
 
     /// <summary>
     /// A seat's pawn and its hand, null while empty, and its abilities until they act (DEC-059): the tiles Speed Boost adds
-    /// to the next roll, a raised Shield, and whether its player sees the deck's top card with Card Vision.
+    /// to the next roll, a raised Shield, and whether its player sees the deck's top card with Card Vision. The command that
+    /// last moved it, counted in <see cref="RaceMatchState.Moves"/> (null if it never moved), and its player's statistics
+    /// (DEC-060).
     /// </summary>
     private sealed record RacePawn(
-        int Seat, int Tile, IReadOnlyList<RaceCard>? Hand = null, int? Boost = null, bool? Shielded = null, bool? Sees = null);
+        int Seat,
+        int Tile,
+        IReadOnlyList<RaceCard>? Hand = null,
+        int? Boost = null,
+        bool? Shielded = null,
+        bool? Sees = null,
+        int? Since = null,
+        RaceStats? Stats = null);
 
     /// <summary>A pawn as every player sees it: how many cards it holds, not which, and its armed Speed Boost or Shield.</summary>
     private sealed record RacePawnView(int Seat, int Tile, int Cards, int? Boost, bool? Shielded);
@@ -864,7 +867,8 @@ public sealed partial class ChogRaceMatchRules : IMatchRules
         RaceAttack? Reply,
         IReadOnlyList<int>? Skipping,
         RaceCard? Next,
-        RaceAbilityUse? Ability);
+        RaceAbilityUse? Ability,
+        RaceEnding? Ended);
 
     private sealed record RaceTileView(int Index, RaceTileType Type, int? To);
 }
