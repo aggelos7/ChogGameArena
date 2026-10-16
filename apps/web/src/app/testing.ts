@@ -80,7 +80,11 @@ export const RACE_BOARD: RaceBoard = {
   rulesVersion: 1,
   tiles: RACE_TILES,
   pawns: [
-    { seat: 1, tile: 0 },
-    { seat: 2, tile: 0 },
+    { seat: 1, tile: 0, cards: 0 },
+    { seat: 2, tile: 0, cards: 0 },
   ],
+  maxHand: 3,
+  deck: 24,
+  discard: 0,
+  hand: [],
 };

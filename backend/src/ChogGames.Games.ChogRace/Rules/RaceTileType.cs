@@ -9,7 +9,7 @@ public enum RaceTileType
     /// <summary>Nothing happens.</summary>
     Normal,
 
-    /// <summary>The player draws a card (STORY-052).</summary>
+    /// <summary>The player draws a card, unless their hand is full (STORY-052, DEC-056).</summary>
     Card,
 
     /// <summary>The pawn jumps forward to the tile's <see cref="RaceTile.To"/>.</summary>

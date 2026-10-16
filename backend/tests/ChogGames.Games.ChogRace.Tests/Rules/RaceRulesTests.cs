@@ -5,11 +5,14 @@ namespace ChogGames.Games.ChogRace.Tests.Rules;
 
 /// <summary>
 /// STORY-050, DEC-054: the Chog Race rules are checked when built. A track whose finish a pawn can't reach, a jump off
-/// the track or into another jump, and out-of-range moves or caps are refused, naming the problem.
+/// the track or into another jump, and out-of-range moves or caps are refused, naming the problem. STORY-052, DEC-056:
+/// so are an empty deck, unknown cards and a hand limit out of range.
 /// </summary>
 public class RaceRulesTests
 {
     private static readonly TimeSpan Cap = TimeSpan.FromMinutes(20);
+
+    private static readonly RaceCard[] Deck = [RaceCard.Pump, RaceCard.Hodl];
 
     /// <summary>A valid track of <paramref name="count"/> tiles: Start, Normal tiles and the Finish.</summary>
     private static RaceTile[] Plain(int count = 24) =>
@@ -27,7 +30,7 @@ public class RaceRulesTests
     }
 
     private static RaceRules Create(RaceTile[] track, int minMove = 1, int maxMove = 3) =>
-        RaceRules.Create(1, track, minMove, maxMove, Cap);
+        RaceRules.Create(1, track, minMove, maxMove, Cap, Deck, 3);
 
     private static string Refused(RaceTile[] track, int minMove = 1, int maxMove = 3) =>
         Assert.ThrowsAny<ArgumentException>(() => Create(track, minMove, maxMove)).Message;
@@ -136,10 +139,41 @@ public class RaceRulesTests
     [Fact]
     public void The_version_and_time_cap_are_checked()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(0, Plain(), 1, 3, Cap));
-        Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(1, Plain(), 1, 3, TimeSpan.Zero));
-        Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(1, Plain(), 1, 3, TimeSpan.FromMinutes(21)));
-        Assert.Throws<ArgumentNullException>(() => RaceRules.Create(1, null!, 1, 3, Cap));
-        Assert.Equal(Cap, RaceRules.Create(1, Plain(), 1, 3, Cap).TimeCap);
+        Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(0, Plain(), 1, 3, Cap, Deck, 3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(1, Plain(), 1, 3, TimeSpan.Zero, Deck, 3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(1, Plain(), 1, 3, TimeSpan.FromMinutes(21), Deck, 3));
+        Assert.Throws<ArgumentNullException>(() => RaceRules.Create(1, null!, 1, 3, Cap, Deck, 3));
+        Assert.Equal(Cap, RaceRules.Create(1, Plain(), 1, 3, Cap, Deck, 3).TimeCap);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    public void The_deck_and_hand_limit_are_kept(int maxHand)
+    {
+        var rules = RaceRules.Create(1, Plain(), 1, 3, Cap, [RaceCard.Pump, RaceCard.Pump, RaceCard.Rug], maxHand);
+
+        Assert.Equal([RaceCard.Pump, RaceCard.Pump, RaceCard.Rug], rules.Deck);
+        Assert.Equal(maxHand, rules.MaxHand);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(6)]
+    public void A_hand_holds_1_to_5_cards(int maxHand) =>
+        Assert.Contains(
+            "A hand holds 1 to 5 cards",
+            Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(1, Plain(), 1, 3, Cap, Deck, maxHand)).Message);
+
+    [Fact]
+    public void The_deck_needs_cards_of_known_kinds()
+    {
+        Assert.Contains(
+            "The deck needs at least one card",
+            Assert.Throws<ArgumentException>(() => RaceRules.Create(1, Plain(), 1, 3, Cap, [], 3)).Message);
+        Assert.Contains(
+            "The deck needs at least one card",
+            Assert.Throws<ArgumentException>(() => RaceRules.Create(1, Plain(), 1, 3, Cap, [RaceCard.Pump, (RaceCard)99], 3)).Message);
+        Assert.Throws<ArgumentNullException>(() => RaceRules.Create(1, Plain(), 1, 3, Cap, null!, 3));
     }
 }

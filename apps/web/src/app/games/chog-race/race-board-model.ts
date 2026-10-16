@@ -8,15 +8,25 @@ export interface RaceTile {
   to?: number;
 }
 
+/** Mirrors the server's cards (RACE-005, DEC-056). What they do comes with STORY-053/054. */
+export type RaceCard = 'Pump' | 'Rug' | 'Hodl' | 'Whale' | 'Airdrop' | 'Liquidated' | 'Fomo' | 'Reverse';
+
+/** What landing on a Card tile drew (DEC-056): a card, or nothing because the hand was full or no card was left. */
+export type RaceDraw = 'Drawn' | 'HandFull' | 'NoCards';
+
 /** A player's pawn, by their seat (the room's `seat`); player ids never reach the client. */
 export interface RacePawn {
   seat: number;
   tile: number;
+  /** How many cards the player holds (STORY-052); which ones only they see. */
+  cards?: number;
 }
 
 /**
  * A seat's latest move (STORY-051, DEC-055): the server's roll, the tile it left, the tile it `landed` on and the tile it
- * ended `to` after a Boost or Setback, and what the tile landed on does (absent for a Normal tile).
+ * ended `to` after a Boost or Setback, and what the tile landed on does (absent for a Normal tile). On a Card tile, what
+ * was drawn and whether the discard pile was reshuffled into the deck first (STORY-052, DEC-056); the `card` is sent only
+ * to the player who drew it.
  */
 export interface RaceMove {
   seat: number;
@@ -25,6 +35,9 @@ export interface RaceMove {
   landed: number;
   to: number;
   effect?: Exclude<RaceTileType, 'Start' | 'Normal'>;
+  draw?: RaceDraw;
+  card?: RaceCard;
+  reshuffled?: boolean;
 }
 
 /** The current player's phase (DEC-055): rolling, or playing an optional card before ending the turn. */
@@ -40,6 +53,13 @@ export interface RaceBoard {
   phase?: RacePhase;
   /** The winner's seat, once someone reached the Finish. */
   winner?: number;
+  /** The most cards a hand holds (STORY-052, DEC-056). */
+  maxHand?: number;
+  /** How many cards are left in the deck and on the discard pile; the deck's order is never sent. */
+  deck?: number;
+  discard?: number;
+  /** Your own cards, while you're playing; nobody else's are ever sent. */
+  hand?: RaceCard[];
 }
 
 /** Rolls, moves and resolves the tile landed on, in the Move phase (DEC-055). */
@@ -64,6 +84,21 @@ export const TILE_WIDTH = 84;
 
 const TILE_TYPES: readonly string[] = ['Start', 'Normal', 'Card', 'Boost', 'Setback', 'Finish'];
 
+/** Each card's name as players know it. */
+export const RACE_CARD_NAMES: Readonly<Record<RaceCard, string>> = {
+  Pump: 'Pump',
+  Rug: 'Rug',
+  Hodl: 'HODL',
+  Whale: 'Whale',
+  Airdrop: 'Airdrop',
+  Liquidated: 'Liquidated',
+  Fomo: 'FOMO',
+  Reverse: 'Reverse',
+};
+
+const CARDS: readonly string[] = Object.keys(RACE_CARD_NAMES);
+const isCard = (value: unknown): value is RaceCard => typeof value === 'string' && CARDS.includes(value);
+
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const isIndex = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
 
@@ -81,7 +116,14 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       TILE_TYPES.includes(tile['type'] as string) &&
       (jumps(tile['type']) ? isIndex(tile['to']) && tile['to'] < tiles.length : tile['to'] === undefined),
   );
-  const validPawns = state['pawns'].every((pawn) => isRecord(pawn) && isIndex(pawn['seat']) && isIndex(pawn['tile']) && pawn['tile'] < tiles.length);
+  const validPawns = state['pawns'].every(
+    (pawn) =>
+      isRecord(pawn) &&
+      isIndex(pawn['seat']) &&
+      isIndex(pawn['tile']) &&
+      pawn['tile'] < tiles.length &&
+      (pawn['cards'] === undefined || isIndex(pawn['cards'])),
+  );
   const move = state['lastMove'];
   const validMove =
     move === undefined ||
@@ -89,10 +131,16 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       isIndex(move['seat']) &&
       isIndex(move['roll']) &&
       [move['from'], move['landed'], move['to']].every((tile) => isIndex(tile) && tile < tiles.length) &&
-      (move['effect'] === undefined || ['Card', 'Boost', 'Setback', 'Finish'].includes(move['effect'] as string)));
+      (move['effect'] === undefined || ['Card', 'Boost', 'Setback', 'Finish'].includes(move['effect'] as string)) &&
+      (move['draw'] === undefined || ['Drawn', 'HandFull', 'NoCards'].includes(move['draw'] as string)) &&
+      (move['card'] === undefined || isCard(move['card'])) &&
+      (move['reshuffled'] === undefined || typeof move['reshuffled'] === 'boolean'));
   const validPhase = state['phase'] === undefined || state['phase'] === 'Move' || state['phase'] === 'Play';
   const validWinner = state['winner'] === undefined || isIndex(state['winner']);
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner) {
+  const validCards =
+    ['maxHand', 'deck', 'discard'].every((count) => state[count] === undefined || isIndex(state[count])) &&
+    (state['hand'] === undefined || (Array.isArray(state['hand']) && state['hand'].every(isCard)));
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner || !validCards) {
     return null;
   }
   return state as unknown as RaceBoard;
