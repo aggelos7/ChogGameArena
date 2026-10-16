@@ -12,11 +12,16 @@
         @if (member.isTurn) {
           <span class="tag turn" data-turn>Turn</span>
         }
+        @if (skipping().has(member.seat)) {
+          <span class="tag" data-skipping>Skips a turn</span>
+        }
       </li>
     }
   </ul>
   <p class="turn-line" role="status" data-turn-line>
-    @if (turnOf(); as current) {
+    @if (waitingReply(); as waiting) {
+      {{ waiting.text }}
+    } @else if (turnOf(); as current) {
       @if (current.isYou) {
         It’s your turn.
       } @else {
@@ -52,7 +57,14 @@
   @if (board().deck !== undefined) {
     <p class="piles" data-piles>Deck {{ board().deck }} · Discard {{ board().discard ?? 0 }}</p>
   }
-  @if (yourPhase() === 'Move') {
+  @if (waitingReply()?.isYou) {
+    <div class="plays" role="group" aria-label="Answer the card played on you" data-reply>
+      @if (waitingReply()?.canBlock) {
+        <button type="button" class="action" [disabled]="rolling()" (click)="playCard.emit({ card: 'Hodl' })" data-block>Block with HODL</button>
+      }
+      <button type="button" class="action" [disabled]="rolling()" (click)="pass.emit()" data-pass>Take it</button>
+    </div>
+  } @else if (yourPhase() === 'Move') {
     <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
   } @else if (yourPhase() === 'Play') {
     @if (plays().length > 0) {

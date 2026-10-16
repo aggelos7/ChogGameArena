@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using ChogGames.Api.Matches;
 using ChogGames.Api.Realtime;
 using ChogGames.Core.Matches;
+using ChogGames.Infrastructure.Matches;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -19,6 +20,8 @@ namespace ChogGames.Api.Tests.ChogRace;
 /// outside change nothing and draw nothing. The first pawn to reach the Finish wins and the match ends with ranks.
 /// STORY-052, DEC-056: a Card tile draws from the server's deck, and only the player who drew sees the card. STORY-053,
 /// DEC-057: holding a movement or chaos card opens the Play phase, where <c>PLAY_CARD</c> plays it and ends the turn.
+/// STORY-054, DEC-058: an attack on a player holding cards waits for their reply; HODL blocks it, and a reply that runs
+/// out lets it land and counts as a missed turn.
 /// </summary>
 public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -253,7 +256,7 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         {
             await db.Database.ExecuteSqlRawAsync(
                 """UPDATE "GameRooms" SET "State" = {0}::jsonb WHERE "Code" = {1}""",
-                """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Rug","Hodl","Liquidated"]},{"seat":2,"tile":0}],"deck":["Fomo"],"discard":[]}""",
+                """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Hodl","Hodl","Hodl"]},{"seat":2,"tile":0}],"deck":["Fomo"],"discard":[]}""",
                 code);
         }
 
@@ -262,11 +265,11 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
 
         var mine = await ViewAsync(alice, code);
         var theirs = await ViewAsync(bob, code);
-        Assert.Equal("""["Rug","Hodl","Liquidated"]""", mine.GetProperty("state").GetProperty("hand").GetRawText());
+        Assert.Equal("""["Hodl","Hodl","Hodl"]""", mine.GetProperty("state").GetProperty("hand").GetRawText());
         Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"HandFull"}""", LastMove(theirs));
         Assert.Equal("""[{"seat":1,"tile":2,"cards":3},{"seat":2,"tile":0,"cards":0}]""", Pawns(theirs));
         Assert.Equal(1, theirs.GetProperty("state").GetProperty("deck").GetInt32());
-        foreach (var card in new[] { "Rug", "Hodl", "Liquidated", "Fomo" })
+        foreach (var card in new[] { "Hodl", "Fomo" })
         {
             Assert.DoesNotContain(card, theirs.GetRawText());
         }
@@ -408,7 +411,7 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         await RollAsync(alice, await ViewAsync(alice, code));
         var room = await ViewAsync(alice, code);
         Assert.Equal((1, "Play"), (TurnSeat(room), Phase(room)));
-        Assert.Equal("""["Pump"]""", room.GetProperty("state").GetProperty("playable").GetRawText());
+        Assert.Equal("""["Pump","Rug"]""", room.GetProperty("state").GetProperty("playable").GetRawText());
         var bobLive = await ConnectAsync(bob, code);
         var actionId = Guid.NewGuid();
         var drawsBefore = _dice.Draws.Count;
@@ -453,7 +456,8 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         foreach (var (payload, reason) in new (object, string)[]
         {
             (new { card = "Fomo" }, "card_not_held"),
-            (new { card = "Rug" }, "card_not_playable"),
+            (new { card = "Rug" }, "invalid_target"),
+            (new { card = "Rug", target = 1 }, "invalid_target"),
             (new { card = "Joker" }, "invalid_card"),
             (new { card = "Whale", target = 1 }, "invalid_target"),
             (new { card = "Whale" }, "invalid_target"),
@@ -468,7 +472,127 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         Assert.Equal(before, await StoredAsync(code));
         Assert.Equal(drawsBefore, _dice.Draws.Count);
 
+        // Bob holds a card, so the Whale waits for his reply; he lets it land.
         await PlayCardAsync(alice, room, new { card = "Whale", target = 2 });
+        Assert.Equal("Reply", Phase(await ViewAsync(alice, code)));
+        await CommandAsync(bob, await ViewAsync(bob, code), "PASS", null, HttpStatusCode.OK);
         Assert.Equal("""[{"seat":1,"tile":8,"cards":1},{"seat":2,"tile":5,"cards":1}]""", Pawns(await ViewAsync(bob, code)));
+    }
+
+    private async Task SetStateAsync(string code, string state)
+    {
+        await using var db = database.CreateDbContext();
+        await db.Database.ExecuteSqlRawAsync("""UPDATE "GameRooms" SET "State" = {0}::jsonb WHERE "Code" = {1}""", state, code);
+    }
+
+    private async Task<IReadOnlyList<TimedOutTurn>> SweepAsync()
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<TurnTimeoutService>().TimeOutOverdueTurnsAsync(CancellationToken.None);
+    }
+
+    private async Task<(int MissedTurns, bool SkipsNextTurn)> MemberAsync(string code, int seat)
+    {
+        await using var db = database.CreateDbContext();
+        var room = await db.GameRooms.AsNoTracking().SingleAsync(r => r.Code == code);
+        var member = room.Members.Single(m => m.Seat == seat);
+        return (member.MissedTurns, member.SkipsNextTurn);
+    }
+
+    [PostgresFact]
+    public async Task An_attack_waits_for_its_targets_reply_and_hodl_blocks_it_for_everyone()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        await SetStateAsync(
+            code,
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":5,"hand":["Rug"]},{"seat":2,"tile":10,"hand":["Hodl"]}],"deck":[],"discard":[],"lastMove":{"seat":1,"roll":1,"from":4,"landed":5,"to":5},"playPhase":1}""");
+        var bobLive = await ConnectAsync(bob, code);
+
+        await PlayCardAsync(alice, await ViewAsync(alice, code), new { card = "Rug", target = 2 });
+
+        foreach (var seen in new[] { await bobLive.NextAsync(), await ViewAsync(alice, code) })
+        {
+            Assert.Equal((1, "Reply"), (TurnSeat(seen), Phase(seen)));
+            Assert.Equal("""{"seat":1,"card":"Rug","target":2}""", seen.GetProperty("state").GetProperty("reply").GetRawText());
+            Assert.Equal("""[{"seat":1,"tile":5,"cards":0},{"seat":2,"tile":10,"cards":1}]""", Pawns(seen));
+        }
+
+        // Only Bob may act now; Alice can't roll, end the turn or play on.
+        var waiting = await ViewAsync(alice, code);
+        Assert.Equal("not_your_turn", (await EndTurnAsync(alice, waiting, HttpStatusCode.Conflict)).GetProperty("code").GetString());
+        var early = await RollAsync(bob, waiting, HttpStatusCode.Conflict);
+        Assert.Equal(("command_rejected", "reply_pending"), (early.GetProperty("code").GetString(), early.GetProperty("reason").GetString()));
+
+        await PlayCardAsync(bob, waiting, new { card = "Hodl" });
+
+        foreach (var seen in new[] { await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) })
+        {
+            Assert.Equal((2, "Move"), (TurnSeat(seen), Phase(seen)));
+            Assert.Equal(
+                """{"seat":1,"roll":1,"from":4,"landed":5,"to":5,"play":{"card":"Rug","target":2,"reply":"Blocked"}}""", LastMove(seen));
+            Assert.Equal("""[{"seat":1,"tile":5,"cards":0},{"seat":2,"tile":10,"cards":0}]""", Pawns(seen));
+            Assert.Equal(2, seen.GetProperty("state").GetProperty("discard").GetInt32());
+            Assert.False(seen.GetProperty("state").TryGetProperty("reply", out _));
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_liquidated_whose_reply_runs_out_lands_counts_a_miss_and_skips_the_targets_next_turn()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var carol = await GuestAsync("Carol");
+        var code = await StartedAsync(alice, bob, carol);
+        await SetStateAsync(
+            code,
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":5,"hand":["Liquidated"]},{"seat":2,"tile":3},{"seat":3,"tile":10,"hand":["Hodl"]}],"deck":["Fomo"],"discard":[],"lastMove":{"seat":1,"roll":1,"from":4,"landed":5,"to":5},"playPhase":1}""");
+        await PlayCardAsync(alice, await ViewAsync(alice, code), new { card = "Liquidated", target = 3 });
+        var waiting = await ViewAsync(carol, code);
+
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal([new TimedOutTurn(code, null)], await SweepAsync());
+        Assert.Empty(await SweepAsync());
+
+        var room = await ViewAsync(carol, code);
+        Assert.Equal(waiting.GetProperty("version").GetInt64() + 1, room.GetProperty("version").GetInt64());
+        Assert.Equal((2, "Move"), (TurnSeat(room), Phase(room)));
+        Assert.Equal(
+            """{"seat":1,"roll":1,"from":4,"landed":5,"to":5,"play":{"card":"Liquidated","target":3,"reply":"TimedOut"}}""", LastMove(room));
+        Assert.Equal("[3]", room.GetProperty("state").GetProperty("skipping").GetRawText());
+        Assert.Equal("""["Hodl"]""", room.GetProperty("state").GetProperty("hand").GetRawText());
+        Assert.Equal((1, true), await MemberAsync(code, 3));
+        Assert.Equal((0, false), await MemberAsync(code, 1));
+
+        // Bob's roll passes Carol's turn over, without a miss, back to Alice.
+        _dice.Enqueue(1);
+        await RollAsync(bob, room);
+        room = await ViewAsync(carol, code);
+        Assert.Equal(1, TurnSeat(room));
+        Assert.False(room.GetProperty("state").TryGetProperty("skipping", out _));
+        Assert.Equal((1, false), await MemberAsync(code, 3));
+    }
+
+    [PostgresFact]
+    public async Task A_target_who_leaves_while_an_attack_waits_ends_the_attackers_turn()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var carol = await GuestAsync("Carol");
+        var code = await StartedAsync(alice, bob, carol);
+        await SetStateAsync(
+            code,
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":5,"hand":["Rug"]},{"seat":2,"tile":3},{"seat":3,"tile":10,"hand":["Hodl"]}],"deck":[],"discard":[],"lastMove":{"seat":1,"roll":1,"from":4,"landed":5,"to":5},"playPhase":1}""");
+        await PlayCardAsync(alice, await ViewAsync(alice, code), new { card = "Rug", target = 3 });
+
+        await SendAsync(carol, HttpMethod.Post, $"/api/rooms/{code}/leave", expected: HttpStatusCode.NoContent);
+
+        var room = await ViewAsync(bob, code);
+        Assert.Equal((2, "Move"), (TurnSeat(room), Phase(room)));
+        Assert.False(room.GetProperty("state").TryGetProperty("reply", out _));
+        _dice.Enqueue(1);
+        await RollAsync(bob, room);
+        Assert.Equal(1, TurnSeat(await ViewAsync(alice, code)));
     }
 }

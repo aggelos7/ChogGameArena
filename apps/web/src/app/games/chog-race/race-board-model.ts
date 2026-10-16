@@ -9,8 +9,8 @@ export interface RaceTile {
 }
 
 /**
- * Mirrors the server's cards (RACE-005, DEC-056). Pump, Whale, Airdrop, FOMO and Reverse are played on your turn
- * (STORY-053, DEC-057); Rug, HODL and Liquidated come with STORY-054.
+ * Mirrors the server's cards (RACE-005, DEC-056). Every card but HODL is played on your turn (STORY-053, DEC-057;
+ * STORY-054, DEC-058); HODL only in reply to a Rug, Liquidated or Whale aimed at you.
  */
 export type RaceCard = 'Pump' | 'Rug' | 'Hodl' | 'Whale' | 'Airdrop' | 'Liquidated' | 'Fomo' | 'Reverse';
 
@@ -72,6 +72,18 @@ export interface RacePlay {
   reshuffled?: boolean;
   target?: number;
   pushed?: RacePush[];
+  /** How the target of Rug, Liquidated or Whale answered it (DEC-058); absent while they're deciding or had no cards. */
+  reply?: RaceReply;
+}
+
+/** How an attack's target answered (DEC-058): blocked with HODL, let it land, or didn't answer in time. */
+export type RaceReply = 'Blocked' | 'Allowed' | 'TimedOut';
+
+/** An attack waiting for its target's reply (DEC-058): the attacker's seat, the card and the target's seat. */
+export interface RaceAttack {
+  seat: number;
+  card: RaceCard;
+  target: number;
 }
 
 /** How far the cards move pawns, from the match's rules version (DEC-057). */
@@ -81,10 +93,15 @@ export interface RaceCardValues {
   fomoBack: number;
   fomoForwardChance: number;
   reverse: number;
+  /** How far Rug moves its target back (DEC-058). */
+  rug: number;
 }
 
-/** The current player's phase (DEC-055): rolling, or playing an optional card before ending the turn. */
-export type RacePhase = 'Move' | 'Play';
+/**
+ * The current player's phase (DEC-055): rolling, or playing an optional card before ending the turn; `Reply` while their
+ * attack waits for its target's answer (DEC-058).
+ */
+export type RacePhase = 'Move' | 'Play' | 'Reply';
 
 /** The Chog Race view in a room snapshot's `state` (STORY-050, DEC-054; STORY-051, DEC-055). */
 export interface RaceBoard {
@@ -106,6 +123,10 @@ export interface RaceBoard {
   /** Which of your cards you can play on your turn, each kind once (STORY-053, DEC-057). */
   playable?: RaceCard[];
   cardValues?: RaceCardValues;
+  /** The attack waiting for its target's reply, in the `Reply` phase (DEC-058). */
+  reply?: RaceAttack;
+  /** The seats due to skip their next turn after a Liquidated (DEC-058). */
+  skipping?: number[];
 }
 
 /** Rolls, moves and resolves the tile landed on, in the Move phase (DEC-055). */
@@ -114,8 +135,11 @@ export const RACE_ROLL = 'ROLL';
 /** Ends the turn in the Play phase, without playing a card (DEC-055). */
 export const RACE_END_TURN = 'END_TURN';
 
-/** Plays a card in the Play phase, which ends the turn (DEC-057). */
+/** Plays a card in the Play phase, which ends the turn (DEC-057), or HODL in reply to an attack (DEC-058). */
 export const RACE_PLAY_CARD = 'PLAY_CARD';
+
+/** Lets an attack on you land instead of blocking it (DEC-058). */
+export const RACE_PASS = 'PASS';
 
 /** What a card does, in a short sentence, with the match's values when the server sent them (DEC-057). */
 export function raceCardDescription(card: RaceCard, values?: RaceCardValues): string {
@@ -133,11 +157,11 @@ export function raceCardDescription(card: RaceCard, values?: RaceCardValues): st
     case 'Reverse':
       return values ? `Every opponent moves ${values.reverse} back.` : 'Every opponent moves back.';
     case 'Rug':
-      return 'Send an opponent back. Can’t be played yet.';
+      return values ? `Move an opponent ${values.rug} back.` : 'Move an opponent back.';
     case 'Hodl':
-      return 'Block an attack on you. Can’t be played yet.';
+      return 'Block a Rug, Liquidated or Whale played on you.';
     case 'Liquidated':
-      return 'An opponent skips their next turn. Can’t be played yet.';
+      return 'An opponent skips their next turn.';
   }
 }
 
@@ -177,6 +201,7 @@ const isIndex = (value: unknown): value is number => typeof value === 'number' &
 const isOptional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value);
 const EFFECTS: readonly string[] = ['Card', 'Boost', 'Setback', 'Finish'];
 const DRAWS: readonly string[] = ['Drawn', 'HandFull', 'NoCards'];
+const REPLIES: readonly string[] = ['Blocked', 'Allowed', 'TimedOut'];
 
 /** A card play as the server sends it, its tiles on a track of `tiles` tiles. */
 function isPlay(play: unknown, tiles: number): boolean {
@@ -191,6 +216,7 @@ function isPlay(play: unknown, tiles: number): boolean {
     isOptional(play['draw'], (draw) => DRAWS.includes(draw as string)) &&
     isOptional(play['drawn'], isCard) &&
     isOptional(play['reshuffled'], (reshuffled) => typeof reshuffled === 'boolean') &&
+    isOptional(play['reply'], (reply) => REPLIES.includes(reply as string)) &&
     isOptional(
       play['pushed'],
       (pushed) =>
@@ -207,7 +233,7 @@ function isPlay(play: unknown, tiles: number): boolean {
 }
 
 const isCardValues = (values: unknown): boolean =>
-  isRecord(values) && ['pump', 'fomoForward', 'fomoBack', 'fomoForwardChance', 'reverse'].every((key) => isIndex(values[key]));
+  isRecord(values) && ['pump', 'fomoForward', 'fomoBack', 'fomoForwardChance', 'reverse', 'rug'].every((key) => isIndex(values[key]));
 
 /** The board in `state`, or null when the state isn't a Chog Race board this client understands. */
 export function toRaceBoard(state: unknown): RaceBoard | null {
@@ -243,13 +269,17 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       (move['card'] === undefined || isCard(move['card'])) &&
       (move['reshuffled'] === undefined || typeof move['reshuffled'] === 'boolean') &&
       isOptional(move['play'], (play) => isPlay(play, tiles.length)));
-  const validPhase = state['phase'] === undefined || state['phase'] === 'Move' || state['phase'] === 'Play';
+  const validPhase = state['phase'] === undefined || ['Move', 'Play', 'Reply'].includes(state['phase'] as string);
+  const reply = state['reply'];
+  const validReply =
+    reply === undefined || (isRecord(reply) && isIndex(reply['seat']) && isCard(reply['card']) && isIndex(reply['target']));
+  const validSkipping = isOptional(state['skipping'], (seats) => Array.isArray(seats) && seats.every(isIndex));
   const validWinner = state['winner'] === undefined || isIndex(state['winner']);
   const validCards =
     ['maxHand', 'deck', 'discard'].every((count) => state[count] === undefined || isIndex(state[count])) &&
     ['hand', 'playable'].every((cards) => isOptional(state[cards], (list) => Array.isArray(list) && list.every(isCard))) &&
     isOptional(state['cardValues'], isCardValues);
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner || !validCards) {
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner || !validCards || !validReply || !validSkipping) {
     return null;
   }
   return state as unknown as RaceBoard;

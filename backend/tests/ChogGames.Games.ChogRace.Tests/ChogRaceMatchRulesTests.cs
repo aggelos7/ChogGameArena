@@ -16,6 +16,8 @@ namespace ChogGames.Games.ChogRace.Tests;
 /// wins. STORY-052, DEC-056: Card tiles draw from a deck the server shuffled, up to a full hand, refilling an empty deck
 /// from the discard pile and leavers' hands; each player sees only their own cards. STORY-053, DEC-057: holding a
 /// movement or chaos card opens the Play phase, where <c>PLAY_CARD</c> plays one, onto the discard pile, and ends the turn.
+/// STORY-054, DEC-058: Rug and Liquidated are played on an opponent; an attack (with Whale) on a player holding cards waits
+/// for their reply, HODL to block it once or <c>PASS</c> to let it land, and lands by itself when the reply runs out.
 /// </summary>
 public class ChogRaceMatchRulesTests
 {
@@ -454,17 +456,17 @@ public class ChogRaceMatchRulesTests
         var dice = new Dice(2);
 
         var decision = Apply(
-            room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0], [["Rug"], []], ["Liquidated", "Whale"], ["Fomo"]), dice);
+            room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0], [["Hodl"], []], ["Hodl", "Whale"], ["Fomo"]), dice);
 
         Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
         Assert.Single(dice.Draws);
-        Assert.Equal(["Rug", "Liquidated"], HandOf(decision, 1));
+        Assert.Equal(["Hodl", "Hodl"], HandOf(decision, 1));
         Assert.Empty(HandOf(decision, 2));
         Assert.Equal(["Whale"], Pile(decision, "deck"));
         Assert.Equal(["Fomo"], Pile(decision, "discard"));
         Assert.False(decision.State!.Value.TryGetProperty("playPhase", out _));
         Assert.Equal(
-            """{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"Drawn","card":"Liquidated"}""",
+            """{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"Drawn","card":"Hodl"}""",
             LastMove(decision));
     }
 
@@ -472,12 +474,12 @@ public class ChogRaceMatchRulesTests
     public void A_full_hand_draws_nothing_and_leaves_the_deck_alone()
     {
         var (room, players) = Started(2);
-        var state = CardState([0, 0], [["Rug", "Hodl", "Liquidated"], []], ["Pump"], []);
+        var state = CardState([0, 0], [["Hodl", "Hodl", "Hodl"], []], ["Pump"], []);
 
         var decision = Apply(room, players[0].Id, ChogRaceMatchRules.Roll, state, new Dice(2));
 
         Assert.True(decision.EndsTurn);
-        Assert.Equal(["Rug", "Hodl", "Liquidated"], HandOf(decision, 1));
+        Assert.Equal(["Hodl", "Hodl", "Hodl"], HandOf(decision, 1));
         Assert.Equal(["Pump"], Pile(decision, "deck"));
         Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"HandFull"}""", LastMove(decision));
     }
@@ -554,12 +556,12 @@ public class ChogRaceMatchRulesTests
     }
 
     [Fact]
-    public void Cards_played_only_in_reply_or_not_yet_playable_dont_open_the_play_phase()
+    public void A_card_played_only_in_reply_doesnt_open_the_play_phase()
     {
         var (room, players) = Started(2);
 
         var decision = Apply(
-            room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0], [["Rug", "Hodl", "Liquidated"], []], ["Whale"], []), new Dice(1));
+            room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0], [["Hodl", "Hodl"], []], ["Whale"], []), new Dice(1));
 
         Assert.True(decision.EndsTurn);
         Assert.False(decision.State!.Value.TryGetProperty("playPhase", out _));
@@ -571,7 +573,9 @@ public class ChogRaceMatchRulesTests
     [InlineData("Airdrop")]
     [InlineData("Fomo")]
     [InlineData("Reverse")]
-    public void Holding_a_movement_or_chaos_card_opens_the_play_phase(string card)
+    [InlineData("Rug")]
+    [InlineData("Liquidated")]
+    public void Holding_a_card_playable_on_the_turn_opens_the_play_phase(string card)
     {
         var (room, players) = Started(2);
 
@@ -825,8 +829,9 @@ public class ChogRaceMatchRulesTests
     [InlineData("""{"card":"Joker"}""", "invalid_card")]
     [InlineData("""[]""", "invalid_card")]
     [InlineData("""{"card":"Fomo"}""", "card_not_held")]
-    [InlineData("""{"card":"Rug"}""", "card_not_playable")]
+    [InlineData("""{"card":"Rug"}""", "invalid_target")]
     [InlineData("""{"card":"Hodl"}""", "card_not_playable")]
+    [InlineData("""{"card":"Hodl","target":2}""", "card_not_playable")]
     public void Only_a_held_card_playable_on_the_turn_can_be_played(string payload, string reason)
     {
         var (room, players) = Started(2);
@@ -859,11 +864,315 @@ public class ChogRaceMatchRulesTests
         var own = ViewOf(room, players[0].Id, state)!.Value;
         var other = ViewOf(room, players[1].Id, state)!.Value;
 
-        Assert.Equal(["Pump"], Cards(own.GetProperty("playable")));
+        Assert.Equal(["Pump", "Rug"], Cards(own.GetProperty("playable")));
         Assert.Equal(["Fomo"], Cards(other.GetProperty("playable")));
         Assert.Equal(
-            """{"pump":3,"fomoForward":5,"fomoBack":3,"fomoForwardChance":50,"reverse":1}""",
+            """{"pump":3,"fomoForward":5,"fomoBack":3,"fomoForwardChance":50,"reverse":1,"rug":4}""",
             own.GetProperty("cardValues").GetRawText());
         Assert.Equal("Play", own.GetProperty("phase").GetString());
+    }
+
+    [Fact]
+    public void Rug_on_a_player_without_cards_moves_them_back_at_once_and_ends_the_turn()
+    {
+        var (room, players) = Started(2);
+
+        var decision = Play(room, players[0].Id, PlayState([5, 10], [["Rug"], []], deck: ["Pump"]), new NoDraws(), """{"card":"Rug","target":2}""");
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true, (Guid?)null), (decision.Outcome, decision.EndsTurn, decision.AwaitsReplyFrom));
+        Assert.Equal([5, 6], Tiles(decision));
+        Assert.Equal("""{"card":"Rug","target":2,"pushed":[{"seat":2,"from":10,"landed":6,"to":6}]}""", PlayOf(decision));
+        Assert.Equal(["Rug"], Pile(decision, "discard"));
+        Assert.Empty(HandOf(decision, 1));
+    }
+
+    [Theory]
+    [InlineData(13, 9, 7, "Setback")] // onto the Setback at 9, back to 7, a Card tile that draws nothing
+    [InlineData(8, 4, 6, "Boost")] // onto the Boost at 4, on to 6
+    [InlineData(3, 0, 0, null)] // no further back than the Start
+    public void Rug_stops_at_the_start_and_follows_the_boost_or_setback_it_lands_on(int from, int landed, int to, string? effect)
+    {
+        var (room, players) = Started(2);
+
+        var decision = Play(room, players[0].Id, PlayState([5, from], [["Rug"], []], deck: ["Pump"]), new NoDraws(), """{"card":"Rug","target":2}""");
+
+        Assert.Equal([5, to], Tiles(decision));
+        var push = $$"""{"seat":2,"from":{{from}},"landed":{{landed}},"to":{{to}}""" + (effect is null ? "}" : $$""","effect":"{{effect}}"}""");
+        Assert.Equal($$"""{"card":"Rug","target":2,"pushed":[{{push}}]}""", PlayOf(decision));
+        Assert.Empty(HandOf(decision, 2));
+        Assert.Equal(["Pump"], Pile(decision, "deck"));
+    }
+
+    [Fact]
+    public void Liquidated_on_a_player_without_cards_makes_them_skip_their_next_turn()
+    {
+        var (room, players) = Started(3);
+
+        var decision = Play(room, players[0].Id, PlayState([5, 10, 2], [["Liquidated"], [], []]), new NoDraws(), """{"card":"Liquidated","target":3}""");
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true, players[2].Id), (decision.Outcome, decision.EndsTurn, decision.SkipsNextTurnOf));
+        Assert.Equal([5, 10, 2], Tiles(decision));
+        Assert.Equal("""{"card":"Liquidated","target":3}""", PlayOf(decision));
+        Assert.Equal(["Liquidated"], Pile(decision, "discard"));
+    }
+
+    [Theory]
+    [InlineData("""{"card":"Rug"}""")]
+    [InlineData("""{"card":"Rug","target":1}""")]
+    [InlineData("""{"card":"Rug","target":3}""")]
+    [InlineData("""{"card":"Rug","target":7}""")]
+    [InlineData("""{"card":"Rug","target":"2"}""")]
+    [InlineData("""{"card":"Rug","target":4}""")] // on the Start: nowhere to go back to
+    [InlineData("""{"card":"Liquidated"}""")]
+    [InlineData("""{"card":"Liquidated","target":1}""")]
+    [InlineData("""{"card":"Liquidated","target":3}""")]
+    [InlineData("""{"card":"Liquidated","target":5}""")] // already due to skip a turn; it doesn't stack
+    public void An_attack_needs_an_opponent_still_playing_it_can_hurt_as_its_target(string payload)
+    {
+        var (room, players) = Started(5);
+        room.Leave(players[2].Id, Now.AddMinutes(1));
+        Skips(room, players[0], players[4]);
+
+        var decision = Play(room, players[0].Id, PlayState([5, 9, 3, 0, 6], [["Rug", "Liquidated"], [], [], [], []]), new NoDraws(), payload);
+
+        Assert.Equal((MatchRuleOutcome.Rejected, "invalid_target"), (decision.Outcome, decision.Reason));
+        Assert.Null(decision.State);
+    }
+
+    /// <summary>Makes <paramref name="skipping"/> due to skip their next turn, on <paramref name="current"/>'s turn.</summary>
+    private static void Skips(GameRoom room, Player current, Player skipping) =>
+        room.ApplyCommand(current.Id, Command(room), "{}", endsTurn: false, Now.AddMinutes(1), skipsNextTurnOf: skipping.Id);
+
+    private static MatchCommand Command(GameRoom room)
+    {
+        using var payload = JsonDocument.Parse("{}");
+        return new MatchCommand(Guid.NewGuid(), room.Id, room.Version, ChogRaceMatchRules.PlayCard, payload.RootElement.Clone());
+    }
+
+    [Theory]
+    [InlineData("Rug")]
+    [InlineData("Liquidated")]
+    [InlineData("Whale")]
+    public void An_attack_on_a_player_holding_cards_waits_for_their_reply(string card)
+    {
+        var (room, players) = Started(3);
+
+        var decision = Play(
+            room, players[0].Id, PlayState([5, 10, 2], [[card], ["Pump"], []]), new NoDraws(), $$"""{"card":"{{card}}","target":2}""");
+
+        Assert.Equal((MatchRuleOutcome.Accepted, false, players[1].Id), (decision.Outcome, decision.EndsTurn, decision.AwaitsReplyFrom));
+        Assert.Null(decision.SkipsNextTurnOf);
+        Assert.Equal([5, 10, 2], Tiles(decision));
+        Assert.Equal($$"""{"seat":1,"card":"{{card}}","target":2}""", decision.State!.Value.GetProperty("reply").GetRawText());
+        Assert.Equal($$"""{"card":"{{card}}","target":2}""", PlayOf(decision));
+        Assert.Equal([card], Pile(decision, "discard"));
+        Assert.False(decision.State!.Value.TryGetProperty("playPhase", out _));
+    }
+
+    /// <summary>
+    /// Seat 1's <paramref name="card"/> on seat 2 waiting for seat 2's reply, the engine waiting with it; the card is on
+    /// the discard pile.
+    /// </summary>
+    private static string ReplyState(GameRoom room, Player[] players, string card, int[] tiles, string[][] hands, string[]? deck = null)
+    {
+        room.ApplyCommand(players[0].Id, Command(room), "{}", endsTurn: false, Now.AddMinutes(1), awaitsReplyFrom: players[1].Id);
+        var state = CardState(tiles, hands, deck ?? [], [card]);
+        return state[..^1]
+            + $$$""","lastMove":{"seat":1,"roll":1,"from":0,"landed":1,"to":1,"play":{"card":"{{{card}}}","target":2}},"reply":{"seat":1,"card":"{{{card}}}","target":2}}""";
+    }
+
+    [Theory]
+    [InlineData("Rug")]
+    [InlineData("Liquidated")]
+    [InlineData("Whale")]
+    public void Hodl_blocks_the_attack_and_is_used_up_once(string card)
+    {
+        var (room, players) = Started(2);
+        var state = ReplyState(room, players, card, [5, 10], [[], ["Hodl", "Hodl"]]);
+
+        var decision = Play(room, players[1].Id, state, new NoDraws(), """{"card":"Hodl"}""");
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
+        Assert.Equal(((Guid?)null, (Guid?)null), (decision.AwaitsReplyFrom, decision.SkipsNextTurnOf));
+        Assert.Equal([5, 10], Tiles(decision));
+        Assert.Equal(["Hodl"], HandOf(decision, 2));
+        Assert.Equal([card, "Hodl"], Pile(decision, "discard"));
+        Assert.Equal($$"""{"card":"{{card}}","target":2,"reply":"Blocked"}""", PlayOf(decision));
+        Assert.False(decision.State!.Value.TryGetProperty("reply", out _));
+    }
+
+    [Fact]
+    public void Pass_lets_a_rug_land_and_keeps_the_targets_cards()
+    {
+        var (room, players) = Started(2);
+        var state = ReplyState(room, players, "Rug", [5, 10], [[], ["Hodl"]]);
+
+        var decision = Apply(room, players[1].Id, ChogRaceMatchRules.Pass, state, new NoDraws());
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
+        Assert.Equal([5, 6], Tiles(decision));
+        Assert.Equal(["Hodl"], HandOf(decision, 2));
+        Assert.Equal(
+            """{"card":"Rug","target":2,"pushed":[{"seat":2,"from":10,"landed":6,"to":6}],"reply":"Allowed"}""", PlayOf(decision));
+        Assert.False(decision.State!.Value.TryGetProperty("reply", out _));
+    }
+
+    [Fact]
+    public void Pass_lets_liquidated_skip_the_targets_next_turn()
+    {
+        var (room, players) = Started(2);
+        var state = ReplyState(room, players, "Liquidated", [5, 10], [[], ["Pump"]]);
+
+        var decision = Apply(room, players[1].Id, ChogRaceMatchRules.Pass, state, new NoDraws());
+
+        Assert.Equal((true, players[1].Id), (decision.EndsTurn, decision.SkipsNextTurnOf));
+        Assert.Equal("""{"card":"Liquidated","target":2,"reply":"Allowed"}""", PlayOf(decision));
+    }
+
+    [Fact]
+    public void Pass_lets_a_whale_swap_and_the_attacker_draws_on_a_card_tile()
+    {
+        var (room, players) = Started(2);
+        var state = ReplyState(room, players, "Whale", [5, 14], [[], ["Hodl"]], deck: ["Pump"]);
+
+        var decision = Apply(room, players[1].Id, ChogRaceMatchRules.Pass, state, new NoDraws());
+
+        Assert.Equal([14, 5], Tiles(decision));
+        Assert.Equal(["Pump"], HandOf(decision, 1));
+        Assert.Equal(
+            """{"card":"Whale","from":5,"to":14,"effect":"Card","draw":"Drawn","drawn":"Pump","target":2,"reply":"Allowed"}""",
+            PlayOf(decision));
+    }
+
+    [Theory]
+    [InlineData(ChogRaceMatchRules.Roll, "{}", "reply_pending")]
+    [InlineData(ChogRaceMatchRules.EndTurn, "{}", "reply_pending")]
+    [InlineData(ChogRaceMatchRules.PlayCard, """{"card":"Pump"}""", "card_not_playable")]
+    [InlineData(ChogRaceMatchRules.PlayCard, """{"card":"Joker"}""", "invalid_card")]
+    public void While_an_attack_waits_its_target_can_only_play_hodl_or_pass(string type, string payload, string reason)
+    {
+        var (room, players) = Started(2);
+        var state = ReplyState(room, players, "Rug", [5, 10], [[], ["Pump"]]);
+
+        var decision = Apply(room, players[1].Id, type, state, new NoDraws(), payload);
+
+        Assert.Equal((MatchRuleOutcome.Rejected, reason), (decision.Outcome, decision.Reason));
+        Assert.Equal("card_not_held", Play(room, players[1].Id, state, new NoDraws(), """{"card":"Hodl"}""").Reason);
+        Assert.Equal("reply_pending", Apply(room, players[0].Id, ChogRaceMatchRules.Roll, state, new NoDraws()).Reason);
+    }
+
+    [Fact]
+    public void Pass_without_an_attack_waiting_is_rejected()
+    {
+        var (room, players) = Started(2);
+
+        var decision = Apply(room, players[0].Id, ChogRaceMatchRules.Pass, PlayState([5, 10], [["Rug"], []]), new NoDraws());
+
+        Assert.Equal((MatchRuleOutcome.Rejected, "no_attack"), (decision.Outcome, decision.Reason));
+    }
+
+    [Fact]
+    public void An_attack_the_engine_stopped_waiting_for_is_void()
+    {
+        // The target left, so the engine moved on; the stored attack no longer holds anyone up.
+        var (room, players) = Started(3);
+        var state = ReplyState(room, players, "Rug", [5, 10, 0], [[], ["Pump"], []]);
+        room.Leave(players[1].Id, Now.AddMinutes(1));
+
+        var decision = Apply(room, players[2].Id, ChogRaceMatchRules.Roll, state, new Dice(1));
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
+        Assert.False(decision.State!.Value.TryGetProperty("reply", out _));
+        Assert.Equal("Move", ViewOf(room, players[0].Id, state)!.Value.GetProperty("phase").GetString());
+    }
+
+    private static MatchRuleDecision? TimeOutReply(GameRoom room, string state, ChogRaceMatchRules? rules = null)
+    {
+        using var document = JsonDocument.Parse(state);
+        var decision = (rules ?? Rules).TimeOutReply(new MatchTurnContext(room, document.RootElement, new NoDraws()));
+        return decision is null ? null : decision with { State = decision.State?.Clone() };
+    }
+
+    [Fact]
+    public void An_attack_whose_reply_runs_out_lands_and_the_target_keeps_their_hodl()
+    {
+        var (room, players) = Started(2);
+        var state = ReplyState(room, players, "Rug", [5, 10], [[], ["Hodl"]]);
+
+        var decision = TimeOutReply(room, state)!;
+
+        Assert.Equal((MatchRuleOutcome.Accepted, (Guid?)null), (decision.Outcome, decision.SkipsNextTurnOf));
+        Assert.Equal([5, 6], Tiles(decision));
+        Assert.Equal(["Hodl"], HandOf(decision, 2));
+        Assert.Equal(
+            """{"card":"Rug","target":2,"pushed":[{"seat":2,"from":10,"landed":6,"to":6}],"reply":"TimedOut"}""", PlayOf(decision));
+        Assert.False(decision.State!.Value.TryGetProperty("reply", out _));
+    }
+
+    [Fact]
+    public void A_liquidated_whose_reply_runs_out_skips_the_targets_next_turn()
+    {
+        var (room, players) = Started(2);
+        var state = ReplyState(room, players, "Liquidated", [5, 10], [[], ["Hodl"]]);
+
+        Assert.Equal(players[1].Id, TimeOutReply(room, state)!.SkipsNextTurnOf);
+    }
+
+    [Fact]
+    public void A_reply_timeout_without_an_attack_waiting_changes_nothing()
+    {
+        var (room, players) = Started(2);
+
+        Assert.Null(TimeOutReply(room, PlayState([5, 10], [["Rug"], []])));
+        Assert.Null(TimeOutReply(room, """{"rulesVersion":99,"pawns":[]}"""));
+
+        // The state says an attack waits, but the engine isn't waiting for it.
+        var state = CardState([5, 10], [[], ["Hodl"]], [], ["Rug"])[..^1]
+            + ""","lastMove":{"seat":1,"roll":1,"from":0,"landed":1,"to":1,"play":{"card":"Rug","target":2}},"reply":{"seat":1,"card":"Rug","target":2}}""";
+        Assert.Null(TimeOutReply(room, state));
+        Assert.Equal("Move", ViewOf(room, players[0].Id, state)!.Value.GetProperty("phase").GetString());
+        Assert.False(ViewOf(room, players[0].Id, state)!.Value.TryGetProperty("reply", out _));
+    }
+
+    [Fact]
+    public void A_rug_whose_reply_runs_out_onto_a_boost_to_the_finish_wins_for_its_target()
+    {
+        var boostToFinish = RaceRules.Create(
+            2,
+            [Start(0), .. Enumerable.Range(1, 25).Select(Normal), Boost(26, to: 29), Normal(27), Normal(28), Finish(29)],
+            1,
+            3,
+            TimeSpan.FromMinutes(20),
+            [RaceCard.Rug],
+            3,
+            RaceRulesV1.Rules.CardValues with { Rug = 2 });
+        var rules = new ChogRaceMatchRules([RaceRulesV1.Rules, boostToFinish]);
+        var (room, players) = Started(2, rules);
+        var state = ReplyState(room, players, "Rug", [10, 28], [[], ["Pump"]]).Replace("\"rulesVersion\":1", "\"rulesVersion\":2");
+
+        var decision = TimeOutReply(room, state, rules)!;
+
+        Assert.Equal(2, decision.State!.Value.GetProperty("winner").GetInt32());
+        Assert.Equal([(players[0].Id, 2), (players[1].Id, 1)], decision.Standings!.Select(s => (s.PlayerId, s.Rank)));
+    }
+
+    [Fact]
+    public void Everyone_sees_the_attack_waiting_for_its_reply_and_who_skips_a_turn()
+    {
+        var (room, players) = Started(3);
+        Skips(room, players[0], players[2]);
+        var state = ReplyState(room, players, "Rug", [5, 10, 2], [[], ["Hodl", "Pump"], []]);
+
+        var views = players.Select(p => ViewOf(room, p.Id, state)!.Value).ToArray();
+
+        foreach (var view in views)
+        {
+            Assert.Equal("Reply", view.GetProperty("phase").GetString());
+            Assert.Equal("""{"seat":1,"card":"Rug","target":2}""", view.GetProperty("reply").GetRawText());
+            Assert.Equal("[3]", view.GetProperty("skipping").GetRawText());
+        }
+
+        Assert.Equal(["Hodl", "Pump"], Cards(views[1].GetProperty("hand")));
+        Assert.Equal(["Pump"], Cards(views[1].GetProperty("playable")));
     }
 }

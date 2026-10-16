@@ -931,6 +931,32 @@ describe('Room page', () => {
       expect(pump.request.body.payload).toEqual({ card: 'Pump' });
     });
 
+    it('answers a Chog Race attack on you, with the clock yours while it waits (STORY-054)', () => {
+      const attacked: Room = {
+        ...room,
+        version: 7,
+        gameType: 'chog-race',
+        status: 'Active',
+        state: { ...RACE_BOARD, phase: 'Reply', reply: { seat: 1, card: 'Rug', target: 2 }, hand: ['Hodl'], playable: [] },
+        turnEndsAt: new Date(Date.now() + 20_000).toISOString(),
+        turnSeconds: 25,
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      };
+      load(attacked);
+
+      expect(element().querySelector('.match [data-turn-timer] .who')?.textContent).toBe('Your turn');
+      element().querySelector<HTMLButtonElement>('[data-block]')?.click();
+      const block = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(block.request.body).toMatchObject({ expectedVersion: 7, type: 'PLAY_CARD', payload: { card: 'Hodl' } });
+      block.flush({ actionId: block.request.body.actionId, type: 'PLAY_CARD', version: 8, currentVersion: 8, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush(attacked);
+      fixture.detectChanges();
+
+      element().querySelector<HTMLButtonElement>('[data-pass]')?.click();
+      const pass = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(pass.request.body).toMatchObject({ expectedVersion: 7, type: 'PASS', payload: {} });
+    });
+
     it('keeps the final Chog Race board once the game is over', () => {
       load({
         ...room,

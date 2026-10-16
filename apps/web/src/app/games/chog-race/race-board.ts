@@ -21,7 +21,7 @@ import {
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
 
-/** A card you can play now, and for Whale the opponent it swaps with (DEC-057). */
+/** A card you can play now, and for Whale, Rug and Liquidated the opponent it's played on (DEC-057, DEC-058). */
 export interface RaceCardPlay {
   card: RaceCard;
   target?: number;
@@ -47,7 +47,9 @@ interface DrawnPawn {
  * End turn in the Play phase (STORY-051, DEC-055), and says what the latest move did; the server decides every outcome.
  * It shows your hand, how many cards each player holds and what's left in the deck and discard pile (STORY-052, DEC-056);
  * the server only ever sends your own cards. In the Play phase it offers a button for each card you can play, Whale once
- * per opponent, and says what the card did (STORY-053, DEC-057).
+ * per opponent, and says what the card did (STORY-053, DEC-057). Rug and Liquidated are offered once per opponent they
+ * can hurt; when one, or a Whale, is played on you while you hold cards, it asks you to block it with HODL or take it, and
+ * everyone sees who it waits for and who skips a turn (STORY-054, DEC-058).
  */
 @Component({
   selector: 'app-race-board',
@@ -63,6 +65,8 @@ export class RaceBoardView {
   readonly roll = output<void>();
   readonly endTurn = output<void>();
   readonly playCard = output<RaceCardPlay>();
+  /** Lets an attack on you land (DEC-058). */
+  readonly pass = output<void>();
 
   protected readonly label = raceTileLabel;
 
@@ -111,6 +115,32 @@ export class RaceBoardView {
 
   protected readonly turnOf = computed(() => this.players().find((member) => member.isTurn) ?? null);
 
+  /** Seats due to skip their next turn (DEC-058). */
+  protected readonly skipping = computed(() => new Set(this.board().skipping ?? []));
+
+  /**
+   * The attack waiting for its target's answer, in the Reply phase (DEC-058), in words: what happened, whether it's you
+   * who answers, and whether you hold a HODL to block it with.
+   */
+  protected readonly waitingReply = computed(() => {
+    const board = this.board();
+    const attack = board.reply;
+    if (board.phase !== 'Reply' || !attack) {
+      return null;
+    }
+    const target = this.members().find((member) => member.seat === attack.target);
+    const card = this.cardName(attack.card);
+    const isYou = !!target?.isYou;
+    const canBlock = isYou && (board.hand ?? []).includes('Hodl');
+    return {
+      isYou,
+      canBlock,
+      text: isYou
+        ? `${this.nameOf(attack.seat)} played ${card} on you. ${canBlock ? 'Block it with HODL or take it.' : 'You have no HODL to block it.'}`
+        : `Waiting for ${this.nameOf(attack.target, false)} to answer ${this.possessive(attack.seat)} ${card}.`,
+    };
+  });
+
   /** Your turn's phase, while it's your turn in a live match; null otherwise. */
   protected readonly yourPhase = computed(() => (this.turnOf()?.isYou ? (this.board().phase ?? null) : null));
 
@@ -124,6 +154,20 @@ export class RaceBoardView {
     return (this.board().playable ?? []).flatMap((card): (RaceCardPlay & { label: string })[] => {
       const name = this.cardName(card);
       switch (card) {
+        case 'Rug':
+          // A pawn on the Start has nowhere to go back to.
+          return opponents
+            .filter((pawn) => pawn.tile > 0)
+            .map((pawn) => ({
+              card,
+              target: pawn.seat,
+              label: `${name}: ${this.nameOf(pawn.seat, false)} ${values ? `${values.rug} ` : ''}back`,
+            }));
+        case 'Liquidated':
+          // Skips don't stack.
+          return opponents
+            .filter((pawn) => !this.skipping().has(pawn.seat))
+            .map((pawn) => ({ card, target: pawn.seat, label: `${name}: ${this.nameOf(pawn.seat, false)} skips a turn` }));
         case 'Whale':
           return opponents.map((pawn) => ({
             card,
@@ -174,6 +218,12 @@ export class RaceBoardView {
     return member?.isYou ? (sentenceStart ? 'You' : 'you') : (member?.displayName ?? `Seat ${seat}`);
   }
 
+  /** A seat's player's, mid-sentence: "your" for yours, otherwise "Bob’s". */
+  private possessive(seat: number): string {
+    const name = this.nameOf(seat, false);
+    return name === 'you' ? 'your' : `${name}’s`;
+  }
+
   /** The sentence for a pawn's own move: `action` (who rolled or played what), where it landed and what the tile did. */
   private landed(action: string, landing: Landing, seat: number): string {
     const isYou = !!this.members().find((player) => player.seat === seat)?.isYou;
@@ -196,9 +246,33 @@ export class RaceBoardView {
     }
   }
 
-  /** What a card play did: a move of the player's own, a swap, or opponents pushed back. */
+  /**
+   * What a card play did: a move of the player's own, a swap, opponents pushed back or a skipped turn, and how the target
+   * of an attack answered it (DEC-058).
+   */
   private played(play: RacePlay, seat: number): string {
     const action = `${this.nameOf(seat)} played ${this.cardName(play.card)}`;
+    if (play.target === undefined) {
+      return this.effectOf(play, seat, action);
+    }
+    const target = this.nameOf(play.target, false);
+    const attack = this.board().reply;
+    if (play.reply === 'Blocked') {
+      return `${action} on ${target}, blocked with HODL.`;
+    }
+    if (!play.reply && attack?.seat === seat && attack.target === play.target && this.board().phase === 'Reply') {
+      return `${action} on ${target}, waiting for an answer.`;
+    }
+    const effect = this.effectOf(play, seat, action);
+    return play.reply === 'TimedOut' ? `${effect} ${this.nameOf(play.target)} didn’t answer in time.` : effect;
+  }
+
+  /** What a card play did to the pawns, or to the turns. */
+  private effectOf(play: RacePlay, seat: number, action: string): string {
+    if (play.card === 'Liquidated' && play.target !== undefined) {
+      const isYou = !!this.members().find((player) => player.seat === play.target)?.isYou;
+      return `${action}: ${this.nameOf(play.target, false)} ${isYou ? 'skip your' : 'skips their'} next turn.`;
+    }
     if (play.target !== undefined && play.to !== undefined) {
       const swapped = `${action} and swapped places with ${this.nameOf(play.target, false)} (now on tile ${play.from})`;
       return this.landed(swapped, { ...play, landed: play.to, to: play.to, card: play.drawn }, seat);

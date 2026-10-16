@@ -208,6 +208,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<int>("MinPlayers")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("ReplyingPlayerId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -262,6 +265,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_GameRooms_MatchEndsAt", "\"MatchEndsAt\" IS NULL OR (\"StartedAt\" IS NOT NULL AND \"MatchEndsAt\" > \"StartedAt\" AND \"MatchEndsAt\" <= \"StartedAt\" + interval '20 minutes')");
 
                             t.HasCheckConstraint("CK_GameRooms_MinPlayers", "\"MinPlayers\" >= 2 AND \"MinPlayers\" <= \"Capacity\"");
+
+                            t.HasCheckConstraint("CK_GameRooms_ReplyingPlayer", "\"ReplyingPlayerId\" IS NULL OR (\"Status\" = 'Active' AND \"CurrentPlayerId\" IS NOT NULL AND \"ReplyingPlayerId\" <> \"CurrentPlayerId\")");
 
                             t.HasCheckConstraint("CK_GameRooms_StartedAt", "(\"StartedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Cancelled'))");
 
@@ -327,6 +332,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<int?>("Seat")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("SkipsNextTurn")
+                        .HasColumnType("boolean");
+
                     b.HasKey("RoomId", "PlayerId");
 
                     b.HasIndex("PlayerId");
@@ -356,6 +364,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_RoomMembers_Result", "\"Result\" IS NULL OR (jsonb_typeof(\"Result\") = 'object' AND \"Rank\" IS NOT NULL AND \"LeftAt\" IS NULL)");
 
                             t.HasCheckConstraint("CK_RoomMembers_Seat", "\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND 6");
+
+                            t.HasCheckConstraint("CK_RoomMembers_SkipsNextTurn", "NOT \"SkipsNextTurn\" OR \"Seat\" IS NOT NULL");
                         });
                 });
 
