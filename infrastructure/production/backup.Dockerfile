@@ -6,7 +6,7 @@
 ARG POSTGRES=postgres:18.6-alpine3.24
 
 FROM ${POSTGRES}
-RUN apk add --no-cache age=1.3.2-r0 rclone=1.74.1-r2 \
+RUN apk add --no-cache age=1.3.2-r1 rclone=1.74.1-r3 \
  && install -d -o postgres -g postgres -m 700 /backups
 COPY --chmod=755 infrastructure/production/backup.sh /usr/local/bin/chog-backup
 COPY --chmod=755 infrastructure/production/backup-retention.sh /usr/local/bin/backup-retention.sh
