@@ -23,9 +23,19 @@ export interface RaceResult {
   attacksLanded: number;
   /** Attacks on them they blocked with HODL or a Shield. */
   attacksBlocked: number;
+  /**
+   * 10 points per attack landed, at most 100 (STORY-066, DEC-062); display only. Missing from results stored before
+   * STORY-066.
+   */
+  degenScore?: number;
+  /** The version of the formula `degenScore` was computed with. */
+  degenScoreVersion?: number;
 }
 
 const COUNTS = ['tile', 'tilesLeft', 'cardsPlayed', 'attacksLanded', 'attacksBlocked'] as const;
+
+/** Present together or not at all: a result from before STORY-066 has neither. */
+const SCORE = ['degenScore', 'degenScoreVersion'] as const;
 
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
 
@@ -35,7 +45,10 @@ export function toRaceResult(value: unknown): RaceResult | null {
     return null;
   }
   const result = value as Record<string, unknown>;
-  return COUNTS.every((key) => isCount(result[key])) && typeof result['finished'] === 'boolean' ? (result as unknown as RaceResult) : null;
+  const scored = SCORE.every((key) => isCount(result[key])) || SCORE.every((key) => result[key] === undefined);
+  return COUNTS.every((key) => isCount(result[key])) && typeof result['finished'] === 'boolean' && scored
+    ? (result as unknown as RaceResult)
+    : null;
 }
 
 /** A member in the final standings, with their result if the game recorded one. */
@@ -53,7 +66,7 @@ function names(standings: Standing[]): string {
 
 /**
  * Chog Race's results (STORY-056, RACE-008, RACE-009, DEC-060): the winner, then every player in rank order with where
- * their pawn ended and their statistics: cards played, attacks landed and attacks blocked. Everything comes from the
+ * their pawn ended and their statistics: Degen Score (STORY-066), cards played, attacks landed and attacks blocked. Everything comes from the
  * results the server stored with the ranks, so every player sees the same, after any reload. Players who left are listed
  * after the others, without results.
  */
@@ -74,6 +87,9 @@ export class RaceResultsView {
       .flatMap((member) => (member.rank === null ? [] : [{ member, rank: member.rank, result: toRaceResult(member.result) }]))
       .sort((a, b) => a.rank - b.rank || (a.member.seat ?? 0) - (b.member.seat ?? 0)),
   );
+
+  /** Whether any result has a Degen Score; a match from before STORY-066 has none. */
+  protected readonly scored = computed(() => this.standings().some((s) => s.result?.degenScore !== undefined));
 
   /**
    * "Alice wins the race!" when a pawn reached the Finish; "Time's up! Alice got furthest." at the cap, or "Alice and Bob
