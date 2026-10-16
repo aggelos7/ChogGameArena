@@ -800,7 +800,7 @@
 
 #### STORY-053 — Movement and chaos cards
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Implement Pump, Whale, Airdrop, FOMO and Reverse using configured values.

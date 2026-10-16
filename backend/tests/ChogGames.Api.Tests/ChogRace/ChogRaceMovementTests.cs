@@ -17,7 +17,8 @@ namespace ChogGames.Api.Tests.ChogRace;
 /// STORY-051, DEC-055: on their turn a player rolls; the server rolls 1–3, moves the pawn, resolves the tile it lands on
 /// and ends the turn, and every player, over REST and live, gets the same move. Commands out of phase, out of turn or from
 /// outside change nothing and draw nothing. The first pawn to reach the Finish wins and the match ends with ranks.
-/// STORY-052, DEC-056: a Card tile draws from the server's deck, and only the player who drew sees the card.
+/// STORY-052, DEC-056: a Card tile draws from the server's deck, and only the player who drew sees the card. STORY-053,
+/// DEC-057: holding a movement or chaos card opens the Play phase, where <c>PLAY_CARD</c> plays it and ends the turn.
 /// </summary>
 public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -230,7 +231,8 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
             Assert.Equal(result.GetProperty("version").GetInt64(), snapshot.GetProperty("version").GetInt64());
             Assert.Equal("""[{"seat":1,"tile":2,"cards":1},{"seat":2,"tile":0,"cards":0}]""", Pawns(snapshot));
             Assert.Equal((23, 0), (snapshot.GetProperty("state").GetProperty("deck").GetInt32(), snapshot.GetProperty("state").GetProperty("discard").GetInt32()));
-            Assert.Equal((2, "Move"), (TurnSeat(snapshot), Phase(snapshot)));
+            // Pump can be played on the turn, so Alice's turn moves on to its Play phase.
+            Assert.Equal((1, "Play"), (TurnSeat(snapshot), Phase(snapshot)));
         }
 
         // The deck was shuffled at the start without reordering it, so its top card is the first Pump.
@@ -251,7 +253,7 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         {
             await db.Database.ExecuteSqlRawAsync(
                 """UPDATE "GameRooms" SET "State" = {0}::jsonb WHERE "Code" = {1}""",
-                """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Rug","Hodl","Whale"]},{"seat":2,"tile":0}],"deck":["Fomo"],"discard":[]}""",
+                """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Rug","Hodl","Liquidated"]},{"seat":2,"tile":0}],"deck":["Fomo"],"discard":[]}""",
                 code);
         }
 
@@ -260,11 +262,11 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
 
         var mine = await ViewAsync(alice, code);
         var theirs = await ViewAsync(bob, code);
-        Assert.Equal("""["Rug","Hodl","Whale"]""", mine.GetProperty("state").GetProperty("hand").GetRawText());
+        Assert.Equal("""["Rug","Hodl","Liquidated"]""", mine.GetProperty("state").GetProperty("hand").GetRawText());
         Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"HandFull"}""", LastMove(theirs));
         Assert.Equal("""[{"seat":1,"tile":2,"cards":3},{"seat":2,"tile":0,"cards":0}]""", Pawns(theirs));
         Assert.Equal(1, theirs.GetProperty("state").GetProperty("deck").GetInt32());
-        foreach (var card in new[] { "Rug", "Hodl", "Whale", "Fomo" })
+        foreach (var card in new[] { "Rug", "Hodl", "Liquidated", "Fomo" })
         {
             Assert.DoesNotContain(card, theirs.GetRawText());
         }
@@ -280,7 +282,7 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         var code = await StartedAsync(alice, bob);
 
         // Alice 3 (tile 3), Bob 1 (tile 1), Alice 1 onto the Boost at 4 (to 6), Bob 3 onto the Boost at 4, Alice 3 onto the
-        // Setback at 9 (back to 7).
+        // Setback at 9, back to the Card tile at 7, which draws her the top card, a Pump she can play.
         _dice.Enqueue(3, 1, 1, 3, 3);
         foreach (var player in new[] { alice, bob, alice })
         {
@@ -292,9 +294,9 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         await RollAsync(alice, await ViewAsync(alice, code));
 
         var room = await ViewAsync(bob, code);
-        Assert.Equal("""{"seat":1,"roll":3,"from":6,"landed":9,"to":7,"effect":"Setback"}""", LastMove(room));
-        Assert.Equal("""[{"seat":1,"tile":7,"cards":0},{"seat":2,"tile":6,"cards":0}]""", Pawns(room));
-        Assert.Equal(2, TurnSeat(room));
+        Assert.Equal("""{"seat":1,"roll":3,"from":6,"landed":9,"to":7,"effect":"Setback","draw":"Drawn"}""", LastMove(room));
+        Assert.Equal("""[{"seat":1,"tile":7,"cards":1},{"seat":2,"tile":6,"cards":0}]""", Pawns(room));
+        Assert.Equal((1, "Play"), (TurnSeat(room), Phase(room)));
     }
 
     [PostgresFact]
@@ -314,8 +316,8 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
         Assert.Equal("not_your_turn", outOfTurn.GetProperty("code").GetString());
         var outsider = await RollAsync(mallory, room, HttpStatusCode.NotFound);
         Assert.Equal("room_not_found", outsider.GetProperty("code").GetString());
-        var card = await CommandAsync(alice, room, "PLAY_CARD", new { card = "Pump" }, HttpStatusCode.BadRequest);
-        Assert.Equal("unknown_command", card.GetProperty("code").GetString());
+        var card = await CommandAsync(alice, room, "PLAY_CARD", new { card = "Pump" }, HttpStatusCode.Conflict);
+        Assert.Equal(("command_rejected", "must_roll_first"), (card.GetProperty("code").GetString(), card.GetProperty("reason").GetString()));
 
         Assert.Equal(before, await StoredAsync(code));
         Assert.Equal(drawsBefore, _dice.Draws.Count);
@@ -382,5 +384,91 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
 
         var after = await RollAsync(bob, await ViewAsync(bob, code), HttpStatusCode.Conflict);
         Assert.Equal("room_closed", after.GetProperty("code").GetString());
+    }
+
+    private static Task<JsonElement> PlayCardAsync(
+        Guest guest, JsonElement room, object payload, HttpStatusCode expected = HttpStatusCode.OK, Guid? actionId = null) =>
+        CommandAsync(guest, room, "PLAY_CARD", payload, expected, actionId);
+
+    [PostgresFact]
+    public async Task A_card_played_moves_the_pawn_for_everyone_and_a_retry_does_not_play_it_again()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """UPDATE "GameRooms" SET "State" = {0}::jsonb WHERE "Code" = {1}""",
+                """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Pump","Rug"]},{"seat":2,"tile":0}],"deck":["Hodl"],"discard":[]}""",
+                code);
+        }
+
+        _dice.Enqueue(3);
+        await RollAsync(alice, await ViewAsync(alice, code));
+        var room = await ViewAsync(alice, code);
+        Assert.Equal((1, "Play"), (TurnSeat(room), Phase(room)));
+        Assert.Equal("""["Pump"]""", room.GetProperty("state").GetProperty("playable").GetRawText());
+        var bobLive = await ConnectAsync(bob, code);
+        var actionId = Guid.NewGuid();
+        var drawsBefore = _dice.Draws.Count;
+
+        var played = await PlayCardAsync(alice, room, new { card = "Pump" }, actionId: actionId);
+        var retried = await PlayCardAsync(alice, room, new { card = "Pump" }, actionId: actionId);
+
+        Assert.True(retried.GetProperty("replayed").GetBoolean());
+        Assert.Equal(played.GetProperty("version").GetInt64(), retried.GetProperty("version").GetInt64());
+        Assert.Equal(drawsBefore, _dice.Draws.Count);
+        foreach (var seen in new[] { await bobLive.NextAsync(), await ViewAsync(bob, code), await ViewAsync(alice, code) })
+        {
+            Assert.Equal(
+                """{"seat":1,"roll":3,"from":0,"landed":3,"to":3,"play":{"card":"Pump","steps":3,"from":3,"landed":6,"to":6}}""",
+                LastMove(seen));
+            Assert.Equal("""[{"seat":1,"tile":6,"cards":1},{"seat":2,"tile":0,"cards":0}]""", Pawns(seen));
+            Assert.Equal(1, seen.GetProperty("state").GetProperty("discard").GetInt32());
+            Assert.Equal((2, "Move"), (TurnSeat(seen), Phase(seen)));
+        }
+
+        Assert.Equal("""["Rug"]""", (await ViewAsync(alice, code)).GetProperty("state").GetProperty("hand").GetRawText());
+    }
+
+    [PostgresFact]
+    public async Task A_card_that_cant_be_played_changes_nothing_and_draws_nothing()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """UPDATE "GameRooms" SET "State" = {0}::jsonb WHERE "Code" = {1}""",
+                """{"rulesVersion":1,"pawns":[{"seat":1,"tile":5,"hand":["Whale","Rug"]},{"seat":2,"tile":8,"hand":["Fomo"]}],"deck":[],"discard":[],"lastMove":{"seat":1,"roll":1,"from":4,"landed":5,"to":5},"playPhase":1}""",
+                code);
+        }
+
+        var room = await ViewAsync(alice, code);
+        var before = await StoredAsync(code);
+        var drawsBefore = _dice.Draws.Count;
+
+        foreach (var (payload, reason) in new (object, string)[]
+        {
+            (new { card = "Fomo" }, "card_not_held"),
+            (new { card = "Rug" }, "card_not_playable"),
+            (new { card = "Joker" }, "invalid_card"),
+            (new { card = "Whale", target = 1 }, "invalid_target"),
+            (new { card = "Whale" }, "invalid_target"),
+        })
+        {
+            var refused = await PlayCardAsync(alice, room, payload, HttpStatusCode.Conflict);
+            Assert.Equal(("command_rejected", reason), (refused.GetProperty("code").GetString(), refused.GetProperty("reason").GetString()));
+        }
+
+        var outOfTurn = await PlayCardAsync(bob, room, new { card = "Fomo" }, HttpStatusCode.Conflict);
+        Assert.Equal("not_your_turn", outOfTurn.GetProperty("code").GetString());
+        Assert.Equal(before, await StoredAsync(code));
+        Assert.Equal(drawsBefore, _dice.Draws.Count);
+
+        await PlayCardAsync(alice, room, new { card = "Whale", target = 2 });
+        Assert.Equal("""[{"seat":1,"tile":8,"cards":1},{"seat":2,"tile":5,"cards":1}]""", Pawns(await ViewAsync(bob, code)));
     }
 }

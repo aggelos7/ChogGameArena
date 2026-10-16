@@ -3,10 +3,32 @@ import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
 import { seatColor } from '../seats';
-import { RACE_CARD_NAMES, RaceBoard, RaceCard, RaceMove, RaceTile, raceColumns, raceLayout, raceTileLabel } from './race-board-model';
+import {
+  RACE_CARD_NAMES,
+  RaceBoard,
+  RaceCard,
+  RaceDraw,
+  RaceMove,
+  RacePlay,
+  RacePush,
+  RaceTile,
+  raceCardDescription,
+  raceColumns,
+  raceLayout,
+  raceTileLabel,
+} from './race-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
+
+/** A card you can play now, and for Whale the opponent it swaps with (DEC-057). */
+export interface RaceCardPlay {
+  card: RaceCard;
+  target?: number;
+}
+
+/** Where a pawn's own move ended and what the tile did, for a roll or a card's move alike. */
+type Landing = Pick<RaceMove, 'landed' | 'to' | 'effect' | 'draw' | 'reshuffled'> & { card?: RaceCard };
 
 /** A pawn as drawn: its seat, colour and the player it belongs to. */
 interface DrawnPawn {
@@ -24,7 +46,8 @@ interface DrawnPawn {
  * each player and whose turn it is. It only draws what the server sent. On your turn it offers Roll in the Move phase and
  * End turn in the Play phase (STORY-051, DEC-055), and says what the latest move did; the server decides every outcome.
  * It shows your hand, how many cards each player holds and what's left in the deck and discard pile (STORY-052, DEC-056);
- * the server only ever sends your own cards.
+ * the server only ever sends your own cards. In the Play phase it offers a button for each card you can play, Whale once
+ * per opponent, and says what the card did (STORY-053, DEC-057).
  */
 @Component({
   selector: 'app-race-board',
@@ -39,6 +62,7 @@ export class RaceBoardView {
   readonly rolling = input(false);
   readonly roll = output<void>();
   readonly endTurn = output<void>();
+  readonly playCard = output<RaceCardPlay>();
 
   protected readonly label = raceTileLabel;
 
@@ -78,38 +102,58 @@ export class RaceBoardView {
   protected readonly cardCounts = computed(() => new Map(this.board().pawns.map((pawn) => [pawn.seat, pawn.cards ?? 0])));
 
   /** Your cards by name, while you're playing; null when the server sent no hand. */
-  protected readonly hand = computed(() => this.board().hand?.map((card) => this.cardName(card)) ?? null);
+  /** Your cards by name with what each does, while you're playing; null when the server sent no hand. */
+  protected readonly hand = computed(
+    () =>
+      this.board().hand?.map((card) => ({ name: this.cardName(card), description: raceCardDescription(card, this.board().cardValues) })) ??
+      null,
+  );
 
   protected readonly turnOf = computed(() => this.players().find((member) => member.isTurn) ?? null);
 
   /** Your turn's phase, while it's your turn in a live match; null otherwise. */
   protected readonly yourPhase = computed(() => (this.turnOf()?.isYou ? (this.board().phase ?? null) : null));
 
+  /** The cards you can play now, in your Play phase, with what each does; Whale once per opponent. */
+  protected readonly plays = computed(() => {
+    if (this.yourPhase() !== 'Play') {
+      return [];
+    }
+    const values = this.board().cardValues;
+    const opponents = this.board().pawns.filter((pawn) => pawn.seat !== this.turnOf()?.seat);
+    return (this.board().playable ?? []).flatMap((card): (RaceCardPlay & { label: string })[] => {
+      const name = this.cardName(card);
+      switch (card) {
+        case 'Whale':
+          return opponents.map((pawn) => ({
+            card,
+            target: pawn.seat,
+            label: `${name}: swap with ${this.nameOf(pawn.seat, false)} (tile ${pawn.tile})`,
+          }));
+        case 'Pump':
+          return [{ card, label: values ? `${name}: ${values.pump} forward` : name }];
+        case 'Fomo':
+          return [{ card, label: values ? `${name}: ${values.fomoForward} forward or ${values.fomoBack} back` : name }];
+        case 'Airdrop':
+          return [{ card, label: `${name}: roll again` }];
+        case 'Reverse':
+          return [{ card, label: values ? `${name}: others ${values.reverse} back` : name }];
+        default:
+          return [{ card, label: name }];
+      }
+    });
+  });
+
   /** What the latest move did, in words: who rolled what, where they landed and where the tile sent them. */
   protected readonly lastMove = computed(() => {
     const move = this.board().lastMove;
-    if (!move) {
-      return null;
-    }
-    const member = this.members().find((player) => player.seat === move.seat);
-    const who = member?.isYou ? 'You' : (member?.displayName ?? `Seat ${move.seat}`);
-    const rolled = `${who} rolled ${move.roll}`;
-    switch (move.effect) {
-      case 'Boost':
-        return `${rolled}, landed on the Boost at tile ${move.landed} and jumped to tile ${move.to}.`;
-      case 'Setback':
-        return `${rolled}, landed on the Setback at tile ${move.landed} and fell back to tile ${move.to}.`;
-      case 'Card':
-        return move.draw
-          ? `${rolled}, landed on the Card tile ${move.to}${this.drew(move, !!member?.isYou)}.`
-          : `${rolled} and landed on the Card tile ${move.to}.`;
-      case 'Finish':
-        return this.board().winner === move.seat
-          ? `${rolled}, reached the finish and won the race!`
-          : `${rolled} and reached the finish.`;
-      default:
-        return `${rolled} and moved to tile ${move.to}.`;
-    }
+    return move ? this.landed(`${this.nameOf(move.seat)} rolled ${move.roll}`, move, move.seat) : null;
+  });
+
+  /** What the card played after the latest roll did, in words (DEC-057). */
+  protected readonly lastPlay = computed(() => {
+    const move = this.board().lastMove;
+    return move?.play ? this.played(move.play, move.seat) : null;
   });
 
   constructor() {
@@ -124,12 +168,77 @@ export class RaceBoardView {
     inject(DestroyRef).onDestroy(() => resize?.disconnect());
   }
 
+  /** A seat's player: "You" (or "you" mid-sentence) for yours, otherwise their name. */
+  private nameOf(seat: number, sentenceStart = true): string {
+    const member = this.members().find((player) => player.seat === seat);
+    return member?.isYou ? (sentenceStart ? 'You' : 'you') : (member?.displayName ?? `Seat ${seat}`);
+  }
+
+  /** The sentence for a pawn's own move: `action` (who rolled or played what), where it landed and what the tile did. */
+  private landed(action: string, landing: Landing, seat: number): string {
+    const isYou = !!this.members().find((player) => player.seat === seat)?.isYou;
+    const drew = landing.draw ? this.drew(landing.draw, landing.card, landing.reshuffled, isYou) : '';
+    // A jump onto a Card tile draws there too: "…at tile 9, fell back to tile 7 and drew Rug."
+    const then = drew ? ',' : ' and';
+    switch (landing.effect) {
+      case 'Boost':
+        return `${action}, landed on the Boost at tile ${landing.landed}${then} jumped to tile ${landing.to}${drew}.`;
+      case 'Setback':
+        return `${action}, landed on the Setback at tile ${landing.landed}${then} fell back to tile ${landing.to}${drew}.`;
+      case 'Card':
+        return landing.draw
+          ? `${action}, landed on the Card tile ${landing.to}${drew}.`
+          : `${action} and landed on the Card tile ${landing.to}.`;
+      case 'Finish':
+        return this.board().winner === seat ? `${action}, reached the finish and won the race!` : `${action} and reached the finish.`;
+      default:
+        return `${action} and moved to tile ${landing.to}.`;
+    }
+  }
+
+  /** What a card play did: a move of the player's own, a swap, or opponents pushed back. */
+  private played(play: RacePlay, seat: number): string {
+    const action = `${this.nameOf(seat)} played ${this.cardName(play.card)}`;
+    if (play.target !== undefined && play.to !== undefined) {
+      const swapped = `${action} and swapped places with ${this.nameOf(play.target, false)} (now on tile ${play.from})`;
+      return this.landed(swapped, { ...play, landed: play.to, to: play.to, card: play.drawn }, seat);
+    }
+    if (play.pushed) {
+      return play.pushed.length > 0
+        ? `${action}: ${play.pushed.map((push) => this.pushedTo(push)).join(', ')}.`
+        : `${action}, but nobody could move back.`;
+    }
+    if (play.to === undefined || play.landed === undefined) {
+      return `${action}.`;
+    }
+    const moved =
+      play.roll !== undefined
+        ? ` and rolled ${play.roll}`
+        : play.steps !== undefined
+          ? ` (${Math.abs(play.steps)} ${play.steps < 0 ? 'back' : 'forward'})`
+          : '';
+    return this.landed(`${action}${moved}`, { ...play, landed: play.landed, to: play.to, card: play.drawn }, seat);
+  }
+
+  /** Where Reverse sent an opponent: back a tile, then on with the Boost or Setback landed on. */
+  private pushedTo(push: RacePush): string {
+    const back = `${this.nameOf(push.seat, false)} back to tile ${push.landed}`;
+    switch (push.effect) {
+      case 'Boost':
+        return `${back}, then boosted to tile ${push.to}`;
+      case 'Setback':
+        return `${back}, then set back to tile ${push.to}`;
+      default:
+        return back;
+    }
+  }
+
   /** What a Card tile drew, as the end of the last-move sentence: the card by name only for the player who drew it. */
-  private drew(move: RaceMove, isYou: boolean): string {
-    switch (move.draw) {
+  private drew(draw: RaceDraw, drawn: RaceCard | undefined, reshuffledFirst: boolean | undefined, isYou: boolean): string {
+    switch (draw) {
       case 'Drawn': {
-        const card = move.card ? this.cardName(move.card) : 'a card';
-        const reshuffled = move.reshuffled ? ' after the discard pile was shuffled into a new deck' : '';
+        const card = drawn ? this.cardName(drawn) : 'a card';
+        const reshuffled = reshuffledFirst ? ' after the discard pile was shuffled into a new deck' : '';
         return ` and drew ${card}${reshuffled}`;
       }
       case 'HandFull':

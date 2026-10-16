@@ -222,7 +222,7 @@
                 <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
               }
               @if (raceBoard(); as board) {
-                <app-race-board [board]="board" [members]="current.members" [rolling]="busy()" (roll)="roll()" (endTurn)="endTurn()" />
+                <app-race-board [board]="board" [members]="current.members" [rolling]="busy()" (roll)="roll()" (endTurn)="endTurn()" (playCard)="playCard($event)" />
               }
             }
             <div class="leave" data-leave>

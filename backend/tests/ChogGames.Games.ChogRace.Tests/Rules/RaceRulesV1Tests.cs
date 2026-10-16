@@ -4,7 +4,7 @@ namespace ChogGames.Games.ChogRace.Tests.Rules;
 
 /// <summary>
 /// STORY-050, DEC-054: the shipped rules have the agreed values and a track every pawn can finish. STORY-052, DEC-056:
-/// a deck of three of each card and hands of up to three.
+/// a deck of three of each card and hands of up to three. STORY-053, DEC-057: the card values.
 /// </summary>
 public class RaceRulesV1Tests
 {
@@ -28,6 +28,10 @@ public class RaceRulesV1Tests
         Assert.Equal(8, Enum.GetValues<RaceCard>().Length);
         Assert.Equal(3, Rules.MaxHand);
     }
+
+    [Fact]
+    public void Pump_moves_3_fomo_5_forward_or_3_back_at_even_odds_and_reverse_1_back() =>
+        Assert.Equal(new RaceCardValues(Pump: 3, FomoForward: 5, FomoBack: 3, FomoForwardChance: 50, Reverse: 1), Rules.CardValues);
 
     [Fact]
     public void The_track_has_seven_card_tiles_three_boosts_and_three_setbacks()
