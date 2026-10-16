@@ -2,9 +2,14 @@ import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, i
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
+import { timeLeft } from '../chog-life/life-board-model';
 import { seatColor } from '../seats';
 import {
   RACE_CARD_NAMES,
+  RACE_CARD_STEAL,
+  RACE_CARD_VISION,
+  RACE_SHIELD,
+  RACE_SPEED_BOOST,
   RaceBoard,
   RaceCard,
   RaceDraw,
@@ -24,6 +29,12 @@ const NFT_COLOR = 'var(--brand)';
 /** A card you can play now, and for Whale, Rug and Liquidated the opponent it's played on (DEC-057, DEC-058). */
 export interface RaceCardPlay {
   card: RaceCard;
+  target?: number;
+}
+
+/** Your locked ability used now, and for Card Steal the opponent it's used on (STORY-055, DEC-059). */
+export interface RaceAbilityPlay {
+  abilityId: string;
   target?: number;
 }
 
@@ -49,7 +60,11 @@ interface DrawnPawn {
  * the server only ever sends your own cards. In the Play phase it offers a button for each card you can play, Whale once
  * per opponent, and says what the card did (STORY-053, DEC-057). Rug and Liquidated are offered once per opponent they
  * can hurt; when one, or a Whale, is played on you while you hold cards, it asks you to block it with HODL or take it, and
- * everyone sees who it waits for and who skips a turn (STORY-054, DEC-058).
+ * everyone sees who it waits for and who skips a turn (STORY-054, DEC-058). On your turn it offers your locked ability
+ * while it has a use left and fits the moment (STORY-055, DEC-059): Speed Boost before the roll, Shield and Card Vision
+ * before or after it, and Card Steal once per opponent holding a card while your hand has room. Everyone sees armed
+ * Speed Boosts, raised Shields and the latest ability used; only you see the card Card Vision shows you, and a stolen
+ * card only its two players. While the race runs it counts down to the 20-minute cap (STORY-056, DEC-060).
  */
 @Component({
   selector: 'app-race-board',
@@ -60,6 +75,8 @@ interface DrawnPawn {
 export class RaceBoardView {
   readonly board = input.required<RaceBoard>();
   readonly members = input.required<RoomMember[]>();
+  /** When the match's time is up (ISO 8601), counted down while it runs; null for no clock. */
+  readonly endsAt = input<string | null>(null);
   /** A command is on its way: the buttons wait for it. */
   readonly rolling = input(false);
   readonly roll = output<void>();
@@ -67,8 +84,20 @@ export class RaceBoardView {
   readonly playCard = output<RaceCardPlay>();
   /** Lets an attack on you land (DEC-058). */
   readonly pass = output<void>();
+  /** Uses your locked ability (DEC-059). */
+  readonly useAbility = output<RaceAbilityPlay>();
 
   protected readonly label = raceTileLabel;
+
+  /** The time now, ticking every second for the clock. */
+  private readonly now = signal(Date.now());
+
+  /** The time left to the cap, while the race runs; null once it's over or without a cap. */
+  protected readonly clock = computed(() => {
+    const endsAt = this.endsAt();
+    const end = endsAt ? Date.parse(endsAt) : NaN;
+    return Number.isNaN(end) || this.board().ended || this.board().winner !== undefined ? null : timeLeft(end, this.now());
+  });
 
   /** The board's width, once measured; until then, and without ResizeObserver, the phone layout. */
   private readonly width = signal(0);
@@ -188,10 +217,82 @@ export class RaceBoardView {
     });
   });
 
+  /** Armed Speed Boosts and raised Shields, by seat (DEC-059). */
+  protected readonly armed = computed(() => new Map(this.board().pawns.map((pawn) => [pawn.seat, pawn])));
+
+  /**
+   * Your locked ability's buttons, on your turn while it has a use left and fits the moment (DEC-059): Speed Boost before
+   * the roll and not yet armed, Shield not yet raised, Card Vision with cards in the deck, and Card Steal once per
+   * opponent holding a card while your hand has room. The server checks each again.
+   */
+  protected readonly abilityPlays = computed((): (RaceAbilityPlay & { label: string })[] => {
+    const phase = this.yourPhase();
+    const you = this.turnOf();
+    const ability = you?.ability;
+    const board = this.board();
+    if ((phase !== 'Move' && phase !== 'Play') || !you || !ability?.usesLeft) {
+      return [];
+    }
+    const pawn = this.armed().get(you.seat);
+    switch (ability.id) {
+      case RACE_SPEED_BOOST:
+        return phase === 'Move' && !pawn?.boost ? [{ abilityId: ability.id, label: `Use ${ability.name}: +2 to your roll` }] : [];
+      case RACE_SHIELD:
+        return pawn?.shielded ? [] : [{ abilityId: ability.id, label: `Use ${ability.name}` }];
+      case RACE_CARD_VISION:
+        return (board.deck ?? 0) > 0 ? [{ abilityId: ability.id, label: `Use ${ability.name}: see the next card` }] : [];
+      case RACE_CARD_STEAL:
+        if ((board.hand?.length ?? 0) >= (board.maxHand ?? Infinity)) {
+          return [];
+        }
+        return board.pawns
+          .filter((other) => other.seat !== you.seat && (other.cards ?? 0) > 0)
+          .map((other) => ({ abilityId: ability.id, target: other.seat, label: `${ability.name}: from ${this.nameOf(other.seat, false)}` }));
+      default:
+        return [{ abilityId: ability.id, label: `Use ${ability.name}` }];
+    }
+  });
+
+  /**
+   * Your locked ability, always shown while you're playing a live match (DEC-059): what it does, the uses left and, when it
+   * can't be used now, why; its buttons go with it.
+   */
+  protected readonly yourAbility = computed(() => {
+    const board = this.board();
+    const you = this.players().find((member) => member.isYou);
+    const ability = you?.ability;
+    if (!you || !ability || ability.usesLeft === null || !board.phase) {
+      return null;
+    }
+    return { ...ability, status: this.abilityPlays().length > 0 ? null : this.abilityStatus(you.seat, you.isTurn) };
+  });
+
+  /** The deck's top card Card Vision shows you, by name (DEC-059). */
+  protected readonly nextCard = computed(() => {
+    const next = this.board().next;
+    return next ? this.cardName(next) : null;
+  });
+
+  /** The latest ability used, in words; a stolen card is named only when the server sent it, to its two players (DEC-059). */
+  protected readonly lastAbility = computed(() => {
+    const used = this.board().ability;
+    if (!used) {
+      return null;
+    }
+    const name = this.members().find((member) => member.seat === used.seat)?.ability?.name ?? used.ability;
+    const action = `${this.nameOf(used.seat)} used ${name}`;
+    if (used.target === undefined) {
+      return `${action}.`;
+    }
+    const took = used.card ? this.cardName(used.card) : 'a card';
+    return `${action} and took ${took} from ${this.nameOf(used.target, false)}.`;
+  });
+
   /** What the latest move did, in words: who rolled what, where they landed and where the tile sent them. */
   protected readonly lastMove = computed(() => {
     const move = this.board().lastMove;
-    return move ? this.landed(`${this.nameOf(move.seat)} rolled ${move.roll}`, move, move.seat) : null;
+    const boost = move?.boost ? ` (+${move.boost} Speed Boost)` : '';
+    return move ? this.landed(`${this.nameOf(move.seat)} rolled ${move.roll}${boost}`, move, move.seat) : null;
   });
 
   /** What the card played after the latest roll did, in words (DEC-057). */
@@ -201,6 +302,7 @@ export class RaceBoardView {
   });
 
   constructor() {
+    const tick = setInterval(() => this.now.set(Date.now()), 1000);
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     let resize: ResizeObserver | undefined;
     afterNextRender(() => {
@@ -209,7 +311,42 @@ export class RaceBoardView {
         resize.observe(host);
       }
     });
-    inject(DestroyRef).onDestroy(() => resize?.disconnect());
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(tick);
+      resize?.disconnect();
+    });
+  }
+
+  /** Why your ability can't be used now, or what it's doing while armed (DEC-059). */
+  private abilityStatus(seat: number, isTurn: boolean): string {
+    const board = this.board();
+    const ability = this.players().find((member) => member.seat === seat)?.ability;
+    const pawn = this.armed().get(seat);
+    if (pawn?.boost) {
+      return `Armed: your next roll moves ${pawn.boost} more.`;
+    }
+    if (pawn?.shielded) {
+      return 'Raised: it blocks the next Rug, Liquidated or Whale played on you.';
+    }
+    if (!ability?.usesLeft) {
+      return 'Used.';
+    }
+    if (board.phase === 'Reply') {
+      return 'Not while an attack waits for an answer.';
+    }
+    if (!isTurn) {
+      return 'Use it on your turn.';
+    }
+    switch (ability.id) {
+      case RACE_SPEED_BOOST:
+        return 'Only before you roll.';
+      case RACE_CARD_VISION:
+        return 'The deck is empty.';
+      case RACE_CARD_STEAL:
+        return (board.hand?.length ?? 0) >= (board.maxHand ?? Infinity) ? 'Your hand is full.' : 'No opponent holds a card.';
+      default:
+        return 'Not now.';
+    }
   }
 
   /** A seat's player: "You" (or "you" mid-sentence) for yours, otherwise their name. */
@@ -260,6 +397,9 @@ export class RaceBoardView {
     if (play.reply === 'Blocked') {
       return `${action} on ${target}, blocked with HODL.`;
     }
+    if (play.reply === 'Shielded') {
+      return `${action} on ${target}, blocked by a Shield.`;
+    }
     if (!play.reply && attack?.seat === seat && attack.target === play.target && this.board().phase === 'Reply') {
       return `${action} on ${target}, waiting for an answer.`;
     }
@@ -294,16 +434,21 @@ export class RaceBoardView {
     return this.landed(`${action}${moved}`, { ...play, landed: play.landed, to: play.to, card: play.drawn }, seat);
   }
 
-  /** Where Reverse sent an opponent: back a tile, then on with the Boost or Setback landed on. */
+  /**
+   * Where Reverse or Rug sent an opponent: back a few tiles, then on with the Boost or Setback landed on, and what a Card
+   * tile there drew, named only to that player (revised in STORY-055).
+   */
   private pushedTo(push: RacePush): string {
     const back = `${this.nameOf(push.seat, false)} back to tile ${push.landed}`;
+    const isYou = !!this.members().find((player) => player.seat === push.seat)?.isYou;
+    const drew = push.draw ? this.drew(push.draw, push.card, push.reshuffled, isYou) : '';
     switch (push.effect) {
       case 'Boost':
-        return `${back}, then boosted to tile ${push.to}`;
+        return `${back}, then boosted to tile ${push.to}${drew}`;
       case 'Setback':
-        return `${back}, then set back to tile ${push.to}`;
+        return `${back}, then set back to tile ${push.to}${drew}`;
       default:
-        return back;
+        return `${back}${drew}`;
     }
   }
 

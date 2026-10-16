@@ -826,7 +826,7 @@
 
 #### STORY-055 — Race abilities
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Implement Speed Boost, Shield, Card Vision and Card Steal.
@@ -839,7 +839,7 @@
 
 #### STORY-056 — Race finish and results
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Declare first valid finisher winner; resolve simultaneous effects consistently.
@@ -861,6 +861,19 @@
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-066 — Chog Race Degen Score
+
+- **Status:** Todo
+- **Priority:** P2
+- **Epic:** E08
+- **Implementation:** Add a Degen Score to Chog Race results, computed by the server from the attacks the player landed (STORY-056's `attacksLanded`: Rug, Liquidated or Whale not blocked, and Reverse that pushed someone back). Proposed formula, version 1: 10 points per attack landed, at most 100. Like Chog Life's (DEC-046), it is display only and never changes the ranking, and it is stored in the result with its formula version (`degenScore`, `degenScoreVersion`). The Results panel shows it as a tile ("Degen Score n/100") with a note that it doesn't count towards the ranking. Confirm the points and cap with the product owner before coding.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** each player still playing gets a Degen Score from their attacks landed, capped at 100 and stored with its formula version; the ranking is unchanged; every player sees the same scores live and after a reload.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: blocked attacks, leavers and abandoned matches earn nothing, and no client can set a score.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. No change to Chog Life's Degen Score, no lifetime totals or rewards, no migration.
 
 
 ## E09 — Post-MVP shared progression

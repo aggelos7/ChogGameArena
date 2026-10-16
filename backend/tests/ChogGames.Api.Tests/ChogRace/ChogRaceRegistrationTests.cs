@@ -2,6 +2,7 @@ using ChogGames.Api.ChogRace;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Matches;
 using ChogGames.Games.ChogRace;
+using ChogGames.Games.ChogRace.Abilities;
 using ChogGames.Games.ChogRace.Rules;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -9,7 +10,7 @@ namespace ChogGames.Api.Tests.ChogRace;
 
 /// <summary>
 /// STORY-050, DEC-054: the API serves the checked Chog Race rules and plays them in the match engine next to Chog Life,
-/// with no abilities yet (STORY-055).
+/// with its ability catalog (STORY-055, DEC-059).
 /// </summary>
 public class ChogRaceRegistrationTests
 {
@@ -25,11 +26,15 @@ public class ChogRaceRegistrationTests
     }
 
     [Fact]
-    public void Chog_race_registers_its_match_rules_and_no_abilities()
+    public void Chog_race_registers_its_match_rules_and_abilities()
     {
         using var services = new ServiceCollection().AddChogRace().BuildServiceProvider();
 
         Assert.Same(services.GetRequiredService<ChogRaceMatchRules>(), Assert.Single(services.GetServices<IMatchRules>()));
-        Assert.Empty(services.GetServices<AbilityCatalog>());
+        var catalog = Assert.Single(services.GetServices<AbilityCatalog>());
+        Assert.Equal(("chog-race", RaceAbilities.Version), (catalog.GameType, catalog.Version));
+        Assert.Equal(
+            [RaceAbilities.MovementBoost, RaceAbilities.AttackBlock, RaceAbilities.CardPreview, RaceAbilities.CardSteal],
+            catalog.Definitions.Select(d => d.Id));
     }
 }

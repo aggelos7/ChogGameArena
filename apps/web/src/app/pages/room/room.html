@@ -222,7 +222,7 @@
                 <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
               }
               @if (raceBoard(); as board) {
-                <app-race-board [board]="board" [members]="current.members" [rolling]="busy()" (roll)="roll()" (endTurn)="endTurn()" (playCard)="playCard($event)" (pass)="pass()" />
+                <app-race-board [board]="board" [members]="current.members" [endsAt]="current.matchEndsAt" [rolling]="busy()" (roll)="roll()" (endTurn)="endTurn()" (playCard)="playCard($event)" (pass)="pass()" (useAbility)="useRaceAbility($event)" />
               }
             }
             <div class="leave" data-leave>
@@ -249,6 +249,9 @@
           <app-life-board [board]="board" [members]="current.members" />
         </section>
       } @else if (current.status === 'Completed' && raceBoard(); as board) {
+        @if (hasRaceResults()) {
+          <app-race-results [members]="current.members" />
+        }
         <section class="match" aria-labelledby="final-heading" data-final-board>
           <h2 id="final-heading">Final board</h2>
           <app-race-board [board]="board" [members]="current.members" />
