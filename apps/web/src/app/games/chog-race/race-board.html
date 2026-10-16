@@ -24,6 +24,9 @@
       </li>
     }
   </ul>
+  @if (clock(); as left) {
+    <p class="clock" data-clock>Time left <strong role="timer">{{ left }}</strong></p>
+  }
   <p class="turn-line" role="status" data-turn-line>
     @if (waitingReply(); as waiting) {
       {{ waiting.text }}

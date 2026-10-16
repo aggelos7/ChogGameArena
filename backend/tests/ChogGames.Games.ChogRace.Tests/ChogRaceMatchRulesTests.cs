@@ -97,7 +97,7 @@ public class ChogRaceMatchRulesTests
         Assert.Equal(1, state.RootElement.GetProperty("rulesVersion").GetInt32());
         Assert.Equal(Enumerable.Range(1, count).Select(seat => (seat, 0)), Pawns(state.RootElement));
         Assert.Equal(GameDefinition.ChogRace, Rules.GameType);
-        Assert.Null(((IMatchRules)Rules).TimeLimit);
+        Assert.Equal(TimeSpan.FromMinutes(20), ((IMatchRules)Rules).TimeLimit);
     }
 
     [Fact]

@@ -2,6 +2,7 @@ import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, i
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
+import { timeLeft } from '../chog-life/life-board-model';
 import { seatColor } from '../seats';
 import {
   RACE_CARD_NAMES,
@@ -63,7 +64,7 @@ interface DrawnPawn {
  * while it has a use left and fits the moment (STORY-055, DEC-059): Speed Boost before the roll, Shield and Card Vision
  * before or after it, and Card Steal once per opponent holding a card while your hand has room. Everyone sees armed
  * Speed Boosts, raised Shields and the latest ability used; only you see the card Card Vision shows you, and a stolen
- * card only its two players.
+ * card only its two players. While the race runs it counts down to the 20-minute cap (STORY-056, DEC-060).
  */
 @Component({
   selector: 'app-race-board',
@@ -74,6 +75,8 @@ interface DrawnPawn {
 export class RaceBoardView {
   readonly board = input.required<RaceBoard>();
   readonly members = input.required<RoomMember[]>();
+  /** When the match's time is up (ISO 8601), counted down while it runs; null for no clock. */
+  readonly endsAt = input<string | null>(null);
   /** A command is on its way: the buttons wait for it. */
   readonly rolling = input(false);
   readonly roll = output<void>();
@@ -85,6 +88,16 @@ export class RaceBoardView {
   readonly useAbility = output<RaceAbilityPlay>();
 
   protected readonly label = raceTileLabel;
+
+  /** The time now, ticking every second for the clock. */
+  private readonly now = signal(Date.now());
+
+  /** The time left to the cap, while the race runs; null once it's over or without a cap. */
+  protected readonly clock = computed(() => {
+    const endsAt = this.endsAt();
+    const end = endsAt ? Date.parse(endsAt) : NaN;
+    return Number.isNaN(end) || this.board().ended || this.board().winner !== undefined ? null : timeLeft(end, this.now());
+  });
 
   /** The board's width, once measured; until then, and without ResizeObserver, the phone layout. */
   private readonly width = signal(0);
@@ -289,6 +302,7 @@ export class RaceBoardView {
   });
 
   constructor() {
+    const tick = setInterval(() => this.now.set(Date.now()), 1000);
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     let resize: ResizeObserver | undefined;
     afterNextRender(() => {
@@ -297,7 +311,10 @@ export class RaceBoardView {
         resize.observe(host);
       }
     });
-    inject(DestroyRef).onDestroy(() => resize?.disconnect());
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(tick);
+      resize?.disconnect();
+    });
   }
 
   /** Why your ability can't be used now, or what it's doing while armed (DEC-059). */

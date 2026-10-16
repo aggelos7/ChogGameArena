@@ -31,6 +31,10 @@ describe('Chog Race board model', () => {
     expect(toRaceBoard(RACE_BOARD)).toBe(RACE_BOARD);
     const moved = { ...RACE_BOARD, lastMove: { seat: 1, roll: 2, from: 2, landed: 4, to: 6, effect: 'Boost' }, phase: 'Move', winner: 1 };
     expect(toRaceBoard(moved)).toBe(moved);
+    for (const ended of ['Finish', 'TimeUp']) {
+      const over = { ...RACE_BOARD, ended };
+      expect(toRaceBoard(over)).toBe(over);
+    }
     const drawn = {
       ...RACE_BOARD,
       hand: ['Pump', 'Hodl'],
@@ -80,6 +84,7 @@ describe('Chog Race board model', () => {
       { rulesVersion: 1, tiles, pawns: [], lastMove: 'rolled' },
       { rulesVersion: 1, tiles, pawns: [], phase: 'React' },
       { rulesVersion: 1, tiles, pawns: [], winner: 'Alice' },
+      { rulesVersion: 1, tiles, pawns: [], ended: 'Draw' },
       { rulesVersion: 1, tiles, pawns: [{ seat: 1, tile: 0, cards: -1 }] },
       { rulesVersion: 1, tiles, pawns: [], hand: ['Joker'] },
       { rulesVersion: 1, tiles, pawns: [], hand: 'Pump' },
@@ -162,6 +167,24 @@ describe('Chog Race board', () => {
     TestBed.configureTestingModule({ imports: [RaceBoardView] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
+  });
+
+  it('counts down to the time cap while the race runs, and stops once it is over (STORY-056)', () => {
+    // The board's clock started a moment before this, which rounds up; 12:34 is any start within 0.6 seconds.
+    fixture.componentRef.setInput('endsAt', new Date(Date.now() + 753_600).toISOString());
+    render(RACE_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+    expect(page.querySelector('[data-clock]')?.textContent?.trim()).toBe('Time left 12:34');
+
+    render({ ...RACE_BOARD, winner: 1, ended: 'Finish' }, [member('Alice', 1), member('Bob', 2, { isYou: true })]);
+    expect(page.querySelector('[data-clock]')).toBeNull();
+    render({ ...RACE_BOARD, ended: 'TimeUp' }, [member('Alice', 1), member('Bob', 2, { isYou: true })]);
+    expect(page.querySelector('[data-clock]')).toBeNull();
+  });
+
+  it('shows no clock without a time cap', () => {
+    render(RACE_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+
+    expect(page.querySelector('[data-clock]')).toBeNull();
   });
 
   it('shows every tile in order from start to finish, with what it does', () => {

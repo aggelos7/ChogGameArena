@@ -21,6 +21,7 @@ import {
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { LifeBoardView } from '../../games/chog-life/life-board';
 import { LifeResultsView, toLifeResult } from '../../games/chog-life/life-results';
+import { RaceResultsView, toRaceResult } from '../../games/chog-race/race-results';
 import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
@@ -44,7 +45,7 @@ const NFT_COLOR = 'var(--brand)';
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, LifeBoardView, LifeResultsView, RaceBoardView, TurnTimer],
+  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, LifeBoardView, LifeResultsView, RaceBoardView, RaceResultsView, TurnTimer],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })
@@ -109,6 +110,12 @@ export class RoomPage implements OnInit {
   protected readonly hasLifeResults = computed(() => {
     const room = this.room();
     return room?.gameType === 'chog-life' && room.status === 'Completed' && room.members.some((member) => toLifeResult(member.result) !== null);
+  });
+
+  /** A completed Chog Race match whose results the server stored (STORY-056, DEC-060), shown above the final board. */
+  protected readonly hasRaceResults = computed(() => {
+    const room = this.room();
+    return room?.gameType === 'chog-race' && room.status === 'Completed' && room.members.some((member) => toRaceResult(member.result) !== null);
   });
 
   /** Whose turn it is and when it runs out, while a match is active (DEC-045). */

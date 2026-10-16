@@ -1,0 +1,47 @@
+<section class="results" aria-labelledby="results-heading" data-results>
+  <h2 id="results-heading">Results</h2>
+  @if (winnerLine(); as line) {
+    <p class="winner-line" data-winner>{{ line }}</p>
+  }
+  <ol class="standings" data-list="standings">
+    @for (standing of standings(); track $index) {
+      <li [class.winner]="standing.rank === 1" [class.you]="standing.member.isYou" data-standing>
+        <span class="place" data-place>{{ ordinal(standing.rank) }}</span>
+        <app-avatar-badge [avatar]="badge(standing.member.character)" [name]="standing.member.character.name" [size]="2" />
+        <span class="who">
+          <span class="name">{{ standing.member.displayName }}</span>
+          @if (standing.member.isYou) {
+            <span class="tag">You</span>
+          }
+        </span>
+        @if (standing.result; as result) {
+          <span class="portfolio" data-position>{{ result.finished ? 'Finished' : 'Tile ' + result.tile }}</span>
+          <p class="summary" data-summary>
+            @if (result.finished) {
+              Reached the finish
+            } @else {
+              {{ result.tilesLeft }} {{ result.tilesLeft === 1 ? 'tile' : 'tiles' }} to go
+            }
+          </p>
+          <dl class="stats">
+            <div>
+              <dt>Cards played</dt>
+              <dd data-stat="cards-played">{{ result.cardsPlayed }}</dd>
+            </div>
+            <div>
+              <dt>Attacks landed</dt>
+              <dd data-stat="attacks-landed">{{ result.attacksLanded }}</dd>
+            </div>
+            <div>
+              <dt>Attacks blocked</dt>
+              <dd data-stat="attacks-blocked">{{ result.attacksBlocked }}</dd>
+            </div>
+          </dl>
+        } @else if (standing.member.hasLeft) {
+          <p class="summary" data-summary>Left the match</p>
+        }
+      </li>
+    }
+  </ol>
+  <p class="hint">Ranked by how far each pawn got, then by who reached that tile first.</p>
+</section>
