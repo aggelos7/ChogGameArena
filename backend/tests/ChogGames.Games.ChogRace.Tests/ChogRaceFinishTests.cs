@@ -204,17 +204,65 @@ public class ChogRaceFinishTests
             "",
             Pawn(1, 26, 9, ""","stats":{"cardsPlayed":2,"attacksLanded":1}"""),
             Pawn(2, 10, 4, ""","stats":{"cardsPlayed":1,"attacksBlocked":1}"""),
-            Pawn(3, 20, 5));
+            Pawn(3, 20, 5, ""","stats":{"cardsPlayed":3,"attacksLanded":3}"""));
 
         var decision = Apply(room, players[0].Id, ChogRaceMatchRules.Roll, state, new Dice(1));
 
         Assert.Equal([(players[0].Id, 1), (players[1].Id, 2)], Ranks(decision.Standings!));
         Assert.Equal(
-            """{"tile":27,"tilesLeft":0,"finished":true,"cardsPlayed":2,"attacksLanded":1,"attacksBlocked":0}""",
+            """{"tile":27,"tilesLeft":0,"finished":true,"cardsPlayed":2,"attacksLanded":1,"attacksBlocked":0,"degenScore":10,"degenScoreVersion":1}""",
             ResultOf(decision.Standings!, players[0].Id));
         Assert.Equal(
-            """{"tile":10,"tilesLeft":17,"finished":false,"cardsPlayed":1,"attacksLanded":0,"attacksBlocked":1}""",
+            """{"tile":10,"tilesLeft":17,"finished":false,"cardsPlayed":1,"attacksLanded":0,"attacksBlocked":1,"degenScore":0,"degenScoreVersion":1}""",
             ResultOf(decision.Standings!, players[1].Id));
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 10)]
+    [InlineData(7, 70)]
+    [InlineData(10, 100)]
+    [InlineData(12, 100)]
+    [InlineData(int.MaxValue, 100)]
+    public void The_degen_score_is_ten_points_per_attack_landed_at_most_a_hundred_with_its_formula_version(int attacks, int score)
+    {
+        var (room, players) = Started(2);
+        var state = State(9, "", Pawn(1, 12, 9, $$""","stats":{"attacksLanded":{{attacks}}}"""), Pawn(2, 20, 7));
+
+        var ending = EndMatch(room, state);
+
+        using var result = JsonDocument.Parse(ResultOf(ending.Standings, players[0].Id));
+        Assert.Equal(score, result.RootElement.GetProperty("degenScore").GetInt32());
+        Assert.Equal(ChogRaceMatchRules.DegenScoreVersion, result.RootElement.GetProperty("degenScoreVersion").GetInt32());
+        Assert.Equal(1, ChogRaceMatchRules.DegenScoreVersion);
+    }
+
+    [Fact]
+    public void The_degen_score_never_changes_the_ranking()
+    {
+        var (room, players) = Started(3);
+        var state = State(
+            9,
+            "",
+            Pawn(1, 12, 9, ""","stats":{"cardsPlayed":10,"attacksLanded":10}"""),
+            Pawn(2, 20, 7),
+            Pawn(3, 12, 3, ""","stats":{"attacksBlocked":4}"""));
+
+        var ending = EndMatch(room, state);
+
+        Assert.Equal([(players[0].Id, 3), (players[1].Id, 1), (players[2].Id, 2)], Ranks(ending.Standings));
+    }
+
+    [Fact]
+    public void Blocked_attacks_earn_no_degen_score()
+    {
+        var (room, players) = Started(2);
+        var state = State(9, "", Pawn(1, 12, 9, ""","stats":{"cardsPlayed":5,"attacksBlocked":5}"""), Pawn(2, 20, 7));
+
+        var ending = EndMatch(room, state);
+
+        using var result = JsonDocument.Parse(ResultOf(ending.Standings, players[0].Id));
+        Assert.Equal(0, result.RootElement.GetProperty("degenScore").GetInt32());
     }
 
     /// <summary>
@@ -283,7 +331,7 @@ public class ChogRaceFinishTests
         Assert.Equal("TimeUp", ending.State.GetProperty("ended").GetString());
         Assert.False(ending.State.TryGetProperty("winner", out _));
         Assert.Equal(
-            """{"tile":20,"tilesLeft":7,"finished":false,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0}""",
+            """{"tile":20,"tilesLeft":7,"finished":false,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0,"degenScore":0,"degenScoreVersion":1}""",
             ResultOf(ending.Standings, players[1].Id));
     }
 

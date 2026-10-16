@@ -991,7 +991,7 @@ describe('Room page', () => {
     });
 
     it('shows the Chog Race results above the final board (STORY-056)', () => {
-      const result = (tile: number, extra = {}) => ({ tile, tilesLeft: 27 - tile, finished: tile === 27, cardsPlayed: 0, attacksLanded: 0, attacksBlocked: 0, ...extra });
+      const result = (tile: number, extra = {}) => ({ tile, tilesLeft: 27 - tile, finished: tile === 27, cardsPlayed: 0, attacksLanded: 0, attacksBlocked: 0, degenScore: 0, degenScoreVersion: 1, ...extra });
       load({
         ...room,
         gameType: 'chog-race',

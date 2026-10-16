@@ -23,19 +23,33 @@ function member(displayName: string, seat: number, rank: number | null, result: 
 
 /** A result on <tile> of the 28-tile track, finished on tile 27. */
 function result(tile: number, extra: Partial<RaceResult> = {}): RaceResult {
-  return { tile, tilesLeft: 27 - tile, finished: tile === 27, cardsPlayed: 0, attacksLanded: 0, attacksBlocked: 0, ...extra };
+  return { tile, tilesLeft: 27 - tile, finished: tile === 27, cardsPlayed: 0, attacksLanded: 0, attacksBlocked: 0, degenScore: 0, degenScoreVersion: 1, ...extra };
+}
+
+/** A result as stored before STORY-066, without a Degen Score. */
+function unscored(tile: number): Partial<RaceResult> {
+  const stored: Partial<RaceResult> = result(tile);
+  delete stored.degenScore;
+  delete stored.degenScoreVersion;
+  return stored;
 }
 
 describe('Chog Race result model', () => {
   it('reads a result the server stored', () => {
-    const stored = result(19, { cardsPlayed: 3, attacksLanded: 1, attacksBlocked: 2 });
+    const stored = result(19, { cardsPlayed: 3, attacksLanded: 1, attacksBlocked: 2, degenScore: 10 });
 
     expect(toRaceResult(stored)).toEqual(stored);
     expect(toRaceResult(result(27))?.finished).toBe(true);
   });
 
+  it('reads a result stored before the Degen Score (STORY-066)', () => {
+    const old = unscored(19);
+
+    expect(toRaceResult(old)).toEqual(old);
+  });
+
   it('refuses anything else', () => {
-    for (const bad of [null, 'nope', [], { ...result(4), tile: -1 }, { ...result(4), cardsPlayed: '2' }, { ...result(4), finished: 'no' }, { tile: 4 }]) {
+    for (const bad of [null, 'nope', [], { ...result(4), tile: -1 }, { ...result(4), cardsPlayed: '2' }, { ...result(4), finished: 'no' }, { tile: 4 }, { ...result(4), degenScore: '10' }, { ...result(4), degenScoreVersion: undefined }]) {
       expect(toRaceResult(bad)).toBeNull();
     }
   });
@@ -57,7 +71,7 @@ describe('Chog Race results', () => {
     const view = render([
       member('Bob', 2, 2, result(19, { cardsPlayed: 2, attacksBlocked: 1 }), { isYou: true }),
       member('Carol', 3, 3, result(14)),
-      member('Alice', 1, 1, result(27, { cardsPlayed: 4, attacksLanded: 2 })),
+      member('Alice', 1, 1, result(27, { cardsPlayed: 4, attacksLanded: 2, degenScore: 20 })),
     ]);
 
     expect(view.querySelector('[data-winner]')?.textContent).toBe('Alice wins the race!');
@@ -65,10 +79,20 @@ describe('Chog Race results', () => {
     expect(texts(view, '[data-standing] .name')).toEqual(['Alice', 'Bob', 'Carol']);
     expect(texts(view, '[data-position]')).toEqual(['Finished', 'Tile 19', 'Tile 14']);
     expect(texts(view, '[data-summary]')).toEqual(['Reached the finish', '8 tiles to go', '13 tiles to go']);
+    expect(texts(view, '[data-stat="degen-score"]')).toEqual(['20/100', '0/100', '0/100']);
     expect(texts(view, '[data-stat="cards-played"]')).toEqual(['4', '2', '0']);
     expect(texts(view, '[data-stat="attacks-landed"]')).toEqual(['2', '0', '0']);
     expect(texts(view, '[data-stat="attacks-blocked"]')).toEqual(['0', '1', '0']);
     expect(view.querySelector('.hint')?.textContent).toContain('then by who reached that tile first');
+    expect(view.querySelector('.hint')?.textContent).toContain('doesn’t count towards the ranking');
+  });
+
+  it('shows a match from before the Degen Score without one (STORY-066)', () => {
+    const view = render([member('Alice', 1, 1, unscored(27)), member('Bob', 2, 2, unscored(20))]);
+
+    expect(view.querySelector('[data-stat="degen-score"]')).toBeNull();
+    expect(texts(view, '[data-stat="attacks-landed"]')).toEqual(['0', '0']);
+    expect(view.querySelector('.hint')?.textContent).not.toContain('Degen Score');
   });
 
   it('says one tile to go and when you won', () => {

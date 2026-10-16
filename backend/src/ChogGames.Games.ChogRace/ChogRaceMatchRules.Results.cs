@@ -16,6 +16,12 @@ namespace ChogGames.Games.ChogRace;
 /// </summary>
 public sealed partial class ChogRaceMatchRules
 {
+    /// <summary>The version of the Degen Score formula, stored with every score so a later formula isn't mixed with it.</summary>
+    public const int DegenScoreVersion = 1;
+
+    private const int AttackPoints = 10;
+    private const int MaxDegenScore = 100;
+
     public TimeSpan? TimeLimit => _current.TimeCap;
 
     /// <summary>
@@ -83,8 +89,17 @@ public sealed partial class ChogRaceMatchRules
             pawn.Tile == rules.Finish.Index,
             stats.CardsPlayed,
             stats.AttacksLanded,
-            stats.AttacksBlocked);
+            stats.AttacksBlocked,
+            DegenScore(stats),
+            DegenScoreVersion);
     }
+
+    /// <summary>
+    /// The Degen Score (STORY-066, DEC-062, version 1): 10 points per attack landed, at most 100. It is display only and
+    /// doesn't count towards the ranking.
+    /// </summary>
+    private static int DegenScore(RaceStats stats) =>
+        (int)Math.Min(MaxDegenScore, (long)stats.AttacksLanded * AttackPoints);
 
     /// <summary>
     /// <paramref name="after"/>, one command's outcome, with every pawn it moved stamped with the command's place in the
@@ -148,8 +163,16 @@ public sealed partial class ChogRaceMatchRules
 
     /// <summary>
     /// A player's result, stored with their rank when the match ends (DEC-060): the tile their pawn ended on, the tiles it
-    /// had left to the Finish, whether it stood on the Finish, and their statistics.
+    /// had left to the Finish, whether it stood on the Finish, their statistics, and their Degen Score with the formula
+    /// version it was computed with (STORY-066, DEC-062).
     /// </summary>
     private sealed record RaceResult(
-        int Tile, int TilesLeft, bool Finished, int CardsPlayed, int AttacksLanded, int AttacksBlocked);
+        int Tile,
+        int TilesLeft,
+        bool Finished,
+        int CardsPlayed,
+        int AttacksLanded,
+        int AttacksBlocked,
+        int DegenScore,
+        int DegenScoreVersion);
 }
