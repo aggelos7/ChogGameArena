@@ -49,6 +49,48 @@
   background: var(--text);
 }
 
+.cards {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.hand h3 {
+  margin: 0.5rem 0;
+  font-size: 1rem;
+}
+
+.hand .count {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.hand ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  padding: 0 0.875rem;
+  border: 1px solid var(--card);
+  border-radius: 0.5rem;
+  color: var(--card);
+  font-weight: 600;
+  background: var(--card-surface);
+}
+
+.empty,
+.piles {
+  margin: 0.5rem 0;
+  color: var(--text-muted);
+}
+
 .turn-line {
   min-height: 1.5rem;
   font-weight: 600;

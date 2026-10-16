@@ -3,7 +3,7 @@ import { AvatarBadge } from '../../profile/avatar-badge';
 import { Avatar } from '../../profile/profile-api';
 import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
 import { seatColor } from '../seats';
-import { RaceBoard, RaceTile, raceColumns, raceLayout, raceTileLabel } from './race-board-model';
+import { RACE_CARD_NAMES, RaceBoard, RaceCard, RaceMove, RaceTile, raceColumns, raceLayout, raceTileLabel } from './race-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -23,6 +23,8 @@ interface DrawnPawn {
  * six. Pawns are numbered and coloured by seat, yours outlined and the current player's ringed, and the legend names
  * each player and whose turn it is. It only draws what the server sent. On your turn it offers Roll in the Move phase and
  * End turn in the Play phase (STORY-051, DEC-055), and says what the latest move did; the server decides every outcome.
+ * It shows your hand, how many cards each player holds and what's left in the deck and discard pile (STORY-052, DEC-056);
+ * the server only ever sends your own cards.
  */
 @Component({
   selector: 'app-race-board',
@@ -72,6 +74,12 @@ export class RaceBoardView {
     return byTile;
   });
 
+  /** How many cards each seat holds. */
+  protected readonly cardCounts = computed(() => new Map(this.board().pawns.map((pawn) => [pawn.seat, pawn.cards ?? 0])));
+
+  /** Your cards by name, while you're playing; null when the server sent no hand. */
+  protected readonly hand = computed(() => this.board().hand?.map((card) => this.cardName(card)) ?? null);
+
   protected readonly turnOf = computed(() => this.players().find((member) => member.isTurn) ?? null);
 
   /** Your turn's phase, while it's your turn in a live match; null otherwise. */
@@ -92,7 +100,9 @@ export class RaceBoardView {
       case 'Setback':
         return `${rolled}, landed on the Setback at tile ${move.landed} and fell back to tile ${move.to}.`;
       case 'Card':
-        return `${rolled} and landed on the Card tile ${move.to}.`;
+        return move.draw
+          ? `${rolled}, landed on the Card tile ${move.to}${this.drew(move, !!member?.isYou)}.`
+          : `${rolled} and landed on the Card tile ${move.to}.`;
       case 'Finish':
         return this.board().winner === move.seat
           ? `${rolled}, reached the finish and won the race!`
@@ -112,6 +122,32 @@ export class RaceBoardView {
       }
     });
     inject(DestroyRef).onDestroy(() => resize?.disconnect());
+  }
+
+  /** What a Card tile drew, as the end of the last-move sentence: the card by name only for the player who drew it. */
+  private drew(move: RaceMove, isYou: boolean): string {
+    switch (move.draw) {
+      case 'Drawn': {
+        const card = move.card ? this.cardName(move.card) : 'a card';
+        const reshuffled = move.reshuffled ? ' after the discard pile was shuffled into a new deck' : '';
+        return ` and drew ${card}${reshuffled}`;
+      }
+      case 'HandFull':
+        return `, but ${isYou ? 'your' : 'their'} hand is full`;
+      case 'NoCards':
+        return ', but no card was left to draw';
+      default:
+        return '';
+    }
+  }
+
+  protected cardName(card: RaceCard): string {
+    return RACE_CARD_NAMES[card];
+  }
+
+  protected cardsOf(seat: number): string {
+    const count = this.cardCounts().get(seat) ?? 0;
+    return count === 1 ? '1 card' : `${count} cards`;
   }
 
   protected pawnsOn(tile: RaceTile): DrawnPawn[] {

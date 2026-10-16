@@ -5,6 +5,7 @@
         <span class="pawn" [style.background]="color(member.seat)" aria-hidden="true">{{ member.seat }}</span>
         <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="1.75" />
         <span class="name">{{ member.displayName }}</span>
+        <span class="cards" data-cards>{{ cardsOf(member.seat) }}</span>
         @if (member.isYou) {
           <span class="tag">You</span>
         }
@@ -25,6 +26,25 @@
   </p>
   @if (lastMove(); as move) {
     <p class="last-move" data-last-move>{{ move }}</p>
+  }
+  @if (hand(); as cards) {
+    <section class="hand" aria-labelledby="race-hand-title" data-hand>
+      <h3 id="race-hand-title">
+        Your cards <span class="count">{{ cards.length }}/{{ board().maxHand ?? cards.length }}</span>
+      </h3>
+      @if (cards.length > 0) {
+        <ul>
+          @for (card of cards; track $index) {
+            <li class="card" data-card>{{ card }}</li>
+          }
+        </ul>
+      } @else {
+        <p class="empty">None yet. Land on a Card tile to draw one.</p>
+      }
+    </section>
+  }
+  @if (board().deck !== undefined) {
+    <p class="piles" data-piles>Deck {{ board().deck }} · Discard {{ board().discard ?? 0 }}</p>
   }
   @if (yourPhase() === 'Move') {
     <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>

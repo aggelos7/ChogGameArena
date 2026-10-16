@@ -4,8 +4,8 @@ using ChogGames.Core.Rooms;
 namespace ChogGames.Games.ChogRace.Rules;
 
 /// <summary>
-/// A version of the Chog Race rules: the track, how far a pawn moves in a turn and the match's time cap (STORY-050,
-/// RACE-001, RACE-002, RACE-009, DEC-054). Like Chog Life's rules (DEC-037) it is versioned code in the game module,
+/// A version of the Chog Race rules: the track, how far a pawn moves in a turn, the match's time cap (STORY-050,
+/// RACE-001, RACE-002, RACE-009, DEC-054), the deck and the hand limit (STORY-052, RACE-003, DEC-056). Like Chog Life's rules (DEC-037) it is versioned code in the game module,
 /// checked when it is built, so a track whose finish can't be reached stops the API at startup instead of trapping
 /// pawns during a match. Nothing here touches a wallet or the chain (DEC-010).
 /// </summary>
@@ -20,16 +20,22 @@ public sealed class RaceRules
     /// <summary>The furthest a Boost or Setback tile may send a pawn, either way.</summary>
     public const int MaxJump = 6;
 
+    /// <summary>The most cards any rules version may let a player hold.</summary>
+    public const int HandLimit = 5;
+
     /// <summary>The hard limit on any match's duration (ENG-011).</summary>
     public static readonly TimeSpan MaxTimeCap = GameRoom.MaxMatchDuration;
 
-    private RaceRules(int version, IReadOnlyList<RaceTile> tiles, int minMove, int maxMove, TimeSpan timeCap)
+    private RaceRules(
+        int version, IReadOnlyList<RaceTile> tiles, int minMove, int maxMove, TimeSpan timeCap, IReadOnlyList<RaceCard> deck, int maxHand)
     {
         Version = version;
         Tiles = tiles;
         MinMove = minMove;
         MaxMove = maxMove;
         TimeCap = timeCap;
+        Deck = deck;
+        MaxHand = maxHand;
     }
 
     /// <summary>The game these rules are for.</summary>
@@ -54,15 +60,29 @@ public sealed class RaceRules
     /// <summary>The longest a match may last (ENG-011, RACE-009); the match ends when it's up (STORY-056).</summary>
     public TimeSpan TimeCap { get; }
 
+    /// <summary>Every card in a match's deck, one entry per card; each match shuffles its own copy (RACE-003).</summary>
+    public IReadOnlyList<RaceCard> Deck { get; }
+
+    /// <summary>The most cards a player holds; a player with a full hand draws nothing (RACE-003, DEC-056).</summary>
+    public int MaxHand { get; }
+
     /// <summary>
     /// Rules with these values, or <see cref="ArgumentException"/> naming the first problem: moves of 1 to
-    /// <see cref="MoveLimit"/> spaces, a time cap of at most <see cref="MaxTimeCap"/>, and a track of <see cref="MinTiles"/>
+    /// <see cref="MoveLimit"/> spaces, a time cap of at most <see cref="MaxTimeCap"/>, a deck of known cards, a hand of 1 to
+    /// <see cref="HandLimit"/> cards, and a track of <see cref="MinTiles"/>
     /// to <see cref="MaxTiles"/> tiles in index order, from one start to one finish. A Boost jumps forward and a Setback
     /// back, at most <see cref="MaxJump"/> tiles, to a tile on the track that doesn't jump again. The finish must be
     /// reachable: a pawn that can stand on a tile must have some sequence of rolls from it to the finish, so no group of
     /// setbacks can trap it.
     /// </summary>
-    public static RaceRules Create(int version, IEnumerable<RaceTile> tiles, int minMove, int maxMove, TimeSpan timeCap)
+    public static RaceRules Create(
+        int version,
+        IEnumerable<RaceTile> tiles,
+        int minMove,
+        int maxMove,
+        TimeSpan timeCap,
+        IEnumerable<RaceCard> deck,
+        int maxHand)
     {
         if (version < 1)
         {
@@ -79,11 +99,23 @@ public sealed class RaceRules
             throw new ArgumentOutOfRangeException(nameof(timeCap), timeCap, $"The time cap must be positive and at most {MaxTimeCap}.");
         }
 
+        if (maxHand is < 1 or > HandLimit)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxHand), maxHand, $"A hand holds 1 to {HandLimit} cards.");
+        }
+
+        ArgumentNullException.ThrowIfNull(deck);
+        var cards = deck.ToArray();
+        if (cards.Length == 0 || !cards.All(Enum.IsDefined))
+        {
+            throw new ArgumentException("The deck needs at least one card, every one of a known kind.", nameof(deck));
+        }
+
         ArgumentNullException.ThrowIfNull(tiles);
         var track = tiles.ToArray();
         CheckTrack(track);
         CheckFinishReachable(track, minMove, maxMove);
-        return new RaceRules(version, track, minMove, maxMove, timeCap);
+        return new RaceRules(version, track, minMove, maxMove, timeCap, cards, maxHand);
     }
 
     private static void CheckTrack(RaceTile[] track)

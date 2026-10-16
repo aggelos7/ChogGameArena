@@ -17,6 +17,7 @@ namespace ChogGames.Api.Tests.ChogRace;
 /// STORY-051, DEC-055: on their turn a player rolls; the server rolls 1–3, moves the pawn, resolves the tile it lands on
 /// and ends the turn, and every player, over REST and live, gets the same move. Commands out of phase, out of turn or from
 /// outside change nothing and draw nothing. The first pawn to reach the Finish wins and the match ends with ranks.
+/// STORY-052, DEC-056: a Card tile draws from the server's deck, and only the player who drew sees the card.
 /// </summary>
 public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -144,13 +145,17 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
 
     private static Task<JsonElement> ViewAsync(Guest guest, string code) => SendAsync(guest, HttpMethod.Get, $"/api/rooms/{code}");
 
-    /// <summary>A started Chog Race match of <paramref name="players"/>, seated in join order; returns its code.</summary>
-    private static async Task<string> StartedAsync(params Guest[] players)
+    /// <summary>
+    /// A started Chog Race match of <paramref name="players"/>, seated in join order; returns its code. The clock moves on
+    /// between joins, since players joining at the same instant are seated by id.
+    /// </summary>
+    private async Task<string> StartedAsync(params Guest[] players)
     {
         var created = await SendAsync(players[0], HttpMethod.Post, "/api/rooms", new { gameType = "chog-race" }, HttpStatusCode.Created);
         var code = created.GetProperty("code").GetString()!;
         foreach (var player in players[1..])
         {
+            _clock.Advance(TimeSpan.FromSeconds(1));
             await SendAsync(player, HttpMethod.Post, $"/api/rooms/{code}/join");
         }
 
@@ -216,15 +221,55 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
 
         Assert.Equal(room.GetProperty("version").GetInt64() + 1, result.GetProperty("version").GetInt64());
         Assert.Equal([(1, 4)], _dice.Draws.Skip(drawsBefore));
-        var seen = new[] { await aliceLive.NextAsync(), await bobLive.NextAsync(), await ViewAsync(alice, code), await ViewAsync(bob, code) };
-        Assert.Single(seen.Select(s => s.GetProperty("state").GetRawText()).Distinct());
-        foreach (var snapshot in seen)
+        var alices = new[] { await aliceLive.NextAsync(), await ViewAsync(alice, code) };
+        var bobs = new[] { await bobLive.NextAsync(), await ViewAsync(bob, code) };
+        Assert.Single(alices.Select(s => s.GetProperty("state").GetRawText()).Distinct());
+        Assert.Single(bobs.Select(s => s.GetProperty("state").GetRawText()).Distinct());
+        foreach (var snapshot in alices.Concat(bobs))
         {
             Assert.Equal(result.GetProperty("version").GetInt64(), snapshot.GetProperty("version").GetInt64());
-            Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card"}""", LastMove(snapshot));
-            Assert.Equal("""[{"seat":1,"tile":2},{"seat":2,"tile":0}]""", Pawns(snapshot));
+            Assert.Equal("""[{"seat":1,"tile":2,"cards":1},{"seat":2,"tile":0,"cards":0}]""", Pawns(snapshot));
+            Assert.Equal((23, 0), (snapshot.GetProperty("state").GetProperty("deck").GetInt32(), snapshot.GetProperty("state").GetProperty("discard").GetInt32()));
             Assert.Equal((2, "Move"), (TurnSeat(snapshot), Phase(snapshot)));
         }
+
+        // The deck was shuffled at the start without reordering it, so its top card is the first Pump.
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"Drawn","card":"Pump"}""", LastMove(alices[0]));
+        Assert.Equal("""["Pump"]""", alices[0].GetProperty("state").GetProperty("hand").GetRawText());
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"Drawn"}""", LastMove(bobs[0]));
+        Assert.Equal("[]", bobs[0].GetProperty("state").GetProperty("hand").GetRawText());
+        Assert.DoesNotContain("Pump", bobs[0].GetRawText());
+    }
+
+    [PostgresFact]
+    public async Task A_full_hand_draws_nothing_and_stays_hidden_from_the_other_players()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync(alice, bob);
+        await using (var db = database.CreateDbContext())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """UPDATE "GameRooms" SET "State" = {0}::jsonb WHERE "Code" = {1}""",
+                """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Rug","Hodl","Whale"]},{"seat":2,"tile":0}],"deck":["Fomo"],"discard":[]}""",
+                code);
+        }
+
+        _dice.Enqueue(2);
+        await RollAsync(alice, await ViewAsync(alice, code));
+
+        var mine = await ViewAsync(alice, code);
+        var theirs = await ViewAsync(bob, code);
+        Assert.Equal("""["Rug","Hodl","Whale"]""", mine.GetProperty("state").GetProperty("hand").GetRawText());
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"HandFull"}""", LastMove(theirs));
+        Assert.Equal("""[{"seat":1,"tile":2,"cards":3},{"seat":2,"tile":0,"cards":0}]""", Pawns(theirs));
+        Assert.Equal(1, theirs.GetProperty("state").GetProperty("deck").GetInt32());
+        foreach (var card in new[] { "Rug", "Hodl", "Whale", "Fomo" })
+        {
+            Assert.DoesNotContain(card, theirs.GetRawText());
+        }
+
+        Assert.Equal(2, TurnSeat(theirs));
     }
 
     [PostgresFact]
@@ -248,7 +293,7 @@ public sealed class ChogRaceMovementTests(MigratedPostgresDatabase database) : I
 
         var room = await ViewAsync(bob, code);
         Assert.Equal("""{"seat":1,"roll":3,"from":6,"landed":9,"to":7,"effect":"Setback"}""", LastMove(room));
-        Assert.Equal("""[{"seat":1,"tile":7},{"seat":2,"tile":6}]""", Pawns(room));
+        Assert.Equal("""[{"seat":1,"tile":7,"cards":0},{"seat":2,"tile":6,"cards":0}]""", Pawns(room));
         Assert.Equal(2, TurnSeat(room));
     }
 
