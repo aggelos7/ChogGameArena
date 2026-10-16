@@ -94,6 +94,7 @@ services:
       WalletAuth__Uri: ${WALLET_AUTH_URI:-https://${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}}
       Nfts__Monad__RpcUrl: ${MONAD_RPC_URL:-https://rpc.monad.xyz}
       Games__Items__0__Status: ${CHOG_LIFE_STATUS:-ComingSoon}
+      Games__Items__1__Status: ${CHOG_RACE_STATUS:-ComingSoon}
     networks: [backend]
     depends_on:
       postgres:
