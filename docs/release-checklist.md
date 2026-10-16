@@ -18,13 +18,14 @@ Staging `.env` differs from production's only in these values:
 | `PUBLIC_HOSTNAME` | `staging.<domain>` | Its own DNS name and Let's Encrypt certificate |
 | `POSTGRES_PASSWORD` | its own | Never production's |
 | `CHOG_LIFE_STATUS` | `Available` | `CHOG_LIFE_STATUS=Available` is what the smoke test and players play |
+| `CHOG_RACE_STATUS` | `Available` | `CHOG_RACE_STATUS=Available`: the smoke test plays Chog Race beside Chog Life (DEC-061) |
 | `COMPOSE_PROFILES` | `letsencrypt` | Backups off, or `letsencrypt,backup` with a separate bucket and key |
 | `IMAGE_TAG` | the release being tested | So the previous release stays on the VM for the rollback drill |
 
 `MONAD_RPC_URL` stays on Monad mainnet, as in production, so NFT ownership is real. Testers need a browser wallet
 holding at least one Chog, and a second wallet with none.
 
-The automated smoke test creates eight guests and two completed matches on every run. Run it on staging or a local
+The automated smoke test creates eight guests and three completed matches on every run. Run it on staging or a local
 stack only, and **never against production**: it would add made-up players and results to real stats.
 
 ## 2. Before you start
@@ -34,7 +35,7 @@ stack only, and **never against production**: it would add made-up players and r
 - [ ] The release has a tag (`IMAGE_TAG=<release>`, for example the git tag) and the previous release's tag (N-1) is
       known. Its images are still on the staging VM (`docker image ls chog-game-arena/api`).
 - [ ] Schema changes since N-1: `git diff --stat <N-1>..<release> -- backend/src/ChogGames.Infrastructure/Persistence/Migrations`.
-      If any, the release notes say whether N-1 still runs on the new schema (see [Rollback](#9-rollback)).
+      If any, the release notes say whether N-1 still runs on the new schema (see [Rollback](#11-rollback)).
 
 ## 3. Deploy to staging and run the smoke tests
 
@@ -65,7 +66,9 @@ RELEASE_BASE_URL=https://staging.<domain> npm run release:verify
     changed;
   - a player forfeiting;
   - a dropped live connection reconnecting and catching up;
-  - a six-player and a two-player match played to the finish, with ranks and profile stats.
+  - a six-player and a two-player match played to the finish, with ranks and profile stats;
+  - a two-player Chog Race match played to the finish at the same time as that two-player Chog Life one, with
+    a Chog Life command, the other match's id and a player of the other match refused (DEC-061).
 - [ ] `RELEASE_CA_FILE=<pem>` is only needed if staging runs a certificate that isn't from a public authority.
 
 The manual sections below are the parts a script can't check: a real wallet, real NFTs, real phones and the
@@ -123,7 +126,20 @@ rollback. Use one desktop browser with the wallet extension and one phone at abo
 - [ ] Let a turn run out once: the turn passes to the next player, and a pending lane choice takes the default
       lane.
 
-## 10. Rollback
+## 10. Chog Race
+
+Both games share the same sessions, Chogs, rooms, profiles and live updates (DEC-061), so this section checks only
+what is Chog Race's own.
+
+- [ ] The home page lists Chog Race as playable (`CHOG_RACE_STATUS=Available`); creating a Chog Race room offers
+      its four abilities.
+- [ ] Play a two-player Chog Race match on the phone and the desktop: the track, rolls, cards drawn into the hand,
+      playing a card, an attack answered with HODL or let through, and an ability. Both screens agree.
+- [ ] While it runs, a Chog Life match on two other devices plays normally; neither board shows the other's moves.
+- [ ] At the end the Results panel shows every player's place, tile and card stats, and each profile's
+      `Games played` counts it with the Chog Life games.
+
+## 11. Rollback
 
 The drill proves the release can be undone on staging before production depends on it.
 
@@ -142,7 +158,7 @@ IMAGE_TAG=<release> $C up -d --wait      # forward again
       ([Restoring](deployment.md#restoring)). Take that backup in production right before the deploy:
       `$C run --rm backup now`.
 
-## 11. Release record
+## 12. Release record
 
 Copy this table into the release's PR or notes:
 

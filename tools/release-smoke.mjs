@@ -5,9 +5,11 @@
 // sign-in refusing a bad signature; a six-player room up to its limit; lobby and match rules refusing the wrong player,
 // the wrong turn, a stale version and outsiders without any change; a player's forfeit; a dropped live connection
 // reconnecting and catching up; a six-player and a two-player match played over match commands to the finish, with
-// ranks and profile stats. It creates eight guests and two rooms on the target and leaves them there, so it is never
-// run against production. Wallet sign-in with a real wallet, choosing a real Chog NFT, the mobile UI and the
-// deployment rollback are the manual part of docs/release-checklist.md.
+// ranks and profile stats; and (STORY-057, DEC-061) a two-player Chog Race match played at the same time as the
+// two-player Chog Life one, with commands meant for the other game or match refused. It creates eight guests and three
+// rooms on the target and leaves them there, so it is never run against production. Wallet sign-in with a real
+// wallet, choosing a real Chog NFT, the mobile UI and the deployment rollback are the manual part of
+// docs/release-checklist.md.
 //
 //   RELEASE_BASE_URL=https://staging.example.com npm run release:verify
 //
@@ -21,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { connectHub } from './hub-client.mjs';
 
 const GAME = 'chog-life';
+const RACE = 'chog-race';
 const HUB_PATH = '/api/hubs/rooms';
 // Guest creation is limited per client address (GuestSessions:CreatePerMinutePerClient, 10 by default).
 const GUESTS = 8;
@@ -163,10 +166,27 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
   };
 
   /**
-   * Plays an active match to its end over match commands, as each player in turn: a lane choice when the player's
-   * pawn waits on a fork (or to keep a previewed move), otherwise a roll. The host's hub connection says whose turn it
-   * is. `during(room, turns)` runs after every accepted command, for checks along the way. Ends Completed (everyone
-   * reached the Finish, or the time cap) or Abandoned.
+   * The next move in `room`, and who makes it. Chog Life: a lane choice when the player's pawn waits on a fork (or to
+   * keep a previewed move), otherwise a roll. Chog Race: a pass when an attack waits for its target's reply, ending a
+   * Play phase without a card, otherwise a roll.
+   */
+  const nextMove = (room) => {
+    const turn = room.members.find((member) => member.isTurn);
+    if (room.gameType === RACE) {
+      const phase = room.state?.phase;
+      if (phase === 'Reply') {
+        return { member: room.members.find((m) => m.seat === room.state.reply.target), type: 'PASS' };
+      }
+      return { member: turn, type: phase === 'Play' ? 'END_TURN' : 'ROLL' };
+    }
+    const deciding = turn && [room.state?.choosing, room.state?.confirming].includes(turn.seat);
+    return { member: turn, type: deciding ? 'CHOOSE_LANE' : 'ROLL', payload: deciding ? { lane: 'Safe' } : undefined };
+  };
+
+  /**
+   * Plays an active match of either game to its end over match commands, as each player in turn (`nextMove`). The
+   * watcher's hub connection says whose turn it is. `during(room, turns)` runs after every accepted command, for checks
+   * along the way. Ends Completed (everyone reached the Finish, or the time cap) or Abandoned.
    */
   const playToEnd = async (watcher, players, during) => {
     const byName = new Map(players.map((guest) => [guest.name, guest]));
@@ -175,14 +195,13 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     let turns = 0;
     while (room.status === 'Active') {
       check(Date.now() < deadline, `the match did not end within ${matchMinutes} minutes`);
-      const turn = room.members.find((member) => member.isTurn);
-      const player = turn && byName.get(turn.displayName);
+      const move = nextMove(room);
+      const player = move.member && byName.get(move.member.displayName);
       if (!player) {
         room = await watcher.next(room.version, 2);
         continue;
       }
-      const deciding = [room.state?.choosing, room.state?.confirming].includes(turn.seat);
-      const response = await command(player, room, deciding ? 'CHOOSE_LANE' : 'ROLL', deciding ? { lane: 'Safe' } : undefined);
+      const response = await command(player, room, move.type, move.payload);
       if (response.status === 200) {
         turns++;
         room = await watcher.next(response.json.version - 1);
@@ -190,10 +209,13 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
       } else if (response.status === 409 && ['stale_version', 'turn_expired', 'not_your_turn', 'time_up'].includes(response.json?.code)) {
         // The turn timer or the time cap moved the match on first; act on the new state.
         room = await watcher.next(room.version, 2);
+      } else if (response.status === 403 && response.json?.code === 'not_in_match') {
+        // `during` took this player out after the snapshot was read; the match has moved on without them.
+        room = await watcher.next(room.version, 2);
       } else if (response.status === 429) {
         await sleep(5_000);
       } else {
-        throw new Error(`${deciding ? 'CHOOSE_LANE' : 'ROLL'} as ${player.name} returned ${response.status}: ${response.text.slice(0, 300)}`);
+        throw new Error(`${move.type} as ${player.name} returned ${response.status}: ${response.text.slice(0, 300)}`);
       }
     }
     return { room, turns };
@@ -227,6 +249,8 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     expectStatus(games, 200, 'GET /api/games');
     const game = games.json.find((g) => g.id === GAME);
     check(game?.status === 'Available', `${GAME} must be Available in the catalog (set CHOG_LIFE_STATUS=Available on staging)`);
+    const race = games.json.find((g) => g.id === RACE);
+    check(race?.status === 'Available', `${RACE} must be Available in the catalog (set CHOG_RACE_STATUS=Available on staging)`);
 
     step('calls without a session are refused');
     expectStatus(await send('GET', '/api/me'), 401, 'GET /api/me without a session');
@@ -366,20 +390,47 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     expectProblem(await command(host, sixPlayer.room, 'ROLL'), 409, 'room_closed', 'rolling after the end');
     await watcher.hub.close();
 
-    step('a two-player match: the leaver and the refused seventh player play to the finish');
+    step('a two-player Chog Life match and a two-player Chog Race match, played at the same time');
+    // The leaver and the refused seventh player play Chog Life; two players of the six-player match play Chog Race.
     const duo = [leaver, seventh];
-    const pair = await leaver.post('/api/rooms', { gameType: GAME });
-    expectStatus(pair, 201, 'creating a second room');
-    expectStatus(await seventh.post(`/api/rooms/${pair.json.code}/join`), 200, 'joining the second room');
-    const duoWatcher = await follow(leaver, pair.json.code);
-    await readyAll(duo, pair.json.code);
-    const duoStart = await leaver.post(`/api/rooms/${pair.json.code}/start`);
-    expectStatus(duoStart, 200, 'starting the two-player match');
-    await duoWatcher.next(duoStart.json.version - 1);
-    const twoPlayer = await playToEnd(duoWatcher, duo);
-    step(`the two-player match finished after ${twoPlayer.turns} turns`);
+    const racers = [table[1], table[2]];
+    const startPair = async ([first, partner], gameType) => {
+      const pair = await first.post('/api/rooms', { gameType });
+      expectStatus(pair, 201, `creating a ${gameType} room`);
+      expectStatus(await partner.post(`/api/rooms/${pair.json.code}/join`), 200, `joining the ${gameType} room`);
+      const pairWatcher = await follow(first, pair.json.code);
+      await readyAll([first, partner], pair.json.code);
+      const pairStart = await first.post(`/api/rooms/${pair.json.code}/start`);
+      expectStatus(pairStart, 200, `starting the ${gameType} match`);
+      check(pairStart.json.gameType === gameType, `the ${gameType} room must play ${gameType}`);
+      await pairWatcher.next(pairStart.json.version - 1);
+      return pairWatcher;
+    };
+    const duoWatcher = await startPair(duo, GAME);
+    const raceWatcher = await startPair(racers, RACE);
+    check(raceWatcher.latest.state?.tiles?.length > 0, 'the Chog Race match shows its track');
+
+    step('commands meant for the other game or match are refused and change nothing');
+    const lifeNow = await roomOf(leaver, duoWatcher.latest.code);
+    const raceNow = await roomOf(racers[0], raceWatcher.latest.code);
+    const racer = racers.find((g) => g.name === raceNow.members.find((m) => m.isTurn).displayName);
+    expectProblem(await command(racer, raceNow, 'CHOOSE_LANE', { lane: 'Safe' }), 400, 'unknown_command', 'a Chog Life command in Chog Race');
+    expectProblem(await command(racer, raceNow, 'ROLL', undefined, { matchId: lifeNow.matchId }), 404, 'room_not_found', 'the Chog Life match id in Chog Race');
+    expectProblem(await command(leaver, raceNow, 'ROLL'), 404, 'room_not_found', 'a Chog Life player rolling in Chog Race');
+    check((await roomOf(leaver, lifeNow.code)).version === lifeNow.version, 'refused commands must not change the Chog Life match');
+    check((await roomOf(racer, raceNow.code)).version === raceNow.version, 'refused commands must not change the Chog Race match');
+
+    const [twoPlayer, racePlayed] = await Promise.all([playToEnd(duoWatcher, duo), playToEnd(raceWatcher, racers)]);
+    step(`the two-player Chog Life match finished after ${twoPlayer.turns} turns, the Chog Race match after ${racePlayed.turns}`);
     await checkResults(twoPlayer.room, duo, 'the two-player match');
+    await checkResults(racePlayed.room, racers, 'the Chog Race match');
+    check(racePlayed.room.members.every((m) => m.result && Number.isInteger(m.result.tile)), 'every Chog Race player gets a result');
+    for (const guest of racers) {
+      const profile = await guest.get('/api/profile');
+      check(profile.json.gamesPlayed >= 2, `${guest.name}'s profile must count both games`);
+    }
     await duoWatcher.hub.close();
+    await raceWatcher.hub.close();
     log('Release smoke test passed.');
   } finally {
     // A failed run leaves connections open; they would keep the process alive.

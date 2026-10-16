@@ -146,17 +146,20 @@ test('release:verify runs the release smoke test, and deploy:verify runs it agai
   const deploy = read('tools/deploy-smoke.mjs');
   assert.match(deploy, /runReleaseSmoke\(/);
   assert.match(deploy, /CHOG_LIFE_STATUS: 'Available'/);
+  assert.match(deploy, /CHOG_RACE_STATUS: 'Available'/);
+  assert.match(read('infrastructure/production/docker-compose.yml'), /Games__Items__1__Status: \$\{CHOG_RACE_STATUS:-ComingSoon\}/);
 });
 
 test('the release checklist covers every area the story names and the rollback drill', () => {
   const checklist = read('docs/release-checklist.md');
-  for (const heading of ['Guests', 'Wallet', 'NFT', '2–6 players', 'Reconnect', 'Finish', 'Rollback']) {
+  for (const heading of ['Guests', 'Wallet', 'NFT', '2–6 players', 'Reconnect', 'Finish', 'Chog Race', 'Rollback']) {
     assert.match(checklist, new RegExp(`^##.*${heading}`, 'mi'), `the checklist needs a section on ${heading}`);
   }
   for (const command of ['npm run release:verify', 'npm run deploy:verify', 'npm run backup:verify', 'IMAGE_TAG=']) {
     assert.ok(checklist.includes(command), `the checklist must use ${command}`);
   }
   assert.match(checklist, /CHOG_LIFE_STATUS=Available/);
+  assert.match(checklist, /CHOG_RACE_STATUS=Available/);
   assert.match(checklist, /never.*production/i, 'the checklist must keep the smoke test off production');
   assert.match(read('docs/deployment.md'), /release-checklist\.md/);
 });

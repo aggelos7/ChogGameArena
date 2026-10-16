@@ -37,8 +37,9 @@ const env = {
   HTTP_PORT: httpPort,
   HTTPS_PORT: httpsPort,
   IMAGE_TAG: 'smoke',
-  // The release smoke test plays Chog Life, which production lists as Coming Soon by default.
+  // The release smoke test plays both games, which production lists as Coming Soon by default.
   CHOG_LIFE_STATUS: 'Available',
+  CHOG_RACE_STATUS: 'Available',
 };
 const compose = (...args) =>
   execFileSync('docker', ['compose', '-f', composeFile, '--env-file', '/dev/null', ...args], {
