@@ -852,7 +852,7 @@
 
 #### STORY-057 — Cross-game regression
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Verify same wallet, NFT, rooms, profiles and realtime infrastructure serve both games.

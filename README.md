@@ -85,7 +85,7 @@ npm run backup:verify   # smoke test: backs up an isolated copy, checks encrypti
 RELEASE_BASE_URL=https://staging.<domain> npm run release:verify   # release smoke test against staging (default: the dev server on :4201); never against production
 ```
 
-Releases (STORY-049, DEC-053): every release passes [`docs/release-checklist.md`](docs/release-checklist.md) on a separate staging VM before production. The checklist has two parts. The automated part is `npm run release:verify`: guests, character choice, wallet refusal, a six-player room, refused commands, a forfeit, a reconnect, and two matches played to the finish, through the API and the room hub with Node built-ins only. The manual part covers a real wallet, real Chog NFTs, phones, and a rollback drill. `npm run deploy:verify` also runs the release smoke test against its production-like stack. Set `RELEASE_CA_FILE` to a PEM file when staging's certificate isn't from a public authority.
+Releases (STORY-049, DEC-053): every release passes [`docs/release-checklist.md`](docs/release-checklist.md) on a separate staging VM before production. The checklist has two parts. The automated part is `npm run release:verify`: guests, character choice, wallet refusal, a six-player room, refused commands, a forfeit, a reconnect, and three matches played to the finish (the last two, Chog Life and Chog Race, at the same time), through the API and the room hub with Node built-ins only. The manual part covers a real wallet, real Chog NFTs, phones, and a rollback drill. `npm run deploy:verify` also runs the release smoke test against its production-like stack. Set `RELEASE_CA_FILE` to a PEM file when staging's certificate isn't from a public authority.
 
 | Setting (`infrastructure/production/.env`) | Default | Notes |
 |---|---|---|
@@ -104,6 +104,7 @@ Releases (STORY-049, DEC-053): every release passes [`docs/release-checklist.md`
 | `HTTP_BIND` / `HTTP_PORT` / `HTTPS_PORT` | `0.0.0.0` / `80` / `443` | where nginx listens |
 | `MONAD_RPC_URL` | `https://rpc.monad.xyz` | `Nfts:Monad:RpcUrl` |
 | `CHOG_LIFE_STATUS` | `ComingSoon` | `Games:Items:0:Status` |
+| `CHOG_RACE_STATUS` | `ComingSoon` | `Games:Items:1:Status` (DEC-061) |
 | `IMAGE_PREFIX` / `IMAGE_TAG` | `chog-game-arena` / `local` | image names, for releases and rollbacks |
 
 The API runs with `ASPNETCORE_ENVIRONMENT=Production` and `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`: it publishes no port, and nginx overwrites `X-Forwarded-For` with the client it saw, so per-client rate limits use the real client address.
