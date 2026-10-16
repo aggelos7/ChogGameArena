@@ -813,7 +813,7 @@
 
 #### STORY-054 — Attack and defense cards
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Implement Rug, HODL, Liquidated and defense response window.

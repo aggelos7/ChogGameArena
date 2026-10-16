@@ -15,7 +15,7 @@ public class RaceRulesTests
 
     private static readonly RaceCard[] Deck = [RaceCard.Pump, RaceCard.Hodl];
 
-    private static readonly RaceCardValues Values = new(Pump: 3, FomoForward: 5, FomoBack: 3, FomoForwardChance: 50, Reverse: 1);
+    private static readonly RaceCardValues Values = new(Pump: 3, FomoForward: 5, FomoBack: 3, FomoForwardChance: 50, Reverse: 1, Rug: 1);
 
     /// <summary>A valid track of <paramref name="count"/> tiles: Start, Normal tiles and the Finish.</summary>
     private static RaceTile[] Plain(int count = 24) =>
@@ -139,25 +139,28 @@ public class RaceRulesTests
     [Theory]
     [InlineData(RaceCard.Fomo)]
     [InlineData(RaceCard.Reverse)]
+    [InlineData(RaceCard.Rug)]
     public void A_pawn_a_card_can_move_onto_a_tile_needs_a_route_from_it(RaceCard card)
     {
-        // Moves of exactly 2 from the start stand on even tiles only; FOMO's 5 forward or 3 back and Reverse's 1 back reach
-        // odd ones too, from which every roll of 2 runs into the loop at 7 (a Reverse onto the setback at 9 lands there).
+        // Moves of exactly 2 from the start stand on even tiles only; FOMO's 5 forward or 3 back and Reverse's or Rug's 1
+        // back reach odd ones too, from which every roll of 2 runs into the loop at 7 (a Reverse onto the setback at 9 lands there).
         var track = With(Setback(9, to: 7), Setback(11, to: 7));
 
         Assert.StartsWith("The finish can't be reached from tile 1 with", Refused(track, minMove: 2, maxMove: 2, deck: [card]));
     }
 
     [Theory]
-    [InlineData(0, 5, 3, 50, 1)]
-    [InlineData(3, 7, 3, 50, 1)]
-    [InlineData(3, 5, 0, 50, 1)]
-    [InlineData(3, 5, 3, 50, 7)]
-    public void Cards_move_1_to_6_tiles(int pump, int fomoForward, int fomoBack, int chance, int reverse) =>
+    [InlineData(0, 5, 3, 50, 1, 4)]
+    [InlineData(3, 7, 3, 50, 1, 4)]
+    [InlineData(3, 5, 0, 50, 1, 4)]
+    [InlineData(3, 5, 3, 50, 7, 4)]
+    [InlineData(3, 5, 3, 50, 1, 0)]
+    [InlineData(3, 5, 3, 50, 1, 7)]
+    public void Cards_move_1_to_6_tiles(int pump, int fomoForward, int fomoBack, int chance, int reverse, int rug) =>
         Assert.Contains(
             "A card moves a pawn 1 to 6 tiles",
             Assert.Throws<ArgumentOutOfRangeException>(() => RaceRules.Create(
-                1, Plain(), 1, 3, Cap, Deck, 3, new RaceCardValues(pump, fomoForward, fomoBack, chance, reverse))).Message);
+                1, Plain(), 1, 3, Cap, Deck, 3, new RaceCardValues(pump, fomoForward, fomoBack, chance, reverse, rug))).Message);
 
     [Theory]
     [InlineData(0)]

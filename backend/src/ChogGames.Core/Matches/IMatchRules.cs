@@ -51,6 +51,16 @@ public interface IMatchRules
     JsonElement? TimeOutTurn(MatchTurnContext context);
 
     /// <summary>
+    /// The reply window ran out (STORY-054, DEC-058): <see cref="GameRoom.ReplyingPlayerId"/> didn't answer the command
+    /// that opened it (<see cref="MatchRuleDecision.AwaitsReplyFrom"/>) in time. Returns the game's safe default, such as
+    /// letting an attack land, as an accepted decision whose state and <see cref="MatchRuleDecision.SkipsNextTurnOf"/>
+    /// are applied; null, the default, leaves the state unchanged. The engine then counts a missed turn for the player
+    /// who didn't reply and ends the current player's turn either way. A default that finishes the match
+    /// (<see cref="MatchRuleDecision.Finish"/>) completes it instead, with no missed turn.
+    /// </summary>
+    MatchRuleDecision? TimeOutReply(MatchTurnContext context) => null;
+
+    /// <summary>
     /// What one player may see of the game state in their snapshot (STORY-026, ENG-013, DEC-028): hidden hands, upcoming
     /// cards and other players' private choices must be left out. Returns null to show the player nothing of it.
     /// </summary>
@@ -75,13 +85,18 @@ public sealed record MatchEndContext(GameRoom Match, JsonElement? State, bool Ti
 /// <param name="Standings">A rank for every player still playing, as for <see cref="MatchRuleDecision.Finish"/>.</param>
 public sealed record MatchEnding(JsonElement State, IReadOnlyList<MatchStanding> Standings);
 
-/// <param name="Match">The active match, read only; <see cref="GameRoom.CurrentPlayerId"/> is the player whose turn ran out.</param>
+/// <param name="Match">
+/// The active match, read only; <see cref="GameRoom.CurrentPlayerId"/> is the player whose turn ran out, or, with
+/// <see cref="GameRoom.ReplyingPlayerId"/> set, whose turn waited for a reply that didn't come.
+/// </param>
 /// <param name="State">The game's state, or null while it has none: no start state and no accepted command yet.</param>
 /// <param name="Random">The server's source of chance, for a safe default that needs a draw.</param>
 public sealed record MatchTurnContext(GameRoom Match, JsonElement? State, IRandomSource Random);
 
 /// <param name="Match">The active match, read only; its members are the players.</param>
-/// <param name="PlayerId">The session's player, whose turn it is.</param>
+/// <param name="PlayerId">
+/// The session's player: the one whose turn it is or, while a reply window is open, the one it waits for (DEC-058).
+/// </param>
 /// <param name="Payload">The player's choices only; anything in it that claims an outcome, such as a roll, is ignored.</param>
 /// <param name="State">The game's state, or null while it has none: no start state and no accepted command yet.</param>
 /// <param name="Random">The server's source of chance: the only place rolls, draws and random targets come from.</param>
@@ -111,16 +126,33 @@ public enum MatchRuleOutcome
 /// in the match but get no more turns. When nobody still playing is left to take a turn the engine ends the match with
 /// <see cref="IMatchRules.EndMatch"/>.
 /// </param>
+/// <param name="AwaitsReplyFrom">
+/// For <c>Accepted</c>: the turn doesn't end yet but waits for this other player's reply (STORY-054, DEC-058), such as
+/// a defense against an attack. Until they reply, or a full turn's time runs out, only they can act; their accepted reply
+/// says whether the turn ends.
+/// </param>
+/// <param name="SkipsNextTurnOf">
+/// For <c>Accepted</c>: this player still playing skips their next turn, once, without it counting as missed (DEC-058).
+/// </param>
 public sealed record MatchRuleDecision(
     MatchRuleOutcome Outcome,
     JsonElement? State = null,
     string? Reason = null,
     bool EndsTurn = false,
     IReadOnlyList<MatchStanding>? Standings = null,
-    bool Finished = false)
+    bool Finished = false,
+    Guid? AwaitsReplyFrom = null,
+    Guid? SkipsNextTurnOf = null)
 {
-    public static MatchRuleDecision Accept(JsonElement state, bool endsTurn = false, bool finished = false) =>
-        new(MatchRuleOutcome.Accepted, state, EndsTurn: endsTurn || finished, Finished: finished);
+    public static MatchRuleDecision Accept(
+        JsonElement state, bool endsTurn = false, bool finished = false, Guid? awaitsReplyFrom = null, Guid? skipsNextTurnOf = null) =>
+        new(
+            MatchRuleOutcome.Accepted,
+            state,
+            EndsTurn: endsTurn || finished,
+            Finished: finished,
+            AwaitsReplyFrom: awaitsReplyFrom,
+            SkipsNextTurnOf: skipsNextTurnOf);
 
     /// <summary>The command ended the match with <paramref name="standings"/> for the players still playing.</summary>
     public static MatchRuleDecision Finish(JsonElement state, IReadOnlyList<MatchStanding> standings) =>

@@ -68,6 +68,13 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
                 "CK_GameRooms_CurrentTurn",
                 $"(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> '{nameof(RoomStatus.Active)}') AND (\"TurnEndsAt\" IS NULL) = (\"CurrentPlayerId\" IS NULL)");
 
+            // Only an active match's turn waits for a reply, from someone other than the current player (STORY-054,
+            // DEC-058); an active match always has a current player, so the comparison is never NULL there.
+            table.HasCheckConstraint(
+                "CK_GameRooms_ReplyingPlayer",
+                $"\"ReplyingPlayerId\" IS NULL OR (\"Status\" = '{nameof(RoomStatus.Active)}' AND \"CurrentPlayerId\" IS NOT NULL "
+                + "AND \"ReplyingPlayerId\" <> \"CurrentPlayerId\")");
+
             // Only a started match has a time limit, of some time and at most the maximum match duration (STORY-041, ENG-011).
             table.HasCheckConstraint(
                 "CK_GameRooms_MatchEndsAt",
@@ -119,6 +126,9 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
             table.HasCheckConstraint(
                 "CK_RoomMembers_Seat", $"\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND {GameDefinition.MaxRoomPlayers}");
             table.HasCheckConstraint("CK_RoomMembers_MissedTurns", "\"MissedTurns\" >= 0");
+
+            // Only a seated match player can be due to skip a turn (STORY-054, DEC-058).
+            table.HasCheckConstraint("CK_RoomMembers_SkipsNextTurn", "NOT \"SkipsNextTurn\" OR \"Seat\" IS NOT NULL");
 
             // Only a seated match player can finish the game (STORY-041).
             table.HasCheckConstraint("CK_RoomMembers_FinishedAt", "\"FinishedAt\" IS NULL OR \"Seat\" IS NOT NULL");

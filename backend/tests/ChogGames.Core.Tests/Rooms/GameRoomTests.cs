@@ -845,7 +845,7 @@ public class GameRoomTests
 
         Assert.Throws<InvalidOperationException>(() => room.TimeOutTurn(null, 3, deadline.AddTicks(-1)));
 
-        Assert.False(room.TimeOutTurn(null, 3, deadline));
+        Assert.Null(room.TimeOutTurn(null, 3, deadline));
 
         Assert.Equal((version + 1, 2, bob.Id, deadline + Turn), (room.Version, room.TurnNumber, room.CurrentPlayerId, room.TurnEndsAt));
         Assert.Null(room.State);
@@ -875,7 +875,7 @@ public class GameRoomTests
         for (var missed = 1; missed <= 3; missed++)
         {
             at = room.TurnEndsAt!.Value;
-            var forfeited = room.TimeOutTurn(null, 3, at);
+            var forfeited = room.TimeOutTurn(null, 3, at) == alice.Id;
             Assert.Equal(missed == 3, forfeited);
             Assert.Equal(missed, room.Members.Single(m => m.PlayerId == alice.Id).MissedTurns);
             if (!forfeited)
@@ -912,7 +912,7 @@ public class GameRoomTests
         var room = Started(alice, bob);
         var deadline = room.TurnEndsAt!.Value;
 
-        Assert.True(room.TimeOutTurn(null, 1, deadline));
+        Assert.NotNull(room.TimeOutTurn(null, 1, deadline));
 
         Assert.Equal((RoomStatus.Abandoned, deadline, (Guid?)null, (DateTimeOffset?)null), (room.Status, room.EndedAt, room.CurrentPlayerId, room.TurnEndsAt));
         Assert.False(room.IsTurnOverdue(deadline.AddYears(1)));
@@ -1270,5 +1270,149 @@ public class GameRoomTests
 
         Assert.Equal(end, room.MatchEndsAt);
         Assert.True(room.IsDueToEnd(StartedAt.AddMinutes(30)));
+    }
+
+    /// <summary>STORY-054, DEC-058: alice's command waits for <paramref name="replier"/>'s reply.</summary>
+    private static void AwaitReply(GameRoom room, Player current, Player replier, DateTimeOffset at) =>
+        room.ApplyCommand(current.Id, Command(room), """{"waiting":true}""", endsTurn: false, at, awaitsReplyFrom: replier.Id);
+
+    [Fact]
+    public void A_command_can_wait_for_another_players_reply_and_only_they_act_until_it_comes()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+        var at = StartedAt.AddSeconds(5);
+
+        AwaitReply(room, alice, carol, at);
+
+        Assert.Equal((alice.Id, carol.Id, at + Turn, 1), (room.CurrentPlayerId, room.ReplyingPlayerId, room.TurnEndsAt, room.TurnNumber));
+        Assert.Equal(MatchCommandProblem.NotYourTurn, room.CheckCommand(alice.Id, Command(room), at));
+        Assert.Equal(MatchCommandProblem.NotYourTurn, room.CheckCommand(bob.Id, Command(room), at));
+        Assert.Null(room.CheckCommand(carol.Id, Command(room), at));
+
+        // The reply ends alice's turn; the next is bob's, after alice, not after carol.
+        Act(room, carol, at.AddSeconds(1));
+        Assert.Equal((bob.Id, (Guid?)null, 2), (room.CurrentPlayerId, room.ReplyingPlayerId, room.TurnNumber));
+    }
+
+    [Fact]
+    public void Only_the_current_player_can_wait_for_a_reply_from_another_player_still_playing()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+        room.Leave(carol.Id, StartedAt);
+        var version = room.Version;
+
+        Assert.Throws<InvalidOperationException>(() => AwaitReply(room, alice, alice, StartedAt));
+        Assert.Throws<InvalidOperationException>(() => AwaitReply(room, alice, carol, StartedAt));
+        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(
+            alice.Id, Command(room), "{}", endsTurn: true, StartedAt, awaitsReplyFrom: bob.Id));
+        Assert.Equal((version, (Guid?)null), (room.Version, room.ReplyingPlayerId));
+
+        AwaitReply(room, alice, bob, StartedAt);
+        Assert.Throws<InvalidOperationException>(() => AwaitReply(room, bob, alice, StartedAt));
+        Assert.Throws<InvalidOperationException>(() => room.ApplyCommand(
+            bob.Id, Command(room), "{}", endsTurn: true, StartedAt, finished: true));
+        Assert.Throws<InvalidOperationException>(() => room.ApplyAbility(bob.Id, Command(room), "boost", "{}", StartedAt));
+    }
+
+    [Fact]
+    public void A_skipped_turn_is_passed_over_once_without_counting_as_missed()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+
+        room.ApplyCommand(alice.Id, Command(room), "{}", endsTurn: true, StartedAt, skipsNextTurnOf: bob.Id);
+        Assert.Equal((carol.Id, 2), (room.CurrentPlayerId, room.TurnNumber));
+        Assert.False(room.Members.Single(m => m.PlayerId == bob.Id).SkipsNextTurn);
+        Assert.Equal(0, room.Members.Single(m => m.PlayerId == bob.Id).MissedTurns);
+
+        Act(room, carol, StartedAt);
+        Act(room, alice, StartedAt);
+        Assert.Equal(bob.Id, room.CurrentPlayerId);
+    }
+
+    [Fact]
+    public void With_two_players_a_skip_gives_the_other_player_the_next_turn_too()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+
+        room.ApplyCommand(alice.Id, Command(room), "{}", endsTurn: false, StartedAt, skipsNextTurnOf: bob.Id);
+        Assert.True(room.Members.Single(m => m.PlayerId == bob.Id).SkipsNextTurn);
+        Act(room, alice, StartedAt);
+
+        Assert.Equal((alice.Id, 2), (room.CurrentPlayerId, room.TurnNumber));
+        Assert.False(room.Members.Single(m => m.PlayerId == bob.Id).SkipsNextTurn);
+        Act(room, alice, StartedAt);
+        Assert.Equal(bob.Id, room.CurrentPlayerId);
+    }
+
+    [Fact]
+    public void A_reply_that_runs_out_counts_a_missed_turn_for_the_replier_and_ends_the_current_turn()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+        AwaitReply(room, alice, carol, StartedAt);
+        var deadline = room.TurnEndsAt!.Value;
+
+        Assert.Null(room.TimeOutTurn("""{"landed":true}""", 3, deadline, skipsNextTurnOf: carol.Id));
+
+        Assert.Equal((bob.Id, (Guid?)null, """{"landed":true}"""), (room.CurrentPlayerId, room.ReplyingPlayerId, room.State));
+        Assert.Equal((0, 1), (room.Members.Single(m => m.PlayerId == alice.Id).MissedTurns, room.Members.Single(m => m.PlayerId == carol.Id).MissedTurns));
+        Assert.True(room.Members.Single(m => m.PlayerId == carol.Id).SkipsNextTurn);
+
+        // Only a reply's default can make someone skip a turn.
+        Assert.Throws<InvalidOperationException>(() => room.TimeOutTurn(null, 3, room.TurnEndsAt!.Value, skipsNextTurnOf: alice.Id));
+    }
+
+    [Fact]
+    public void A_replier_who_misses_too_many_turns_forfeits_and_the_match_moves_on()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var room = Started(alice, bob, carol);
+        AwaitReply(room, alice, carol, StartedAt);
+
+        Assert.Equal(carol.Id, room.TimeOutTurn(null, 1, room.TurnEndsAt!.Value));
+
+        Assert.True(room.HasLeft(carol.Id));
+        Assert.Equal((RoomStatus.Active, bob.Id, (Guid?)null), (room.Status, room.CurrentPlayerId, room.ReplyingPlayerId));
+    }
+
+    [Fact]
+    public void Leaving_while_a_reply_is_awaited_ends_the_turn_waiting_for_it()
+    {
+        var (alice, bob, carol) = (Choosing("classic"), Choosing("mint"), Choosing("gold"));
+        var replierLeaves = Started(alice, bob, carol);
+        AwaitReply(replierLeaves, alice, carol, StartedAt);
+        replierLeaves.Leave(carol.Id, StartedAt.AddSeconds(1));
+        Assert.Equal((bob.Id, (Guid?)null), (replierLeaves.CurrentPlayerId, replierLeaves.ReplyingPlayerId));
+
+        var currentLeaves = Started(alice, bob, carol);
+        AwaitReply(currentLeaves, alice, carol, StartedAt);
+        currentLeaves.Leave(alice.Id, StartedAt.AddSeconds(1));
+        Assert.Equal((bob.Id, (Guid?)null), (currentLeaves.CurrentPlayerId, currentLeaves.ReplyingPlayerId));
+
+        var abandoned = Started(alice, bob);
+        AwaitReply(abandoned, alice, bob, StartedAt);
+        abandoned.Leave(bob.Id, StartedAt.AddSeconds(1));
+        Assert.Equal((RoomStatus.Abandoned, (Guid?)null), (abandoned.Status, abandoned.ReplyingPlayerId));
+    }
+
+    [Fact]
+    public void A_reply_timeout_can_finish_the_match()
+    {
+        var (alice, bob) = (Choosing("classic"), Choosing("mint"));
+        var room = Started(alice, bob);
+        Assert.Throws<InvalidOperationException>(() => room.FinishOnReplyTimeout("{}", InSeatOrder(room), room.TurnEndsAt!.Value));
+
+        AwaitReply(room, alice, bob, StartedAt);
+        var deadline = room.TurnEndsAt!.Value;
+        Assert.Throws<InvalidOperationException>(() => room.FinishOnReplyTimeout("{}", InSeatOrder(room), deadline.AddTicks(-1)));
+
+        room.FinishOnReplyTimeout("""{"winner":2}""", InSeatOrder(room), deadline);
+
+        Assert.Equal((RoomStatus.Completed, """{"winner":2}""", (Guid?)null), (room.Status, room.State, room.ReplyingPlayerId));
+        Assert.All(room.Members, m => Assert.Equal(0, m.MissedTurns));
     }
 }

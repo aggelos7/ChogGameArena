@@ -66,7 +66,8 @@ public sealed record MatchCommandResult(
 /// for one match are processed one at a time: a retried action id returns its first result, a command built on an older
 /// version is refused, and of several commands built on the same version exactly one can succeed. The game's
 /// <see cref="IMatchRules"/> decide what an accepted command does; the player is always the session's. Only the current
-/// player acts, before their turn runs out (STORY-025, DEC-027). A command that finishes the match stores the standings
+/// player acts, before their turn runs out (STORY-025, DEC-027), or the player the turn waits for while a reply window is
+/// open (STORY-054, DEC-058). A command that finishes the match stores the standings
 /// and updates the players' stats in the same transaction, so results are recorded exactly once (STORY-028, DEC-030).
 /// The rules draw every outcome from the server's <see cref="IRandomSource"/>, never from the payload (STORY-029, DEC-031).
 /// <c>USE_ABILITY</c> goes to the shared <see cref="AbilityEngine"/> instead of the rules: under the same lock and checks,
@@ -75,6 +76,9 @@ public sealed record MatchCommandResult(
 public sealed class MatchCommandService(
     ChogGamesDbContext db, IEnumerable<IMatchRules> rules, AbilityEngine abilities, IRandomSource random, TimeProvider timeProvider)
 {
+    /// <summary>Why an ability can't be used while the turn waits for another player's reply (DEC-058).</summary>
+    public const string ReplyPending = "reply_pending";
+
     private readonly Dictionary<string, IMatchRules> _rulesByGame = rules.ToDictionary(r => r.GameType, StringComparer.Ordinal);
 
     public async Task<MatchCommandResult> ExecuteAsync(Player player, RoomCode code, MatchCommand command, CancellationToken cancellationToken)
@@ -146,7 +150,15 @@ public sealed class MatchCommandService(
         }
 
         var action = room.ApplyCommand(
-            player.Id, command, newState.GetRawText(), decision.EndsTurn, now, decision.Standings, decision.Finished);
+            player.Id,
+            command,
+            newState.GetRawText(),
+            decision.EndsTurn,
+            now,
+            decision.Standings,
+            decision.Finished,
+            decision.AwaitsReplyFrom,
+            decision.SkipsNextTurnOf);
         db.MatchActions.Add(action);
         if (room.Status == RoomStatus.Completed)
         {
@@ -171,6 +183,12 @@ public sealed class MatchCommandService(
         if (abilities.CatalogFor(room.GameType) is null)
         {
             return new MatchCommandResult(MatchCommandOutcome.UnknownCommand);
+        }
+
+        // A turn waiting for another player's reply goes no further until it comes (DEC-058).
+        if (room.ReplyingPlayerId is not null)
+        {
+            return new MatchCommandResult(MatchCommandOutcome.Rejected, Reason: ReplyPending);
         }
 
         var result = abilities.Use(new AbilityRequest(room, player.Id, command.Payload, state, random));
