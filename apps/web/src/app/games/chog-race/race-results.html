@@ -24,6 +24,12 @@
             }
           </p>
           <dl class="stats">
+            @if (result.degenScore !== undefined) {
+              <div class="degen">
+                <dt>Degen Score</dt>
+                <dd data-stat="degen-score">{{ result.degenScore }}<span class="out-of">/100</span></dd>
+              </div>
+            }
             <div>
               <dt>Cards played</dt>
               <dd data-stat="cards-played">{{ result.cardsPlayed }}</dd>
@@ -43,5 +49,10 @@
       </li>
     }
   </ol>
-  <p class="hint">Ranked by how far each pawn got, then by who reached that tile first.</p>
+  <p class="hint">
+    Ranked by how far each pawn got, then by who reached that tile first.
+    @if (scored()) {
+      The Degen Score counts the attacks each player landed: it doesn’t count towards the ranking.
+    }
+  </p>
 </section>

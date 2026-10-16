@@ -425,6 +425,12 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     await checkResults(twoPlayer.room, duo, 'the two-player match');
     await checkResults(racePlayed.room, racers, 'the Chog Race match');
     check(racePlayed.room.members.every((m) => m.result && Number.isInteger(m.result.tile)), 'every Chog Race player gets a result');
+    check(
+      racePlayed.room.members.every(
+        (m) => m.result.degenScore === Math.min(100, 10 * m.result.attacksLanded) && m.result.degenScoreVersion === 1,
+      ),
+      'every Chog Race result carries its Degen Score, 10 per attack landed up to 100 (STORY-066)',
+    );
     for (const guest of racers) {
       const profile = await guest.get('/api/profile');
       check(profile.json.gamesPlayed >= 2, `${guest.name}'s profile must count both games`);

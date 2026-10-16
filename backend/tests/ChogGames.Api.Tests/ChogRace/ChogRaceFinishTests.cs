@@ -219,9 +219,9 @@ public sealed class ChogRaceFinishTests(MigratedPostgresDatabase database) : ICl
             Assert.False(seen.GetProperty("state").TryGetProperty("phase", out _));
             Assert.Equal(
                 [
-                    Sorted("""{"tile":13,"finished":false,"tilesLeft":14,"cardsPlayed":1,"attacksLanded":1,"attacksBlocked":0}"""),
-                    Sorted("""{"tile":19,"finished":false,"tilesLeft":8,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0}"""),
-                    Sorted("""{"tile":13,"finished":false,"tilesLeft":14,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":1}"""),
+                    Sorted("""{"tile":13,"finished":false,"tilesLeft":14,"cardsPlayed":1,"attacksLanded":1,"attacksBlocked":0,"degenScore":10,"degenScoreVersion":1}"""),
+                    Sorted("""{"tile":19,"finished":false,"tilesLeft":8,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0,"degenScore":0,"degenScoreVersion":1}"""),
+                    Sorted("""{"tile":13,"finished":false,"tilesLeft":14,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":1,"degenScore":0,"degenScoreVersion":1}"""),
                 ],
                 Results(seen));
         }
@@ -254,8 +254,8 @@ public sealed class ChogRaceFinishTests(MigratedPostgresDatabase database) : ICl
             Assert.Equal("Finish", seen.GetProperty("state").GetProperty("ended").GetString());
             Assert.Equal(
                 [
-                    Sorted("""{"tile":27,"finished":true,"tilesLeft":0,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0}"""),
-                    Sorted("""{"tile":21,"finished":false,"tilesLeft":6,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0}"""),
+                    Sorted("""{"tile":27,"finished":true,"tilesLeft":0,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0,"degenScore":0,"degenScoreVersion":1}"""),
+                    Sorted("""{"tile":21,"finished":false,"tilesLeft":6,"cardsPlayed":0,"attacksLanded":0,"attacksBlocked":0,"degenScore":0,"degenScoreVersion":1}"""),
                 ],
                 Results(seen));
         }

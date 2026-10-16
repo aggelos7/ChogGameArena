@@ -865,10 +865,10 @@
 
 #### STORY-066 — Chog Race Degen Score
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E08
-- **Implementation:** Add a Degen Score to Chog Race results, computed by the server from the attacks the player landed (STORY-056's `attacksLanded`: Rug, Liquidated or Whale not blocked, and Reverse that pushed someone back). Proposed formula, version 1: 10 points per attack landed, at most 100. Like Chog Life's (DEC-046), it is display only and never changes the ranking, and it is stored in the result with its formula version (`degenScore`, `degenScoreVersion`). The Results panel shows it as a tile ("Degen Score n/100") with a note that it doesn't count towards the ranking. Confirm the points and cap with the product owner before coding.
+- **Implementation:** Add a Degen Score to Chog Race results, computed by the server from the attacks the player landed (STORY-056's `attacksLanded`: Rug, Liquidated or Whale not blocked, and Reverse that pushed someone back). Proposed formula, version 1: 10 points per attack landed, at most 100. Like Chog Life's (DEC-046), it is display only and never changes the ranking, and it is stored in the result with its formula version (`degenScore`, `degenScoreVersion`). The Results panel shows it as a tile ("Degen Score n/100") with a note that it doesn't count towards the ranking. Points and cap confirmed by the product owner (DEC-062).
 - **Acceptance criteria:**
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** each player still playing gets a Degen Score from their attacks landed, capped at 100 and stored with its formula version; the ranking is unchanged; every player sees the same scores live and after a reload.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: blocked attacks, leavers and abandoned matches earn nothing, and no client can set a score.
