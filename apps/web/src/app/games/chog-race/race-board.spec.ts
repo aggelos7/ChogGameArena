@@ -37,6 +37,25 @@ describe('Chog Race board model', () => {
       lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, effect: 'Card', draw: 'Drawn', card: 'Hodl', reshuffled: true },
     };
     expect(toRaceBoard(drawn)).toBe(drawn);
+    const played = {
+      ...RACE_BOARD,
+      playable: ['Pump', 'Whale'],
+      cardValues: { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1 },
+      lastMove: {
+        seat: 1,
+        roll: 1,
+        from: 0,
+        landed: 1,
+        to: 1,
+        play: { card: 'Fomo', steps: -3, from: 8, landed: 5, to: 5, effect: 'Card', draw: 'Drawn', drawn: 'Rug', reshuffled: true },
+      },
+    };
+    expect(toRaceBoard(played)).toBe(played);
+    const pushed = {
+      ...RACE_BOARD,
+      lastMove: { seat: 1, roll: 1, from: 0, landed: 1, to: 1, play: { card: 'Reverse', pushed: [{ seat: 2, from: 5, landed: 4, to: 6, effect: 'Boost' }] } },
+    };
+    expect(toRaceBoard(pushed)).toBe(pushed);
     const older = { rulesVersion: 1, tiles: RACE_TILES, pawns: [{ seat: 1, tile: 0 }] };
     expect(toRaceBoard(older)).toBe(older);
   });
@@ -70,6 +89,21 @@ describe('Chog Race board model', () => {
       { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, effect: 'Card', draw: 'Lost' } },
       { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, effect: 'Card', card: 'toString' } },
       { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, reshuffled: 'yes' } },
+      { rulesVersion: 1, tiles, pawns: [], playable: ['Joker'] },
+      { rulesVersion: 1, tiles, pawns: [], cardValues: { pump: 3 } },
+      ...[
+        'Pump',
+        { card: 'Joker' },
+        { card: 'Pump', steps: 1.5 },
+        { card: 'Pump', to: 28 },
+        { card: 'Pump', effect: 'Branch' },
+        { card: 'Pump', drawn: 'Joker' },
+        { card: 'Whale', target: -1 },
+        { card: 'Reverse', pushed: [{ seat: 2, from: 5, landed: 4, to: 40 }] },
+        { card: 'Reverse', pushed: [{ seat: 2, from: 5, to: 4 }] },
+        { card: 'Reverse', pushed: [{ seat: 2, from: 5, landed: 4, to: 6, effect: 'Card' }] },
+        { card: 'Reverse', pushed: 'all' },
+      ].map((play) => ({ rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 1, from: 0, landed: 1, to: 1, play } })),
     ]) {
       expect(toRaceBoard(state)).toBeNull();
     }
@@ -296,8 +330,27 @@ describe('Chog Race board cards (STORY-052)', () => {
     render({ ...RACE_BOARD, hand: ['Pump', 'Hodl', 'Fomo'] });
 
     expect(text('[data-hand] h3')).toBe('Your cards 3/3');
-    expect(all('[data-card]')).toEqual(['Pump', 'HODL', 'FOMO']);
+    expect(all('[data-card] .card-name')).toEqual(['Pump', 'HODL', 'FOMO']);
     expect(page.querySelector('[data-hand] .empty')).toBeNull();
+  });
+
+  it('says what each card in your hand does, with the match’s values', () => {
+    const cardValues = { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1 };
+    render({ ...RACE_BOARD, cardValues, hand: ['Pump', 'Fomo', 'Airdrop', 'Whale', 'Reverse', 'Rug', 'Hodl', 'Liquidated'], maxHand: 8 });
+
+    expect(all('[data-card] .card-text')).toEqual([
+      'Move 3 forward.',
+      '50% chance to move 5 forward, otherwise 3 back.',
+      'Roll again.',
+      'Swap places with an opponent you pick.',
+      'Every opponent moves 1 back.',
+      'Send an opponent back. Can’t be played yet.',
+      'Block an attack on you. Can’t be played yet.',
+      'An opponent skips their next turn. Can’t be played yet.',
+    ]);
+
+    render({ ...RACE_BOARD, hand: ['Pump', 'Reverse'] });
+    expect(all('[data-card] .card-text')).toEqual(['Move forward.', 'Every opponent moves back.']);
   });
 
   it('says how to get a card while your hand is empty, and shows no hand to someone not playing', () => {
@@ -340,6 +393,127 @@ describe('Chog Race board cards (STORY-052)', () => {
     expect(drew({ seat: 1, ...card, draw: 'HandFull' })).toBe('You rolled 2, landed on the Card tile 2, but your hand is full.');
     expect(drew({ seat: 2, ...card, draw: 'HandFull' })).toBe('Bob rolled 2, landed on the Card tile 2, but their hand is full.');
     expect(drew({ seat: 2, ...card, draw: 'NoCards' })).toBe('Bob rolled 2, landed on the Card tile 2, but no card was left to draw.');
+    expect(drew({ seat: 1, roll: 2, from: 7, landed: 9, to: 7, effect: 'Setback', draw: 'Drawn', card: 'Rug' })).toBe(
+      'You rolled 2, landed on the Setback at tile 9, fell back to tile 7 and drew Rug.',
+    );
+    expect(drew({ seat: 2, roll: 2, from: 18, landed: 20, to: 22, effect: 'Boost', draw: 'HandFull' })).toBe(
+      'Bob rolled 2, landed on the Boost at tile 20, jumped to tile 22, but their hand is full.',
+    );
+  });
+});
+
+describe('Chog Race board card plays (STORY-053)', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+  let plays: unknown[];
+
+  const VALUES = { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1 };
+  const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2), member('Carol', 3)];
+  const pawns = [
+    { seat: 1, tile: 5, cards: 2 },
+    { seat: 2, tile: 9, cards: 0 },
+    { seat: 3, tile: 12, cards: 1 },
+  ];
+
+  function render(board: Partial<RaceBoard>, members: RoomMember[] = you, rolling = false): void {
+    fixture.componentRef.setInput('board', { ...RACE_BOARD, pawns, cardValues: VALUES, ...board });
+    fixture.componentRef.setInput('members', members);
+    fixture.componentRef.setInput('rolling', rolling);
+    fixture.detectChanges();
+  }
+
+  const buttons = () => Array.from(page.querySelectorAll<HTMLButtonElement>('[data-play]'));
+  const labels = () => buttons().map((button) => button.textContent?.trim());
+  const played = (lastMove: RaceBoard['lastMove'], members: RoomMember[] = you, winner?: number) => {
+    render({ lastMove, winner }, members);
+    return page.querySelector('[data-last-play]')?.textContent?.trim();
+  };
+  const roll = { roll: 1, from: 4, landed: 5, to: 5 };
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+    plays = [];
+    fixture.componentInstance.playCard.subscribe((play) => plays.push(play));
+  });
+
+  it('offers each card you can play in your Play phase, saying what it does, with End turn', () => {
+    render({ phase: 'Play', hand: ['Pump', 'Fomo', 'Rug'], playable: ['Pump', 'Fomo', 'Airdrop', 'Reverse'] });
+
+    expect(labels()).toEqual(['Pump: 3 forward', 'FOMO: 5 forward or 3 back', 'Airdrop: roll again', 'Reverse: others 1 back']);
+    buttons()[1].click();
+    expect(plays).toEqual([{ card: 'Fomo', target: undefined }]);
+    expect(page.querySelector('[data-end-turn]')).not.toBeNull();
+  });
+
+  it('offers Whale once for each opponent, naming them and their tile', () => {
+    render({ phase: 'Play', hand: ['Whale'], playable: ['Whale'] });
+
+    expect(labels()).toEqual(['Whale: swap with Bob (tile 9)', 'Whale: swap with Carol (tile 12)']);
+    buttons()[1].click();
+    expect(plays).toEqual([{ card: 'Whale', target: 3 }]);
+  });
+
+  it('offers no card outside your Play phase or while a command is on its way', () => {
+    render({ phase: 'Move', playable: ['Pump'] });
+    expect(buttons()).toEqual([]);
+
+    render({ phase: 'Play', playable: ['Pump'] }, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+    expect(buttons()).toEqual([]);
+
+    render({ phase: 'Play', playable: [] });
+    expect(buttons()).toEqual([]);
+    expect(page.querySelector('[data-plays]')).toBeNull();
+
+    render({ phase: 'Play', playable: ['Pump'] }, you, true);
+    expect(buttons().map((button) => button.disabled)).toEqual([true]);
+  });
+
+  it('says what a card moving its player did, after the roll', () => {
+    expect(played({ seat: 2, ...roll, play: { card: 'Pump', steps: 3, from: 5, landed: 8, to: 8 } })).toBe(
+      'Bob played Pump (3 forward) and moved to tile 8.',
+    );
+    expect(played({ seat: 1, ...roll, play: { card: 'Fomo', steps: -3, from: 10, landed: 7, to: 7, effect: 'Card', draw: 'Drawn', drawn: 'Rug' } })).toBe(
+      'You played FOMO (3 back), landed on the Card tile 7 and drew Rug.',
+    );
+    expect(played({ seat: 2, ...roll, play: { card: 'Airdrop', roll: 3, from: 6, landed: 9, to: 7, effect: 'Setback' } })).toBe(
+      'Bob played Airdrop and rolled 3, landed on the Setback at tile 9 and fell back to tile 7.',
+    );
+    expect(played({ seat: 1, ...roll, play: { card: 'Pump', steps: 3, from: 6, landed: 9, to: 7, effect: 'Setback', draw: 'Drawn', drawn: 'Hodl' } })).toBe(
+      'You played Pump (3 forward), landed on the Setback at tile 9, fell back to tile 7 and drew HODL.',
+    );
+    expect(played({ seat: 2, ...roll, play: { card: 'Pump', steps: 3, from: 25, landed: 27, to: 27, effect: 'Finish' } }, you, 2)).toBe(
+      'Bob played Pump (3 forward), reached the finish and won the race!',
+    );
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('Bob rolled 1 and moved to tile 5.');
+  });
+
+  it('says who Whale swapped with and who Reverse pushed back', () => {
+    expect(played({ seat: 2, ...roll, play: { card: 'Whale', from: 5, to: 12, target: 1 } })).toBe(
+      'Bob played Whale and swapped places with you (now on tile 5) and moved to tile 12.',
+    );
+    expect(played({ seat: 1, ...roll, play: { card: 'Whale', from: 5, to: 11, effect: 'Card', draw: 'Drawn', drawn: 'Rug', target: 2 } })).toBe(
+      'You played Whale and swapped places with Bob (now on tile 5), landed on the Card tile 11 and drew Rug.',
+    );
+    expect(
+      played({
+        seat: 1,
+        ...roll,
+        play: {
+          card: 'Reverse',
+          pushed: [
+            { seat: 2, from: 9, landed: 8, to: 8 },
+            { seat: 3, from: 24, landed: 23, to: 21, effect: 'Setback' },
+          ],
+        },
+      }),
+    ).toBe('You played Reverse: Bob back to tile 8, Carol back to tile 23, then set back to tile 21.');
+    expect(played({ seat: 2, ...roll, play: { card: 'Reverse', pushed: [{ seat: 1, from: 5, landed: 4, to: 6, effect: 'Boost' }] } })).toBe(
+      'Bob played Reverse: you back to tile 4, then boosted to tile 6.',
+    );
+    expect(played({ seat: 3, ...roll, play: { card: 'Reverse', pushed: [] } })).toBe('Carol played Reverse, but nobody could move back.');
+    expect(played({ seat: 3, ...roll })).toBeUndefined();
   });
 });
 

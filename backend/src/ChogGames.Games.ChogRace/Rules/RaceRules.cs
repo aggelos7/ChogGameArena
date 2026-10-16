@@ -5,7 +5,8 @@ namespace ChogGames.Games.ChogRace.Rules;
 
 /// <summary>
 /// A version of the Chog Race rules: the track, how far a pawn moves in a turn, the match's time cap (STORY-050,
-/// RACE-001, RACE-002, RACE-009, DEC-054), the deck and the hand limit (STORY-052, RACE-003, DEC-056). Like Chog Life's rules (DEC-037) it is versioned code in the game module,
+/// RACE-001, RACE-002, RACE-009, DEC-054), the deck and the hand limit (STORY-052, RACE-003, DEC-056) and how far cards
+/// move pawns (STORY-053, RACE-005, DEC-057). Like Chog Life's rules (DEC-037) it is versioned code in the game module,
 /// checked when it is built, so a track whose finish can't be reached stops the API at startup instead of trapping
 /// pawns during a match. Nothing here touches a wallet or the chain (DEC-010).
 /// </summary>
@@ -23,11 +24,21 @@ public sealed class RaceRules
     /// <summary>The most cards any rules version may let a player hold.</summary>
     public const int HandLimit = 5;
 
+    /// <summary>The furthest any card may move a pawn, either way.</summary>
+    public const int CardMoveLimit = 6;
+
     /// <summary>The hard limit on any match's duration (ENG-011).</summary>
     public static readonly TimeSpan MaxTimeCap = GameRoom.MaxMatchDuration;
 
     private RaceRules(
-        int version, IReadOnlyList<RaceTile> tiles, int minMove, int maxMove, TimeSpan timeCap, IReadOnlyList<RaceCard> deck, int maxHand)
+        int version,
+        IReadOnlyList<RaceTile> tiles,
+        int minMove,
+        int maxMove,
+        TimeSpan timeCap,
+        IReadOnlyList<RaceCard> deck,
+        int maxHand,
+        RaceCardValues cardValues)
     {
         Version = version;
         Tiles = tiles;
@@ -36,6 +47,7 @@ public sealed class RaceRules
         TimeCap = timeCap;
         Deck = deck;
         MaxHand = maxHand;
+        CardValues = cardValues;
     }
 
     /// <summary>The game these rules are for.</summary>
@@ -66,14 +78,18 @@ public sealed class RaceRules
     /// <summary>The most cards a player holds; a player with a full hand draws nothing (RACE-003, DEC-056).</summary>
     public int MaxHand { get; }
 
+    /// <summary>How far Pump, FOMO and Reverse move pawns (RACE-005, DEC-057).</summary>
+    public RaceCardValues CardValues { get; }
+
     /// <summary>
     /// Rules with these values, or <see cref="ArgumentException"/> naming the first problem: moves of 1 to
     /// <see cref="MoveLimit"/> spaces, a time cap of at most <see cref="MaxTimeCap"/>, a deck of known cards, a hand of 1 to
-    /// <see cref="HandLimit"/> cards, and a track of <see cref="MinTiles"/>
+    /// <see cref="HandLimit"/> cards, card moves of 1 to <see cref="CardMoveLimit"/> tiles with a FOMO chance of 1–99%, and
+    /// a track of <see cref="MinTiles"/>
     /// to <see cref="MaxTiles"/> tiles in index order, from one start to one finish. A Boost jumps forward and a Setback
     /// back, at most <see cref="MaxJump"/> tiles, to a tile on the track that doesn't jump again. The finish must be
-    /// reachable: a pawn that can stand on a tile must have some sequence of rolls from it to the finish, so no group of
-    /// setbacks can trap it.
+    /// reachable: a pawn that can stand on a tile, after any rolls and cards, must have some sequence of rolls from it to
+    /// the finish, so no group of setbacks can trap it.
     /// </summary>
     public static RaceRules Create(
         int version,
@@ -82,7 +98,8 @@ public sealed class RaceRules
         int maxMove,
         TimeSpan timeCap,
         IEnumerable<RaceCard> deck,
-        int maxHand)
+        int maxHand,
+        RaceCardValues cardValues)
     {
         if (version < 1)
         {
@@ -111,12 +128,41 @@ public sealed class RaceRules
             throw new ArgumentException("The deck needs at least one card, every one of a known kind.", nameof(deck));
         }
 
+        CheckCardValues(cardValues);
         ArgumentNullException.ThrowIfNull(tiles);
         var track = tiles.ToArray();
         CheckTrack(track);
-        CheckFinishReachable(track, minMove, maxMove);
-        return new RaceRules(version, track, minMove, maxMove, timeCap, cards, maxHand);
+        CheckFinishReachable(track, minMove, maxMove, CardMoves(cards, cardValues));
+        return new RaceRules(version, track, minMove, maxMove, timeCap, cards, maxHand, cardValues);
     }
+
+    private static void CheckCardValues(RaceCardValues values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        if (new[] { values.Pump, values.FomoForward, values.FomoBack, values.Reverse }.Any(tiles => tiles is < 1 or > CardMoveLimit))
+        {
+            throw new ArgumentOutOfRangeException(nameof(values), values, $"A card moves a pawn 1 to {CardMoveLimit} tiles.");
+        }
+
+        if (values.FomoForwardChance is < 1 or > 99)
+        {
+            throw new ArgumentOutOfRangeException(nameof(values), values, "FOMO's chance of going forward is 1 to 99%.");
+        }
+    }
+
+    /// <summary>
+    /// The moves, in tiles, the deck's cards can make besides a roll: a player's own card moves them and Reverse pushes
+    /// others back, each following the Boost or Setback landed on (DEC-057). Airdrop rolls again and Whale swaps tiles
+    /// pawns already stand on, so neither adds a place to stand.
+    /// </summary>
+    private static int[] CardMoves(RaceCard[] deck, RaceCardValues values) =>
+        deck.Distinct().SelectMany(card => card switch
+        {
+            RaceCard.Pump => [values.Pump],
+            RaceCard.Fomo => [values.FomoForward, -values.FomoBack],
+            RaceCard.Reverse => [-values.Reverse],
+            _ => Array.Empty<int>(),
+        }).ToArray();
 
     private static void CheckTrack(RaceTile[] track)
     {
@@ -192,22 +238,25 @@ public sealed class RaceRules
     }
 
     /// <summary>
-    /// Every tile a pawn can stand on, from the start with any rolls, must have some sequence of rolls to the finish. A
-    /// roll past the finish stops on it (RACE-008), and landing on a Boost or Setback moves the pawn on to its target.
+    /// Every tile a pawn can stand on, from the start with any rolls and <paramref name="cardMoves"/>, must have some
+    /// sequence of rolls to the finish: a player can always roll, but never has to hold a card. A move past the finish
+    /// stops on it (RACE-008), one back past the start on it, and landing on a Boost or Setback moves the pawn on to its
+    /// target.
     /// </summary>
-    private static void CheckFinishReachable(RaceTile[] track, int minMove, int maxMove)
+    private static void CheckFinishReachable(RaceTile[] track, int minMove, int maxMove, int[] cardMoves)
     {
         var last = track.Length - 1;
+        int Resolve(int to) => track[to].To ?? to;
         IEnumerable<int> Landings(int from) => Enumerable.Range(minMove, maxMove - minMove + 1)
-            .Select(steps => Math.Min(from + steps, last))
-            .Select(to => track[to].To ?? to);
+            .Select(steps => Resolve(Math.Min(from + steps, last)));
+        IEnumerable<int> CardLandings(int from) => cardMoves.Select(steps => Resolve(Math.Clamp(from + steps, 0, last)));
 
         // Forward: where a pawn can stand.
         var standing = new HashSet<int> { 0 };
         var queue = new Queue<int>([0]);
         while (queue.TryDequeue(out var from))
         {
-            foreach (var to in Landings(from).Where(standing.Add))
+            foreach (var to in Landings(from).Concat(CardLandings(from)).Where(standing.Add))
             {
                 queue.Enqueue(to);
             }

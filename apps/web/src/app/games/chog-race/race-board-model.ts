@@ -8,7 +8,10 @@ export interface RaceTile {
   to?: number;
 }
 
-/** Mirrors the server's cards (RACE-005, DEC-056). What they do comes with STORY-053/054. */
+/**
+ * Mirrors the server's cards (RACE-005, DEC-056). Pump, Whale, Airdrop, FOMO and Reverse are played on your turn
+ * (STORY-053, DEC-057); Rug, HODL and Liquidated come with STORY-054.
+ */
 export type RaceCard = 'Pump' | 'Rug' | 'Hodl' | 'Whale' | 'Airdrop' | 'Liquidated' | 'Fomo' | 'Reverse';
 
 /** What landing on a Card tile drew (DEC-056): a card, or nothing because the hand was full or no card was left. */
@@ -38,6 +41,46 @@ export interface RaceMove {
   draw?: RaceDraw;
   card?: RaceCard;
   reshuffled?: boolean;
+  /** The card the player then played, if any (STORY-053, DEC-057). */
+  play?: RacePlay;
+}
+
+/** An opponent Reverse moved back: the tile it `landed` on, and `to` after a Boost or Setback there (the `effect`) sent it on. */
+export interface RacePush {
+  seat: number;
+  from: number;
+  landed: number;
+  to: number;
+  effect?: 'Boost' | 'Setback';
+}
+
+/**
+ * A card played (STORY-053, DEC-057). Pump and FOMO give the signed `steps` moved, Airdrop the `roll`; all three where
+ * the player went as a roll does, with the card `drawn` sent only to them. Whale gives the tiles the player went `from`
+ * and `to` and the `target` seat, which went the other way; Reverse every opponent it `pushed` back.
+ */
+export interface RacePlay {
+  card: RaceCard;
+  steps?: number;
+  roll?: number;
+  from?: number;
+  landed?: number;
+  to?: number;
+  effect?: RaceMove['effect'];
+  draw?: RaceDraw;
+  drawn?: RaceCard;
+  reshuffled?: boolean;
+  target?: number;
+  pushed?: RacePush[];
+}
+
+/** How far the cards move pawns, from the match's rules version (DEC-057). */
+export interface RaceCardValues {
+  pump: number;
+  fomoForward: number;
+  fomoBack: number;
+  fomoForwardChance: number;
+  reverse: number;
 }
 
 /** The current player's phase (DEC-055): rolling, or playing an optional card before ending the turn. */
@@ -60,6 +103,9 @@ export interface RaceBoard {
   discard?: number;
   /** Your own cards, while you're playing; nobody else's are ever sent. */
   hand?: RaceCard[];
+  /** Which of your cards you can play on your turn, each kind once (STORY-053, DEC-057). */
+  playable?: RaceCard[];
+  cardValues?: RaceCardValues;
 }
 
 /** Rolls, moves and resolves the tile landed on, in the Move phase (DEC-055). */
@@ -67,6 +113,33 @@ export const RACE_ROLL = 'ROLL';
 
 /** Ends the turn in the Play phase, without playing a card (DEC-055). */
 export const RACE_END_TURN = 'END_TURN';
+
+/** Plays a card in the Play phase, which ends the turn (DEC-057). */
+export const RACE_PLAY_CARD = 'PLAY_CARD';
+
+/** What a card does, in a short sentence, with the match's values when the server sent them (DEC-057). */
+export function raceCardDescription(card: RaceCard, values?: RaceCardValues): string {
+  switch (card) {
+    case 'Pump':
+      return values ? `Move ${values.pump} forward.` : 'Move forward.';
+    case 'Fomo':
+      return values
+        ? `${values.fomoForwardChance}% chance to move ${values.fomoForward} forward, otherwise ${values.fomoBack} back.`
+        : 'Move forward or back, at random.';
+    case 'Airdrop':
+      return 'Roll again.';
+    case 'Whale':
+      return 'Swap places with an opponent you pick.';
+    case 'Reverse':
+      return values ? `Every opponent moves ${values.reverse} back.` : 'Every opponent moves back.';
+    case 'Rug':
+      return 'Send an opponent back. Can’t be played yet.';
+    case 'Hodl':
+      return 'Block an attack on you. Can’t be played yet.';
+    case 'Liquidated':
+      return 'An opponent skips their next turn. Can’t be played yet.';
+  }
+}
 
 /** Where a tile sits on the drawn track: its grid row and column, from 1. */
 export interface RaceSpot {
@@ -101,6 +174,40 @@ const isCard = (value: unknown): value is RaceCard => typeof value === 'string' 
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const isIndex = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const isOptional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value);
+const EFFECTS: readonly string[] = ['Card', 'Boost', 'Setback', 'Finish'];
+const DRAWS: readonly string[] = ['Drawn', 'HandFull', 'NoCards'];
+
+/** A card play as the server sends it, its tiles on a track of `tiles` tiles. */
+function isPlay(play: unknown, tiles: number): boolean {
+  const isTile = (value: unknown) => isIndex(value) && value < tiles;
+  return (
+    isRecord(play) &&
+    isCard(play['card']) &&
+    isOptional(play['steps'], (steps) => typeof steps === 'number' && Number.isInteger(steps)) &&
+    ['roll', 'target'].every((key) => isOptional(play[key], isIndex)) &&
+    ['from', 'landed', 'to'].every((key) => isOptional(play[key], isTile)) &&
+    isOptional(play['effect'], (effect) => EFFECTS.includes(effect as string)) &&
+    isOptional(play['draw'], (draw) => DRAWS.includes(draw as string)) &&
+    isOptional(play['drawn'], isCard) &&
+    isOptional(play['reshuffled'], (reshuffled) => typeof reshuffled === 'boolean') &&
+    isOptional(
+      play['pushed'],
+      (pushed) =>
+        Array.isArray(pushed) &&
+        pushed.every(
+          (push) =>
+            isRecord(push) &&
+            isIndex(push['seat']) &&
+            ['from', 'landed', 'to'].every((key) => isTile(push[key])) &&
+            isOptional(push['effect'], (effect) => effect === 'Boost' || effect === 'Setback'),
+        ),
+    )
+  );
+}
+
+const isCardValues = (values: unknown): boolean =>
+  isRecord(values) && ['pump', 'fomoForward', 'fomoBack', 'fomoForwardChance', 'reverse'].every((key) => isIndex(values[key]));
 
 /** The board in `state`, or null when the state isn't a Chog Race board this client understands. */
 export function toRaceBoard(state: unknown): RaceBoard | null {
@@ -131,15 +238,17 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       isIndex(move['seat']) &&
       isIndex(move['roll']) &&
       [move['from'], move['landed'], move['to']].every((tile) => isIndex(tile) && tile < tiles.length) &&
-      (move['effect'] === undefined || ['Card', 'Boost', 'Setback', 'Finish'].includes(move['effect'] as string)) &&
-      (move['draw'] === undefined || ['Drawn', 'HandFull', 'NoCards'].includes(move['draw'] as string)) &&
+      (move['effect'] === undefined || EFFECTS.includes(move['effect'] as string)) &&
+      (move['draw'] === undefined || DRAWS.includes(move['draw'] as string)) &&
       (move['card'] === undefined || isCard(move['card'])) &&
-      (move['reshuffled'] === undefined || typeof move['reshuffled'] === 'boolean'));
+      (move['reshuffled'] === undefined || typeof move['reshuffled'] === 'boolean') &&
+      isOptional(move['play'], (play) => isPlay(play, tiles.length)));
   const validPhase = state['phase'] === undefined || state['phase'] === 'Move' || state['phase'] === 'Play';
   const validWinner = state['winner'] === undefined || isIndex(state['winner']);
   const validCards =
     ['maxHand', 'deck', 'discard'].every((count) => state[count] === undefined || isIndex(state[count])) &&
-    (state['hand'] === undefined || (Array.isArray(state['hand']) && state['hand'].every(isCard)));
+    ['hand', 'playable'].every((cards) => isOptional(state[cards], (list) => Array.isArray(list) && list.every(isCard))) &&
+    isOptional(state['cardValues'], isCardValues);
   if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPhase || !validWinner || !validCards) {
     return null;
   }

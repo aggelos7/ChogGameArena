@@ -908,6 +908,29 @@ describe('Room page', () => {
       expect(ended.request.body).toMatchObject({ expectedVersion: 5, type: 'END_TURN', payload: {} });
     });
 
+    it('plays a Chog Race card in the Play phase, naming Whale’s target (STORY-053)', () => {
+      const started: Room = {
+        ...room,
+        version: 5,
+        gameType: 'chog-race',
+        status: 'Active',
+        state: { ...RACE_BOARD, phase: 'Play', hand: ['Pump', 'Whale'], playable: ['Pump', 'Whale'] },
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true })],
+      };
+      load(started);
+
+      element().querySelector<HTMLButtonElement>('[data-play="Whale"]')?.click();
+      const whale = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(whale.request.body).toMatchObject({ expectedVersion: 5, type: 'PLAY_CARD', payload: { card: 'Whale', target: 1 } });
+      whale.flush({ actionId: whale.request.body.actionId, type: 'PLAY_CARD', version: 6, currentVersion: 6, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush(started);
+      fixture.detectChanges();
+
+      element().querySelector<HTMLButtonElement>('[data-play="Pump"]')?.click();
+      const pump = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(pump.request.body.payload).toEqual({ card: 'Pump' });
+    });
+
     it('keeps the final Chog Race board once the game is over', () => {
       load({
         ...room,

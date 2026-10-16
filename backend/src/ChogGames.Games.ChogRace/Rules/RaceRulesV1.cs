@@ -5,7 +5,8 @@ namespace ChogGames.Games.ChogRace.Rules;
 /// <summary>
 /// Chog Race rules version 1 (STORY-050, DEC-054): a 28-tile track with seven Card tiles, three Boosts and three
 /// Setbacks, moves of 1 to 3 spaces and a 20-minute cap (DEC-054), and a deck of three of each card with hands of up to
-/// three (STORY-052, DEC-056). These are proposed defaults to be balanced later
+/// three (STORY-052, DEC-056). Pump moves 3, FOMO 5 forward or 3 back at even odds, and Reverse every opponent 1 back
+/// (STORY-053, DEC-057). These are proposed defaults to be balanced later
 /// (requirements §15); any change means version 2.
 /// </summary>
 public static class RaceRulesV1
@@ -20,7 +21,8 @@ public static class RaceRulesV1
         maxMove: 3,
         timeCap: TimeSpan.FromMinutes(20),
         deck: Enum.GetValues<RaceCard>().SelectMany(card => Enumerable.Repeat(card, 3)),
-        maxHand: 3);
+        maxHand: 3,
+        cardValues: new RaceCardValues(Pump: 3, FomoForward: 5, FomoBack: 3, FomoForwardChance: 50, Reverse: 1));
 
     private static IEnumerable<RaceTile> Track() =>
     [
