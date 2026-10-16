@@ -17,7 +17,8 @@ public sealed record TimedOutTurn(string Code, Guid? ForfeitedPlayerId);
 /// Times out turns that ran out (STORY-025, ENG-007, DEC-027). Each overdue match is handled in its own transaction under
 /// the room's row lock and checked again after locking, so a turn times out exactly once however many sweeps run, and a
 /// command that wins the lock first is not overridden. The game's <see cref="IMatchRules"/> give the safe default; a game
-/// without rules just skips the turn. Deadlines are stored, so turns that ran out while the server was down time out on
+/// without rules just skips the turn. A reply window that runs out (STORY-054, DEC-058) gets the rules' default for the
+/// reply instead, and the player who didn't reply misses a turn. Deadlines are stored, so turns that ran out while the server was down time out on
 /// the first sweep after it starts, and the next turn gets a full timeout from then. The same sweep ends matches whose time
 /// is up or whose players have all finished (STORY-041, ENG-011), with the standings their rules give, and records the
 /// results in the same transaction, once; a match past its time limit is ended rather than having its turn timed out.
@@ -93,26 +94,54 @@ public sealed class TurnTimeoutService(
             return null;
         }
 
-        var playerId = room.CurrentPlayerId!.Value;
         string? state = null;
+        Guid? skips = null;
         if (_rulesByGame.TryGetValue(room.GameType, out var gameRules))
         {
             using var current = room.State is null ? null : JsonDocument.Parse(room.State);
-            if (gameRules.TimeOutTurn(new MatchTurnContext(room, current?.RootElement, random)) is { } safeDefault)
+            var context = new MatchTurnContext(room, current?.RootElement, random);
+            JsonElement? safeDefault;
+            if (room.ReplyingPlayerId is null)
             {
-                if (safeDefault.ValueKind != JsonValueKind.Object)
+                safeDefault = gameRules.TimeOutTurn(context);
+            }
+            else
+            {
+                // The reply window ran out (DEC-058): the rules' default for the reply, which may skip a player's turn.
+                var reply = gameRules.TimeOutReply(context);
+                if (reply is not null && reply.Outcome != MatchRuleOutcome.Accepted)
+                {
+                    throw new InvalidOperationException($"The {room.GameType} rules timed out a reply without accepting a default.");
+                }
+
+                if (reply is { Standings: { } standings, State: { ValueKind: JsonValueKind.Object } final })
+                {
+                    room.FinishOnReplyTimeout(final.GetRawText(), standings, now);
+                    await db.RecordStatsAsync(room, cancellationToken);
+                    await db.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return new TimedOutTurn(room.Code, null);
+                }
+
+                safeDefault = reply?.State;
+                skips = reply?.SkipsNextTurnOf;
+            }
+
+            if (safeDefault is { } json)
+            {
+                if (json.ValueKind != JsonValueKind.Object)
                 {
                     throw new InvalidOperationException($"The {room.GameType} rules timed out a turn without a JSON object state.");
                 }
 
-                state = safeDefault.GetRawText();
+                state = json.GetRawText();
             }
         }
 
-        var forfeited = room.TimeOutTurn(state, options.Value.MaxMissedTurns, now);
+        var forfeited = room.TimeOutTurn(state, options.Value.MaxMissedTurns, now, skips);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new TimedOutTurn(room.Code, forfeited ? playerId : null);
+        return new TimedOutTurn(room.Code, forfeited);
     }
 
     /// <summary>The game's rules rank the players still playing, and the match is completed with its results recorded.</summary>

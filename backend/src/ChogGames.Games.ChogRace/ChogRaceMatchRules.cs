@@ -17,7 +17,10 @@ namespace ChogGames.Games.ChogRace;
 /// player holding a card they can play on their turn then enters the Play phase, for <c>PLAY_CARD</c> or <c>END_TURN</c>;
 /// otherwise the roll ends the turn. Playing one card ends the turn (STORY-053, DEC-057): Pump and FOMO move the player
 /// and Airdrop rolls again, each resolving the tile landed on as a roll does; Whale swaps tiles with an opponent the player
-/// picks and Reverse moves every opponent back, a pushed pawn following the Boost or Setback it lands on. Commands out of phase are rejected. Cards (STORY-052, RACE-003,
+/// picks and Reverse moves every opponent back, a pushed pawn following the Boost or Setback it lands on. Rug moves an
+/// opponent back and Liquidated makes them skip their next turn (STORY-054, DEC-058); a Rug, Liquidated or Whale on a
+/// player holding cards waits for their reply, HODL to block it or <c>PASS</c> to let it land, and lands when the reply
+/// runs out. Commands out of phase are rejected. Cards (STORY-052, RACE-003,
 /// DEC-056) come from a deck the server shuffles at the start; a player with a full hand draws nothing, and an empty
 /// deck is refilled from the discard pile and the hands of players who left. The deck's order and each hand are
 /// hidden: a player sees only their own cards and how many everyone else holds. The first pawn to reach the Finish wins and ends the match, the others ranked by how far they got
@@ -38,8 +41,17 @@ public sealed class ChogRaceMatchRules : IMatchRules
     /// <summary>Ends the Play phase, and with it the turn, without playing a card (DEC-055).</summary>
     public const string EndTurn = "END_TURN";
 
-    /// <summary>Plays a card from the hand in the Play phase, which ends the turn (DEC-057).</summary>
+    /// <summary>
+    /// Plays a card from the hand in the Play phase, which ends the turn (DEC-057), or HODL in reply to an attack
+    /// (DEC-058).
+    /// </summary>
     public const string PlayCard = "PLAY_CARD";
+
+    /// <summary>The target of an attack lets it land instead of blocking it (DEC-058).</summary>
+    public const string Pass = "PASS";
+
+    /// <summary>Why only the attack's target may act while the turn waits for their reply (DEC-058).</summary>
+    private const string ReplyPending = "reply_pending";
 
     private readonly Dictionary<int, RaceRules> _rulesByVersion;
     private readonly RaceRules _current;
@@ -76,7 +88,7 @@ public sealed class ChogRaceMatchRules : IMatchRules
     /// </summary>
     public MatchRuleDecision Apply(MatchCommandContext context)
     {
-        if (context.Type is not (Roll or EndTurn or PlayCard))
+        if (context.Type is not (Roll or EndTurn or PlayCard or Pass))
         {
             return MatchRuleDecision.Unknown;
         }
@@ -89,6 +101,22 @@ public sealed class ChogRaceMatchRules : IMatchRules
             || state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { } pawn)
         {
             return MatchRuleDecision.Reject("game_state_unavailable");
+        }
+
+        // While the turn waits for an attack's target, only they reach the rules (DEC-058); a window the engine closed,
+        // because a player left, is void.
+        var reply = LiveReply(state, context.Match);
+        state = state with { Reply = reply };
+        if (reply is not null)
+        {
+            return seat == reply.Target
+                ? ReplyFor(pawn, reply, state, rules, context)
+                : MatchRuleDecision.Reject(ReplyPending);
+        }
+
+        if (context.Type == Pass)
+        {
+            return MatchRuleDecision.Reject("no_attack");
         }
 
         // The Play phase belongs to the turn it began in; one left by a player who has since gone counts for nobody.
@@ -256,11 +284,13 @@ public sealed class ChogRaceMatchRules : IMatchRules
 
         var playing = PlayingSeats(match);
         RacePawn? target = null;
-        if (card is RaceCard.Whale
+        if (Targets(card)
             && (TargetIn(payload) is not { } seat
                 || seat == pawn.Seat
                 || !playing.Contains(seat)
-                || (target = state.Pawns.FirstOrDefault(p => p.Seat == seat)) is null))
+                || (target = state.Pawns.FirstOrDefault(p => p.Seat == seat)) is null
+                || (card is RaceCard.Rug && target.Tile <= rules.Start.Index)
+                || (card is RaceCard.Liquidated && MemberAt(match, seat).SkipsNextTurn)))
         {
             return MatchRuleDecision.Reject("invalid_target");
         }
@@ -273,35 +303,32 @@ public sealed class ChogRaceMatchRules : IMatchRules
             Pawns = state.Pawns.Select(p => p.Seat == pawn.Seat ? p with { Hand = hand.Count == 0 ? null : hand } : p).ToArray(),
             Discard = [.. state.Discard ?? [], card],
         };
+        // An attack on a player holding cards waits for their reply, which may be HODL (DEC-058).
+        if (target is not null && HandOf(next, target.Seat).Count > 0)
+        {
+            next = next with
+            {
+                Reply = new RaceAttack(pawn.Seat, card, target.Seat),
+                LastMove = move with { Play = new RacePlay(card, Target: target.Seat) },
+            };
+            return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), awaitsReplyFrom: MemberAt(match, target.Seat).PlayerId);
+        }
+
         var values = rules.CardValues;
         RacePlay play;
+        Guid? skips = null;
         switch (card)
         {
-            case RaceCard.Whale:
-                next = next with { Pawns = next.Pawns.Select(p => p.Seat == target!.Seat ? p with { Tile = pawn.Tile } : p).ToArray() };
-                (next, var swapped) = MoveTo(next, pawn.Seat, target!.Tile, rules, random, match);
-                play = new RacePlay(
-                    card,
-                    From: swapped.From,
-                    To: swapped.To,
-                    Effect: swapped.Effect,
-                    Draw: swapped.Draw,
-                    Drawn: swapped.Card,
-                    Reshuffled: swapped.Reshuffled,
-                    Target: target.Seat);
+            case RaceCard.Whale or RaceCard.Rug or RaceCard.Liquidated:
+                (next, play, skips) = Attack(next, new RaceAttack(pawn.Seat, card, target!.Seat), rules, random, match);
                 break;
 
             case RaceCard.Reverse:
                 var pushed = next.Pawns
                     .Where(p => p.Seat != pawn.Seat && playing.Contains(p.Seat) && p.Tile > rules.Start.Index)
-                    .Select(p => Math.Max(p.Tile - values.Reverse, rules.Start.Index) is var landed && rules.Tiles[landed] is { Jumps: true } jump
-                        ? new RacePush(p.Seat, p.Tile, landed, jump.To!.Value, jump.Type)
-                        : new RacePush(p.Seat, p.Tile, landed, landed))
+                    .Select(p => PushBack(p, values.Reverse, rules))
                     .ToArray();
-                next = next with
-                {
-                    Pawns = next.Pawns.Select(p => pushed.FirstOrDefault(push => push.Seat == p.Seat) is { } push ? p with { Tile = push.To } : p).ToArray(),
-                };
+                next = Pushed(next, pushed);
                 play = new RacePlay(card, Pushed: pushed);
                 break;
 
@@ -328,8 +355,129 @@ public sealed class ChogRaceMatchRules : IMatchRules
 
         next = next with { LastMove = move with { Play = play } };
         return Won(next, [pawn.Seat, .. play.Pushed?.Select(push => push.Seat) ?? []], rules, match)
-            ?? MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: true);
+            ?? MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(next, Json), endsTurn: true, skipsNextTurnOf: skips);
     }
+
+    /// <summary>
+    /// The target's reply to the attack the turn waits for (DEC-058): <c>PLAY_CARD</c> with HODL blocks it, both cards
+    /// going to the discard pile, and <c>PASS</c> lets it land. Either ends the attacker's turn. Any other card is
+    /// <c>card_not_playable</c>, HODL not in the hand <c>card_not_held</c>, and <c>ROLL</c> or <c>END_TURN</c>
+    /// <c>reply_pending</c>; none changes anything.
+    /// </summary>
+    private static MatchRuleDecision ReplyFor(
+        RacePawn pawn, RaceAttack attack, RaceMatchState state, RaceRules rules, MatchCommandContext context)
+    {
+        if (state.LastMove is not { Play: { } pending } move || move.Seat != attack.Seat)
+        {
+            return MatchRuleDecision.Reject("game_state_unavailable");
+        }
+
+        if (context.Type == Pass)
+        {
+            var (landed, play, skips) = Attack(state with { Reply = null }, attack, rules, context.Random, context.Match);
+            landed = landed with { LastMove = move with { Play = play with { Reply = RaceReply.Allowed } } };
+            return Won(landed, [attack.Seat, attack.Target], rules, context.Match)
+                ?? MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(landed, Json), endsTurn: true, skipsNextTurnOf: skips);
+        }
+
+        if (context.Type != PlayCard)
+        {
+            return MatchRuleDecision.Reject(ReplyPending);
+        }
+
+        if (CardIn(context.Payload) is not { } card)
+        {
+            return MatchRuleDecision.Reject("invalid_card");
+        }
+
+        if (card != RaceCard.Hodl)
+        {
+            return MatchRuleDecision.Reject("card_not_playable");
+        }
+
+        if (pawn.Hand?.Contains(card) != true)
+        {
+            return MatchRuleDecision.Reject("card_not_held");
+        }
+
+        var hand = pawn.Hand.ToList();
+        hand.Remove(card);
+        var blocked = state with
+        {
+            Reply = null,
+            Pawns = state.Pawns.Select(p => p.Seat == pawn.Seat ? p with { Hand = hand.Count == 0 ? null : hand } : p).ToArray(),
+            Discard = [.. state.Discard ?? [], card],
+            LastMove = move with { Play = pending with { Reply = RaceReply.Blocked } },
+        };
+        return MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(blocked, Json), endsTurn: true);
+    }
+
+    /// <summary>
+    /// What an attack that lands does (DEC-058): Rug moves the target back the rules' tiles, following the Boost or
+    /// Setback it lands on and drawing nothing, as Reverse does; Liquidated makes the target skip their next turn; Whale
+    /// swaps the attacker's and the target's tiles, the attacker's new tile resolving for them (a Card tile draws). Returns
+    /// the state, the play and the player who skips a turn, if any.
+    /// </summary>
+    private static (RaceMatchState State, RacePlay Play, Guid? Skips) Attack(
+        RaceMatchState state, RaceAttack attack, RaceRules rules, IRandomSource random, GameRoom match)
+    {
+        var attacker = state.Pawns.First(p => p.Seat == attack.Seat);
+        var target = state.Pawns.First(p => p.Seat == attack.Target);
+        switch (attack.Card)
+        {
+            case RaceCard.Rug:
+                var push = PushBack(target, rules.CardValues.Rug, rules);
+                return (Pushed(state, [push]), new RacePlay(attack.Card, Target: target.Seat, Pushed: [push]), null);
+
+            case RaceCard.Liquidated:
+                return (state, new RacePlay(attack.Card, Target: target.Seat), MemberAt(match, target.Seat).PlayerId);
+
+            default:
+                var next = state with { Pawns = state.Pawns.Select(p => p.Seat == target.Seat ? p with { Tile = attacker.Tile } : p).ToArray() };
+                (next, var swapped) = MoveTo(next, attacker.Seat, target.Tile, rules, random, match);
+                var play = new RacePlay(
+                    attack.Card,
+                    From: swapped.From,
+                    To: swapped.To,
+                    Effect: swapped.Effect,
+                    Draw: swapped.Draw,
+                    Drawn: swapped.Card,
+                    Reshuffled: swapped.Reshuffled,
+                    Target: target.Seat);
+                return (next, play, null);
+        }
+    }
+
+    /// <summary>
+    /// Where a pawn another player's card moves back <paramref name="tiles"/> ends: no further back than the Start, then on
+    /// with the Boost or Setback it lands on (DEC-057). It draws nothing on a Card tile, on another player's turn.
+    /// </summary>
+    private static RacePush PushBack(RacePawn pawn, int tiles, RaceRules rules) =>
+        Math.Max(pawn.Tile - tiles, rules.Start.Index) is var landed && rules.Tiles[landed] is { Jumps: true } jump
+            ? new RacePush(pawn.Seat, pawn.Tile, landed, jump.To!.Value, jump.Type)
+            : new RacePush(pawn.Seat, pawn.Tile, landed, landed);
+
+    private static RaceMatchState Pushed(RaceMatchState state, IReadOnlyList<RacePush> pushed) => state with
+    {
+        Pawns = state.Pawns.Select(p => pushed.FirstOrDefault(push => push.Seat == p.Seat) is { } push ? p with { Tile = push.To } : p).ToArray(),
+    };
+
+    /// <summary>The cards played on one opponent the player picks: Whale, Rug and Liquidated, which HODL can block (DEC-058).</summary>
+    private static bool Targets(RaceCard card) => card is RaceCard.Whale or RaceCard.Rug or RaceCard.Liquidated;
+
+    /// <summary>
+    /// The attack the turn waits on, while the engine still waits for its target's reply from the attacker's turn; null
+    /// otherwise, as when the target or the attacker left and the engine moved on (DEC-058).
+    /// </summary>
+    private static RaceAttack? LiveReply(RaceMatchState state, GameRoom match) =>
+        state.Reply is { } attack
+        && match.ReplyingPlayerId is { } replying
+        && SeatOf(match, replying) == attack.Target
+        && SeatOf(match, match.CurrentPlayerId) == attack.Seat
+            ? attack
+            : null;
+
+    private static RoomMember MemberAt(GameRoom match, int seat) => match.Members.Single(member => member.Seat == seat);
 
     /// <summary>The card the payload names, by its exact name; a number or any other name is none.</summary>
     private static RaceCard? CardIn(JsonElement payload) =>
@@ -354,11 +502,10 @@ public sealed class ChogRaceMatchRules : IMatchRules
     private static bool HoldsCard(RaceMatchState state, int seat) => HandOf(state, seat).Any(PlayableOnTurn);
 
     /// <summary>
-    /// Whether a card can be played on its holder's turn: the movement and chaos cards (STORY-053, DEC-057). The attack
-    /// cards come with STORY-054.
+    /// Whether a card can be played on its holder's turn: every card but HODL, which is played only in reply to an attack
+    /// (STORY-053, DEC-057; STORY-054, DEC-058).
     /// </summary>
-    private static bool PlayableOnTurn(RaceCard card) =>
-        card is RaceCard.Pump or RaceCard.Whale or RaceCard.Airdrop or RaceCard.Fomo or RaceCard.Reverse;
+    private static bool PlayableOnTurn(RaceCard card) => card is not RaceCard.Hodl;
 
     private static IReadOnlyList<RaceCard> HandOf(RaceMatchState state, int seat) =>
         state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat)?.Hand ?? [];
@@ -385,6 +532,30 @@ public sealed class ChogRaceMatchRules : IMatchRules
         return players
             .Select(player => new MatchStanding(player.PlayerId, 1 + players.Count(other => Beats(other, player))))
             .ToArray();
+    }
+
+    /// <summary>
+    /// The attack's target didn't reply in time (DEC-058): the attack lands as if they had passed, and their HODL, if
+    /// they hold one, stays in their hand. A Rug that pushes its target onto a Boost to the Finish wins the race for
+    /// them. A state this server can't play, or no live attack, changes nothing.
+    /// </summary>
+    public MatchRuleDecision? TimeOutReply(MatchTurnContext context)
+    {
+        if (context.State is not { } json
+            || Read(json) is not { Winner: null } state
+            || !_rulesByVersion.TryGetValue(state.RulesVersion, out var rules)
+            || !IsPlayable(state, rules)
+            || LiveReply(state, context.Match) is not { } attack
+            || state.LastMove is not { Play: not null } move
+            || move.Seat != attack.Seat)
+        {
+            return null;
+        }
+
+        var (landed, play, skips) = Attack(state with { Reply = null }, attack, rules, context.Random, context.Match);
+        landed = landed with { LastMove = move with { Play = play with { Reply = RaceReply.TimedOut } } };
+        return Won(landed, [attack.Seat, attack.Target], rules, context.Match)
+            ?? MatchRuleDecision.Accept(JsonSerializer.SerializeToElement(landed, Json), skipsNextTurnOf: skips);
     }
 
     /// <summary>
@@ -419,9 +590,17 @@ public sealed class ChogRaceMatchRules : IMatchRules
 
         var playing = PlayingSeats(context.Match);
         var viewer = SeatOf(context.Match, context.PlayerId) is { } own && playing.Contains(own) ? own : (int?)null;
+        var reply = context.Match.Status == RoomStatus.Active ? LiveReply(state, context.Match) : null;
         RacePhase? phase = context.Match.Status != RoomStatus.Active ? null
+            : reply is not null ? RacePhase.Reply
             : state.PlayPhase is { } seat && seat == SeatOf(context.Match, context.Match.CurrentPlayerId) ? RacePhase.Play
             : RacePhase.Move;
+        var skipping = context.Match.Status != RoomStatus.Active ? []
+            : context.Match.Members
+                .Where(member => member is { SkipsNextTurn: true, Seat: not null } && playing.Contains(member.Seat!.Value))
+                .Select(member => member.Seat!.Value)
+                .Order()
+                .ToArray();
         var view = new RaceBoardView(
             rules.Version,
             rules.Tiles.Select(tile => new RaceTileView(tile.Index, tile.Type, tile.To)).ToArray(),
@@ -438,7 +617,9 @@ public sealed class ChogRaceMatchRules : IMatchRules
             state.Discard?.Count ?? 0,
             viewer is { } mine ? HandOf(state, mine) : null,
             viewer is { } holder ? HandOf(state, holder).Where(PlayableOnTurn).Distinct().ToArray() : null,
-            rules.CardValues);
+            rules.CardValues,
+            reply,
+            skipping.Length > 0 ? skipping : null);
         return JsonSerializer.SerializeToElement(view, Json);
     }
 
@@ -476,7 +657,27 @@ public sealed class ChogRaceMatchRules : IMatchRules
         int? PlayPhase = null,
         int? Winner = null,
         IReadOnlyList<RaceCard>? Deck = null,
-        IReadOnlyList<RaceCard>? Discard = null);
+        IReadOnlyList<RaceCard>? Discard = null,
+        RaceAttack? Reply = null);
+
+    /// <summary>
+    /// An attack waiting for its target's reply (DEC-058): the attacker's seat, the card, already on the discard pile, and
+    /// the target's seat. Everyone sees it.
+    /// </summary>
+    private sealed record RaceAttack(int Seat, RaceCard Card, int Target);
+
+    /// <summary>How an attack's target answered it (DEC-058).</summary>
+    private enum RaceReply
+    {
+        /// <summary>They played HODL; the attack did nothing.</summary>
+        Blocked,
+
+        /// <summary>They let it land.</summary>
+        Allowed,
+
+        /// <summary>They didn't reply in time; it landed.</summary>
+        TimedOut,
+    }
 
     /// <summary>A seat's pawn and its hand, null while empty.</summary>
     private sealed record RacePawn(int Seat, int Tile, IReadOnlyList<RaceCard>? Hand = null);
@@ -526,7 +727,8 @@ public sealed class ChogRaceMatchRules : IMatchRules
         RaceCard? Drawn = null,
         bool? Reshuffled = null,
         int? Target = null,
-        IReadOnlyList<RacePush>? Pushed = null);
+        IReadOnlyList<RacePush>? Pushed = null,
+        RaceReply? Reply = null);
 
     /// <summary>
     /// An opponent's pawn moved back by Reverse: the tile it <paramref name="Landed"/> on and, after a Boost or Setback
@@ -547,11 +749,12 @@ public sealed class ChogRaceMatchRules : IMatchRules
         NoCards,
     }
 
-    /// <summary>A turn's phases (RACE-004, DEC-055); reactions come with DEC-003.</summary>
+    /// <summary>A turn's phases (RACE-004, DEC-055): Reply while it waits for an attack's target (DEC-058).</summary>
     private enum RacePhase
     {
         Move,
         Play,
+        Reply,
     }
 
     private sealed record RaceBoardView(
@@ -566,7 +769,9 @@ public sealed class ChogRaceMatchRules : IMatchRules
         int Discard,
         IReadOnlyList<RaceCard>? Hand,
         IReadOnlyList<RaceCard>? Playable,
-        RaceCardValues CardValues);
+        RaceCardValues CardValues,
+        RaceAttack? Reply,
+        IReadOnlyList<int>? Skipping);
 
     private sealed record RaceTileView(int Index, RaceTileType Type, int? To);
 }

@@ -70,8 +70,17 @@ public sealed class GameRoom
     /// <summary>Whose turn it is; set exactly while the match is Active.</summary>
     public Guid? CurrentPlayerId { get; private set; }
 
-    /// <summary>When the current turn runs out (ENG-007); set exactly while the match is Active.</summary>
+    /// <summary>
+    /// When the current turn runs out (ENG-007); set exactly while the match is Active. While a reply window is open it
+    /// is when the reply runs out (DEC-058).
+    /// </summary>
     public DateTimeOffset? TurnEndsAt { get; private set; }
+
+    /// <summary>
+    /// The player the current turn waits for (STORY-054, DEC-058), such as the target of an attack who may defend: while
+    /// set, only they act, until <see cref="TurnEndsAt"/>. Never the current player; null when no reply is awaited.
+    /// </summary>
+    public Guid? ReplyingPlayerId { get; private set; }
 
     /// <summary>
     /// When the match's time is up (STORY-041, ENG-011): its start plus the game's time limit, fixed at the start and
@@ -239,7 +248,8 @@ public sealed class GameRoom
 
     /// <summary>
     /// <paramref name="player"/> is out of the match: when fewer than two players remain it is abandoned, and when it was
-    /// their turn the next player's begins (DEC-027).
+    /// their turn, or the turn waited for their reply, the next player's begins (DEC-027, DEC-058); the command that
+    /// awaited the reply goes no further.
     /// </summary>
     private void Forfeit(RoomMember player, DateTimeOffset now)
     {
@@ -248,7 +258,7 @@ public sealed class GameRoom
         {
             MoveTo(RoomStatus.Abandoned, now);
         }
-        else if (player.PlayerId == CurrentPlayerId)
+        else if (player.PlayerId == CurrentPlayerId || player.PlayerId == ReplyingPlayerId)
         {
             NextTurn(now);
         }
@@ -398,27 +408,36 @@ public sealed class GameRoom
 
     /// <summary>
     /// Times out the overdue turn (ENG-007, DEC-027): <paramref name="state"/> is the game's safe default for it, or null
-    /// when the turn is just skipped. The current player has now missed one more turn in a row; at
-    /// <paramref name="maxMissedTurns"/> they forfeit, otherwise the next player's turn begins.
+    /// when the turn is just skipped. The player who had to act, the current player or, while a reply window is open, the
+    /// one it waited for (DEC-058), has now missed one more turn in a row; at <paramref name="maxMissedTurns"/> they
+    /// forfeit. Otherwise, or if the match goes on without them, the next player's turn begins. A safe default for a reply
+    /// may make <paramref name="skipsNextTurnOf"/> skip their next turn.
     /// </summary>
-    /// <returns>Whether the current player forfeited.</returns>
-    public bool TimeOutTurn(string? state, int maxMissedTurns, DateTimeOffset now)
+    /// <returns>The player who forfeited, if any.</returns>
+    public Guid? TimeOutTurn(string? state, int maxMissedTurns, DateTimeOffset now, Guid? skipsNextTurnOf = null)
     {
         if (!IsTurnOverdue(now))
         {
             throw new InvalidOperationException("Only an overdue turn of an active match can time out.");
         }
 
+        if (skipsNextTurnOf is not null && ReplyingPlayerId is null)
+        {
+            throw new InvalidOperationException("Only a reply's safe default can make a player skip a turn.");
+        }
+
+        var skipping = skipsNextTurnOf is { } id ? PlayingMember(id) : null;
         if (state is not null)
         {
             State = state;
         }
 
-        var current = CurrentMember();
-        var forfeited = current.MissTurn() >= maxMissedTurns;
+        skipping?.SkipNextTurn();
+        var late = ReplyingPlayerId is { } replying ? _members.Single(m => m.PlayerId == replying) : CurrentMember();
+        var forfeited = late.MissTurn() >= maxMissedTurns;
         if (forfeited)
         {
-            Forfeit(current, now);
+            Forfeit(late, now);
         }
         else
         {
@@ -426,12 +445,31 @@ public sealed class GameRoom
         }
 
         Version++;
-        return forfeited;
+        return forfeited ? late.PlayerId : null;
+    }
+
+    /// <summary>
+    /// The reply window ran out and the game's safe default for it finished the match (STORY-054, DEC-058), such as a
+    /// pawn an attack pushed onto a Boost to the Finish: <paramref name="state"/> is stored and the match is completed with
+    /// the <paramref name="standings"/> its rules decided. No missed turn is counted, since nobody plays on.
+    /// </summary>
+    public void FinishOnReplyTimeout(string state, IReadOnlyCollection<MatchStanding> standings, DateTimeOffset now)
+    {
+        if (!IsTurnOverdue(now) || ReplyingPlayerId is null)
+        {
+            throw new InvalidOperationException("Only an overdue reply of an active match can finish it.");
+        }
+
+        CheckStandings(standings);
+        State = state;
+        Finish(standings, now);
+        Version++;
     }
 
     /// <summary>
     /// Why <paramref name="playerId"/> can't act on this match with <paramref name="command"/> now, or null if they can
-    /// (STORY-024, DEC-026): only the current player acts, before their turn runs out (STORY-025, DEC-027). The caller has
+    /// (STORY-024, DEC-026): only the current player acts, before their turn runs out (STORY-025, DEC-027), or, while a reply
+    /// window is open, only the player it waits for (STORY-054, DEC-058). The caller has
     /// checked that the player is a member. Once the match is due to end nobody acts any more (STORY-041).
     /// </summary>
     public MatchCommandProblem? CheckCommand(Guid playerId, MatchCommand command, DateTimeOffset now)
@@ -466,7 +504,7 @@ public sealed class GameRoom
             return MatchCommandProblem.TimeUp;
         }
 
-        if (playerId != CurrentPlayerId)
+        if (playerId != (ReplyingPlayerId ?? CurrentPlayerId))
         {
             return MatchCommandProblem.NotYourTurn;
         }
@@ -480,6 +518,9 @@ public sealed class GameRoom
     /// (DEC-026, DEC-027). Acting resets the player's missed turns. A command that finished the match comes with the
     /// <paramref name="standings"/> its rules decided, and the match is completed with them (STORY-028, DEC-030). A
     /// command that <paramref name="finished"/> the player's game ends their turn, and they get no more (STORY-041).
+    /// A command may instead open a reply window (STORY-054, DEC-058): the turn waits, a full turn's time, for
+    /// <paramref name="awaitsReplyFrom"/>, another player still playing, whose own accepted command closes it. Either may
+    /// make <paramref name="skipsNextTurnOf"/>, a player still playing, skip their next turn once.
     /// </summary>
     public MatchAction ApplyCommand(
         Guid playerId,
@@ -488,7 +529,9 @@ public sealed class GameRoom
         bool endsTurn,
         DateTimeOffset now,
         IReadOnlyCollection<MatchStanding>? standings = null,
-        bool finished = false)
+        bool finished = false,
+        Guid? awaitsReplyFrom = null,
+        Guid? skipsNextTurnOf = null)
     {
         if (CheckCommand(playerId, command, now) is { } problem)
         {
@@ -500,8 +543,31 @@ public sealed class GameRoom
             CheckStandings(standings);
         }
 
+        var replying = ReplyingPlayerId == playerId;
+        if (finished && replying)
+        {
+            throw new InvalidOperationException("Only the current player's command can finish their game.");
+        }
+
+        RoomMember? awaited = null;
+        if (awaitsReplyFrom is { } replier)
+        {
+            awaited = PlayingMember(replier);
+            if (replier == CurrentPlayerId || replying || endsTurn || finished || standings is not null)
+            {
+                throw new InvalidOperationException("Only the current player's command can wait for another player's reply, and it can't end the turn.");
+            }
+        }
+
+        var skipping = skipsNextTurnOf is { } skipped ? PlayingMember(skipped) : null;
         State = state;
-        CurrentMember().Act();
+        _members.Single(m => m.PlayerId == playerId).Act();
+        skipping?.SkipNextTurn();
+        if (replying)
+        {
+            ReplyingPlayerId = null;
+        }
+
         if (standings is not null)
         {
             Finish(standings, now);
@@ -514,6 +580,11 @@ public sealed class GameRoom
         else if (endsTurn)
         {
             NextTurn(now);
+        }
+        else if (awaited is not null)
+        {
+            ReplyingPlayerId = awaited.PlayerId;
+            TurnEndsAt = now + TurnTimeout!.Value;
         }
 
         Version++;
@@ -531,6 +602,11 @@ public sealed class GameRoom
         if (CheckCommand(playerId, command, now) is { } problem)
         {
             throw new InvalidOperationException($"The ability cannot be used: {problem}.");
+        }
+
+        if (ReplyingPlayerId is not null)
+        {
+            throw new InvalidOperationException("No ability can be used while a reply is awaited.");
         }
 
         var member = CurrentMember();
@@ -565,6 +641,7 @@ public sealed class GameRoom
             EndedAt = now;
             CurrentPlayerId = null;
             TurnEndsAt = null;
+            ReplyingPlayerId = null;
         }
     }
 
@@ -616,13 +693,19 @@ public sealed class GameRoom
 
     private RoomMember CurrentMember() => _members.Single(m => m.PlayerId == CurrentPlayerId);
 
+    private RoomMember PlayingMember(Guid playerId) =>
+        _members.SingleOrDefault(m => m.PlayerId == playerId && !m.HasLeft && m.Seat is not null)
+        ?? throw new InvalidOperationException("The player is not playing in this match.");
+
     /// <summary>
-    /// The next player still playing who hasn't finished, after the current one in seat order, starts a new turn. When
-    /// every player still playing has finished, the turn goes to the first of them and is already over, so nobody can act
-    /// and the engine ends the match on its next check (STORY-041).
+    /// The next player still playing who hasn't finished, after the current one in seat order, starts a new turn; any
+    /// reply window closes. A player due to skip their next turn is passed over once, which isn't a missed turn
+    /// (DEC-058). When every player still playing has finished, the turn goes to the first of them and is already over,
+    /// so nobody can act and the engine ends the match on its next check (STORY-041).
     /// </summary>
     private void NextTurn(DateTimeOffset now)
     {
+        ReplyingPlayerId = null;
         var seat = CurrentMember().Seat;
         var playing = _members.Where(m => !m.HasLeft).OrderBy(m => m.Seat).ToList();
         var waiting = playing.Where(m => !m.HasFinished).ToList();
@@ -633,7 +716,16 @@ public sealed class GameRoom
             return;
         }
 
-        BeginTurn(waiting.FirstOrDefault(m => m.Seat > seat) ?? waiting[0], now);
+        // In seat order from the player after the current one, round to the current one; at most each skip is used up.
+        var order = waiting.Where(m => m.Seat > seat).Concat(waiting.Where(m => m.Seat <= seat)).ToList();
+        var next = order.FirstOrDefault(m => !m.SkipsNextTurn) ?? order[0];
+        foreach (var skipped in order.TakeWhile(m => m != next))
+        {
+            skipped.TakeSkippedTurn();
+        }
+
+        next.TakeSkippedTurn();
+        BeginTurn(next, now);
     }
 
     private void BeginTurn(RoomMember player, DateTimeOffset now)
@@ -744,6 +836,12 @@ public sealed class RoomMember
     public int MissedTurns { get; private set; }
 
     /// <summary>
+    /// The member's next turn is skipped, once, such as after a Chog Race Liquidated (STORY-054, DEC-058); it isn't
+    /// counted as missed.
+    /// </summary>
+    public bool SkipsNextTurn { get; private set; }
+
+    /// <summary>
     /// When the player finished the game, such as reaching the last tile (STORY-041); they take no more turns but play on
     /// until the match ends. Null while they still play their turns.
     /// </summary>
@@ -833,6 +931,11 @@ public sealed class RoomMember
     internal void FinishGame(DateTimeOffset now) => FinishedAt ??= now;
 
     internal void Act() => MissedTurns = 0;
+
+    internal void SkipNextTurn() => SkipsNextTurn = true;
+
+    /// <summary>The member's turn came round: a skip they were due is used up.</summary>
+    internal void TakeSkippedTurn() => SkipsNextTurn = false;
 
     internal void RankAs(int rank, string? result = null)
     {

@@ -6,7 +6,7 @@ namespace ChogGames.Games.ChogRace.Rules;
 /// <summary>
 /// A version of the Chog Race rules: the track, how far a pawn moves in a turn, the match's time cap (STORY-050,
 /// RACE-001, RACE-002, RACE-009, DEC-054), the deck and the hand limit (STORY-052, RACE-003, DEC-056) and how far cards
-/// move pawns (STORY-053, RACE-005, DEC-057). Like Chog Life's rules (DEC-037) it is versioned code in the game module,
+/// move pawns (STORY-053, STORY-054, RACE-005, DEC-057, DEC-058). Like Chog Life's rules (DEC-037) it is versioned code in the game module,
 /// checked when it is built, so a track whose finish can't be reached stops the API at startup instead of trapping
 /// pawns during a match. Nothing here touches a wallet or the chain (DEC-010).
 /// </summary>
@@ -78,7 +78,7 @@ public sealed class RaceRules
     /// <summary>The most cards a player holds; a player with a full hand draws nothing (RACE-003, DEC-056).</summary>
     public int MaxHand { get; }
 
-    /// <summary>How far Pump, FOMO and Reverse move pawns (RACE-005, DEC-057).</summary>
+    /// <summary>How far Pump, FOMO, Reverse and Rug move pawns (RACE-005, DEC-057, DEC-058).</summary>
     public RaceCardValues CardValues { get; }
 
     /// <summary>
@@ -139,7 +139,7 @@ public sealed class RaceRules
     private static void CheckCardValues(RaceCardValues values)
     {
         ArgumentNullException.ThrowIfNull(values);
-        if (new[] { values.Pump, values.FomoForward, values.FomoBack, values.Reverse }.Any(tiles => tiles is < 1 or > CardMoveLimit))
+        if (new[] { values.Pump, values.FomoForward, values.FomoBack, values.Reverse, values.Rug }.Any(tiles => tiles is < 1 or > CardMoveLimit))
         {
             throw new ArgumentOutOfRangeException(nameof(values), values, $"A card moves a pawn 1 to {CardMoveLimit} tiles.");
         }
@@ -151,9 +151,9 @@ public sealed class RaceRules
     }
 
     /// <summary>
-    /// The moves, in tiles, the deck's cards can make besides a roll: a player's own card moves them and Reverse pushes
-    /// others back, each following the Boost or Setback landed on (DEC-057). Airdrop rolls again and Whale swaps tiles
-    /// pawns already stand on, so neither adds a place to stand.
+    /// The moves, in tiles, the deck's cards can make besides a roll: a player's own card moves them, and Reverse and Rug
+    /// push others back, each following the Boost or Setback landed on (DEC-057, DEC-058). Airdrop rolls again and Whale
+    /// swaps tiles pawns already stand on, so neither adds a place to stand; Liquidated and HODL move nobody.
     /// </summary>
     private static int[] CardMoves(RaceCard[] deck, RaceCardValues values) =>
         deck.Distinct().SelectMany(card => card switch
@@ -161,6 +161,7 @@ public sealed class RaceRules
             RaceCard.Pump => [values.Pump],
             RaceCard.Fomo => [values.FomoForward, -values.FomoBack],
             RaceCard.Reverse => [-values.Reverse],
+            RaceCard.Rug => [-values.Rug],
             _ => Array.Empty<int>(),
         }).ToArray();
 

@@ -421,6 +421,9 @@ public sealed class MatchTurnTests(MigratedPostgresDatabase database) : IClassFi
     [InlineData("""UPDATE "RoomMembers" SET "Seat" = 7""", "CK_RoomMembers_Seat")]
     [InlineData("""UPDATE "RoomMembers" SET "Seat" = 0""", "CK_RoomMembers_Seat")]
     [InlineData("""UPDATE "RoomMembers" SET "MissedTurns" = -1""", "CK_RoomMembers_MissedTurns")]
+    [InlineData("""UPDATE "GameRooms" SET "ReplyingPlayerId" = "CurrentPlayerId" WHERE "Status" = 'Active'""", "CK_GameRooms_ReplyingPlayer")]
+    [InlineData("""UPDATE "GameRooms" SET "ReplyingPlayerId" = "HostPlayerId" WHERE "Status" = 'Waiting'""", "CK_GameRooms_ReplyingPlayer")]
+    [InlineData("""UPDATE "RoomMembers" SET "SkipsNextTurn" = true WHERE "Seat" IS NULL""", "CK_RoomMembers_SkipsNextTurn")]
     public async Task Database_rejects_invalid_turns(string sql, string constraint)
     {
         var alice = await GuestAsync("Alice");

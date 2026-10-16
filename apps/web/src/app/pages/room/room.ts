@@ -25,7 +25,7 @@ import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoa
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
 import { RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
-import { RACE_END_TURN, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
+import { RACE_END_TURN, RACE_PASS, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -114,7 +114,9 @@ export class RoomPage implements OnInit {
   /** Whose turn it is and when it runs out, while a match is active (DEC-045). */
   protected readonly turnTimer = computed(() => {
     const room = this.room();
-    const current = room?.members.find((member) => member.isTurn);
+    // While a Chog Race attack waits for its target's answer, the clock is theirs (DEC-058).
+    const reply = this.raceBoard()?.phase === 'Reply' ? this.raceBoard()?.reply : undefined;
+    const current = room?.members.find((member) => (reply ? member.seat === reply.target : member.isTurn));
     if (room?.status !== 'Active' || !room.turnEndsAt || !room.turnSeconds || !current) {
       return null;
     }
@@ -246,6 +248,11 @@ export class RoomPage implements OnInit {
   /** Plays a Chog Race card in the Play phase, which ends the turn (STORY-053, DEC-057); refusals as for a roll. */
   protected playCard(play: RaceCardPlay): void {
     this.command(RACE_PLAY_CARD, play.target === undefined ? { card: play.card } : { card: play.card, target: play.target });
+  }
+
+  /** Lets a Chog Race attack on you land instead of blocking it (STORY-054, DEC-058); refusals as for a roll. */
+  protected pass(): void {
+    this.command(RACE_PASS);
   }
 
   /** Chooses the route to leave a fork by, after a roll stopped there (STORY-039, DEC-041); refusals as for a roll. */

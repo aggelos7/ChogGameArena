@@ -40,7 +40,7 @@ describe('Chog Race board model', () => {
     const played = {
       ...RACE_BOARD,
       playable: ['Pump', 'Whale'],
-      cardValues: { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1 },
+      cardValues: { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1, rug: 4 },
       lastMove: {
         seat: 1,
         roll: 1,
@@ -335,7 +335,7 @@ describe('Chog Race board cards (STORY-052)', () => {
   });
 
   it('says what each card in your hand does, with the match’s values', () => {
-    const cardValues = { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1 };
+    const cardValues = { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1, rug: 4 };
     render({ ...RACE_BOARD, cardValues, hand: ['Pump', 'Fomo', 'Airdrop', 'Whale', 'Reverse', 'Rug', 'Hodl', 'Liquidated'], maxHand: 8 });
 
     expect(all('[data-card] .card-text')).toEqual([
@@ -344,9 +344,9 @@ describe('Chog Race board cards (STORY-052)', () => {
       'Roll again.',
       'Swap places with an opponent you pick.',
       'Every opponent moves 1 back.',
-      'Send an opponent back. Can’t be played yet.',
-      'Block an attack on you. Can’t be played yet.',
-      'An opponent skips their next turn. Can’t be played yet.',
+      'Move an opponent 4 back.',
+      'Block a Rug, Liquidated or Whale played on you.',
+      'An opponent skips their next turn.',
     ]);
 
     render({ ...RACE_BOARD, hand: ['Pump', 'Reverse'] });
@@ -407,7 +407,7 @@ describe('Chog Race board card plays (STORY-053)', () => {
   let page: HTMLElement;
   let plays: unknown[];
 
-  const VALUES = { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1 };
+  const VALUES = { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1, rug: 4 };
   const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2), member('Carol', 3)];
   const pawns = [
     { seat: 1, tile: 5, cards: 2 },
@@ -514,6 +514,117 @@ describe('Chog Race board card plays (STORY-053)', () => {
     );
     expect(played({ seat: 3, ...roll, play: { card: 'Reverse', pushed: [] } })).toBe('Carol played Reverse, but nobody could move back.');
     expect(played({ seat: 3, ...roll })).toBeUndefined();
+  });
+});
+
+describe('Chog Race board attacks and defense (STORY-054)', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+  let plays: unknown[];
+  let passes: number;
+
+  const VALUES = { pump: 3, fomoForward: 5, fomoBack: 3, fomoForwardChance: 50, reverse: 1, rug: 4 };
+  const pawns = [
+    { seat: 1, tile: 5, cards: 2 },
+    { seat: 2, tile: 0, cards: 1 },
+    { seat: 3, tile: 12, cards: 1 },
+  ];
+  const yourTurn = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2), member('Carol', 3)];
+  const bobsTurn = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true }), member('Carol', 3)];
+  const roll = { roll: 1, from: 4, landed: 5, to: 5 };
+
+  function render(board: Partial<RaceBoard>, members: RoomMember[] = yourTurn, rolling = false): void {
+    fixture.componentRef.setInput('board', { ...RACE_BOARD, pawns, cardValues: VALUES, ...board });
+    fixture.componentRef.setInput('members', members);
+    fixture.componentRef.setInput('rolling', rolling);
+    fixture.detectChanges();
+  }
+
+  const text = (selector: string) => page.querySelector(selector)?.textContent?.trim();
+  const labels = () => Array.from(page.querySelectorAll('[data-play]')).map((button) => button.textContent?.trim());
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+    plays = [];
+    passes = 0;
+    fixture.componentInstance.playCard.subscribe((play) => plays.push(play));
+    fixture.componentInstance.pass.subscribe(() => passes++);
+  });
+
+  it('reads an attack waiting for its answer and who skips a turn', () => {
+    const waiting = {
+      ...RACE_BOARD,
+      phase: 'Reply',
+      reply: { seat: 1, card: 'Rug', target: 2 },
+      skipping: [3],
+      cardValues: VALUES,
+      lastMove: { seat: 1, ...roll, play: { card: 'Rug', target: 2, pushed: [{ seat: 2, from: 9, landed: 5, to: 5 }], reply: 'TimedOut' } },
+    };
+    expect(toRaceBoard(waiting)).toBe(waiting);
+    expect(toRaceBoard({ ...waiting, phase: 'Defend' })).toBeNull();
+    expect(toRaceBoard({ ...waiting, reply: { seat: 1, card: 'Joker', target: 2 } })).toBeNull();
+    expect(toRaceBoard({ ...waiting, skipping: ['3'] })).toBeNull();
+    expect(toRaceBoard({ ...waiting, lastMove: { seat: 1, ...roll, play: { card: 'Rug', reply: 'Maybe' } } })).toBeNull();
+  });
+
+  it('offers Rug on each opponent off the Start and Liquidated on each who isn’t already skipping', () => {
+    render({ phase: 'Play', hand: ['Rug', 'Liquidated'], playable: ['Rug', 'Liquidated'], skipping: [2] });
+
+    expect(labels()).toEqual(['Rug: Carol 4 back', 'Liquidated: Carol skips a turn']);
+    (page.querySelectorAll<HTMLButtonElement>('[data-play]')[0]).click();
+    expect(plays).toEqual([{ card: 'Rug', target: 3 }]);
+  });
+
+  it('asks the target to block with HODL or take it, and says who everyone else waits for', () => {
+    const attack = { phase: 'Reply' as const, reply: { seat: 2, card: 'Rug' as const, target: 1 }, lastMove: { seat: 2, ...roll, play: { card: 'Rug' as const, target: 1 } } };
+    render({ ...attack, hand: ['Hodl', 'Pump'], playable: ['Pump'] }, bobsTurn);
+
+    expect(text('[data-turn-line]')).toBe('Bob played Rug on you. Block it with HODL or take it.');
+    expect(text('[data-last-play]')).toBe('Bob played Rug on you, waiting for an answer.');
+    expect(page.querySelector('[data-roll]')).toBeNull();
+    expect(page.querySelector('[data-end-turn]')).toBeNull();
+    page.querySelector<HTMLButtonElement>('[data-block]')?.click();
+    page.querySelector<HTMLButtonElement>('[data-pass]')?.click();
+    expect(plays).toEqual([{ card: 'Hodl' }]);
+    expect(passes).toBe(1);
+
+    // Without HODL there is only Take it, and it waits while a command is on its way.
+    render({ ...attack, hand: ['Pump'] }, bobsTurn, true);
+    expect(text('[data-turn-line]')).toBe('Bob played Rug on you. You have no HODL to block it.');
+    expect(page.querySelector('[data-block]')).toBeNull();
+    expect(page.querySelector<HTMLButtonElement>('[data-pass]')?.disabled).toBe(true);
+
+    // The attacker and everyone else just wait.
+    render({ phase: 'Reply', reply: { seat: 1, card: 'Liquidated', target: 3 }, hand: ['Hodl'] });
+    expect(text('[data-turn-line]')).toBe('Waiting for Carol to answer your Liquidated.');
+    expect(page.querySelector('[data-reply]')).toBeNull();
+    expect(page.querySelector('[data-plays]')).toBeNull();
+    render({ phase: 'Reply', reply: { seat: 2, card: 'Whale', target: 3 } }, bobsTurn);
+    expect(text('[data-turn-line]')).toBe('Waiting for Carol to answer Bob’s Whale.');
+  });
+
+  it('says how an attack ended and who skips a turn', () => {
+    const played = (play: NonNullable<RaceBoard['lastMove']>['play'], members = bobsTurn, skipping?: number[]) => {
+      render({ phase: 'Move', lastMove: { seat: 1, ...roll, play }, skipping }, members);
+      return text('[data-last-play]');
+    };
+
+    expect(played({ card: 'Rug', target: 2, reply: 'Blocked' })).toBe('You played Rug on Bob, blocked with HODL.');
+    expect(played({ card: 'Rug', target: 3, pushed: [{ seat: 3, from: 12, landed: 8, to: 8 }], reply: 'Allowed' })).toBe(
+      'You played Rug: Carol back to tile 8.',
+    );
+    expect(played({ card: 'Rug', target: 3, pushed: [{ seat: 3, from: 13, landed: 9, to: 7, effect: 'Setback' }] })).toBe(
+      'You played Rug: Carol back to tile 9, then set back to tile 7.',
+    );
+    expect(played({ card: 'Liquidated', target: 3, reply: 'TimedOut' }, bobsTurn, [3])).toBe(
+      'You played Liquidated: Carol skips their next turn. Carol didn’t answer in time.',
+    );
+    expect(text('[data-skipping]')).toBe('Skips a turn');
+    expect(page.querySelector('[data-seat="3"] [data-skipping]')).not.toBeNull();
+    render({ phase: 'Move', lastMove: { seat: 2, ...roll, play: { card: 'Liquidated', target: 1 } } }, bobsTurn);
+    expect(text('[data-last-play]')).toBe('Bob played Liquidated: you skip your next turn.');
   });
 });
 
