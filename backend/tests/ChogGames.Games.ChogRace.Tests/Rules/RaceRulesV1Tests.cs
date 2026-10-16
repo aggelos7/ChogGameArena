@@ -2,7 +2,10 @@ using ChogGames.Games.ChogRace.Rules;
 
 namespace ChogGames.Games.ChogRace.Tests.Rules;
 
-/// <summary>STORY-050, DEC-054: the shipped rules have the agreed values and a track every pawn can finish.</summary>
+/// <summary>
+/// STORY-050, DEC-054: the shipped rules have the agreed values and a track every pawn can finish. STORY-052, DEC-056:
+/// a deck of three of each card and hands of up to three.
+/// </summary>
 public class RaceRulesV1Tests
 {
     private static readonly RaceRules Rules = RaceRulesV1.Rules;
@@ -15,6 +18,15 @@ public class RaceRulesV1Tests
         Assert.Equal((1, 3), (Rules.MinMove, Rules.MaxMove));
         Assert.Equal(TimeSpan.FromMinutes(20), Rules.TimeCap);
         Assert.Equal((RaceTileType.Start, RaceTileType.Finish), (Rules.Start.Type, Rules.Finish.Type));
+    }
+
+    [Fact]
+    public void The_deck_has_three_of_each_card_and_hands_hold_three()
+    {
+        Assert.Equal(24, Rules.Deck.Count);
+        Assert.All(Enum.GetValues<RaceCard>(), card => Assert.Equal(3, Rules.Deck.Count(c => c == card)));
+        Assert.Equal(8, Enum.GetValues<RaceCard>().Length);
+        Assert.Equal(3, Rules.MaxHand);
     }
 
     [Fact]

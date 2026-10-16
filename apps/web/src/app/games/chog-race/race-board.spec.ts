@@ -31,6 +31,14 @@ describe('Chog Race board model', () => {
     expect(toRaceBoard(RACE_BOARD)).toBe(RACE_BOARD);
     const moved = { ...RACE_BOARD, lastMove: { seat: 1, roll: 2, from: 2, landed: 4, to: 6, effect: 'Boost' }, phase: 'Move', winner: 1 };
     expect(toRaceBoard(moved)).toBe(moved);
+    const drawn = {
+      ...RACE_BOARD,
+      hand: ['Pump', 'Hodl'],
+      lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, effect: 'Card', draw: 'Drawn', card: 'Hodl', reshuffled: true },
+    };
+    expect(toRaceBoard(drawn)).toBe(drawn);
+    const older = { rulesVersion: 1, tiles: RACE_TILES, pawns: [{ seat: 1, tile: 0 }] };
+    expect(toRaceBoard(older)).toBe(older);
   });
 
   it('refuses a state it cannot draw', () => {
@@ -53,6 +61,15 @@ describe('Chog Race board model', () => {
       { rulesVersion: 1, tiles, pawns: [], lastMove: 'rolled' },
       { rulesVersion: 1, tiles, pawns: [], phase: 'React' },
       { rulesVersion: 1, tiles, pawns: [], winner: 'Alice' },
+      { rulesVersion: 1, tiles, pawns: [{ seat: 1, tile: 0, cards: -1 }] },
+      { rulesVersion: 1, tiles, pawns: [], hand: ['Joker'] },
+      { rulesVersion: 1, tiles, pawns: [], hand: 'Pump' },
+      { rulesVersion: 1, tiles, pawns: [], deck: 'many' },
+      { rulesVersion: 1, tiles, pawns: [], discard: -2 },
+      { rulesVersion: 1, tiles, pawns: [], maxHand: 1.5 },
+      { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, effect: 'Card', draw: 'Lost' } },
+      { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, effect: 'Card', card: 'toString' } },
+      { rulesVersion: 1, tiles, pawns: [], lastMove: { seat: 1, roll: 2, from: 0, landed: 2, to: 2, reshuffled: 'yes' } },
     ]) {
       expect(toRaceBoard(state)).toBeNull();
     }
@@ -252,6 +269,77 @@ describe('Chog Race board moves (STORY-051)', () => {
 
     render(RACE_BOARD, you);
     expect(lastMove()).toBeUndefined();
+  });
+});
+
+describe('Chog Race board cards (STORY-052)', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+
+  function render(board: RaceBoard, members: RoomMember[] = you): void {
+    fixture.componentRef.setInput('board', board);
+    fixture.componentRef.setInput('members', members);
+    fixture.detectChanges();
+  }
+
+  const text = (selector: string) => page.querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim();
+  const all = (selector: string) => Array.from(page.querySelectorAll(selector)).map((node) => node.textContent?.trim());
+  const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+  });
+
+  it('shows your cards by name, out of the most a hand holds', () => {
+    render({ ...RACE_BOARD, hand: ['Pump', 'Hodl', 'Fomo'] });
+
+    expect(text('[data-hand] h3')).toBe('Your cards 3/3');
+    expect(all('[data-card]')).toEqual(['Pump', 'HODL', 'FOMO']);
+    expect(page.querySelector('[data-hand] .empty')).toBeNull();
+  });
+
+  it('says how to get a card while your hand is empty, and shows no hand to someone not playing', () => {
+    render(RACE_BOARD);
+    expect(text('[data-hand] h3')).toBe('Your cards 0/3');
+    expect(text('[data-hand] .empty')).toBe('None yet. Land on a Card tile to draw one.');
+
+    render({ ...RACE_BOARD, hand: undefined });
+    expect(page.querySelector('[data-hand]')).toBeNull();
+  });
+
+  it('shows how many cards each player holds and what is left in the deck and discard pile', () => {
+    render({
+      ...RACE_BOARD,
+      pawns: [
+        { seat: 1, tile: 0, cards: 1 },
+        { seat: 2, tile: 0, cards: 3 },
+      ],
+      deck: 20,
+      discard: 0,
+      hand: ['Rug'],
+    });
+
+    expect(all('[data-list="pawns"] [data-cards]')).toEqual(['1 card', '3 cards']);
+    expect(text('[data-piles]')).toBe('Deck 20 · Discard 0');
+  });
+
+  it('says what a Card tile drew, naming the card only to the player who drew it', () => {
+    const drew = (lastMove: RaceBoard['lastMove']) => {
+      render({ ...RACE_BOARD, lastMove });
+      return text('[data-last-move]');
+    };
+    const card = { roll: 2, from: 0, landed: 2, to: 2, effect: 'Card' } as const;
+
+    expect(drew({ seat: 1, ...card, draw: 'Drawn', card: 'Hodl' })).toBe('You rolled 2, landed on the Card tile 2 and drew HODL.');
+    expect(drew({ seat: 2, ...card, draw: 'Drawn' })).toBe('Bob rolled 2, landed on the Card tile 2 and drew a card.');
+    expect(drew({ seat: 2, ...card, draw: 'Drawn', reshuffled: true })).toBe(
+      'Bob rolled 2, landed on the Card tile 2 and drew a card after the discard pile was shuffled into a new deck.',
+    );
+    expect(drew({ seat: 1, ...card, draw: 'HandFull' })).toBe('You rolled 2, landed on the Card tile 2, but your hand is full.');
+    expect(drew({ seat: 2, ...card, draw: 'HandFull' })).toBe('Bob rolled 2, landed on the Card tile 2, but their hand is full.');
+    expect(drew({ seat: 2, ...card, draw: 'NoCards' })).toBe('Bob rolled 2, landed on the Card tile 2, but no card was left to draw.');
   });
 });
 

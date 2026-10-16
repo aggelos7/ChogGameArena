@@ -12,7 +12,9 @@ namespace ChogGames.Games.ChogRace.Tests;
 /// STORY-050, DEC-054: a Chog Race match starts with every pawn on the start tile under the current rules version, and
 /// every player sees that version's track and the pawns of the players still playing. STORY-051, DEC-055: on their turn a
 /// player rolls in the Move phase; the server rolls, moves the pawn and resolves the tile it lands on, and the turn ends
-/// unless they hold a card (never yet). Commands out of phase are rejected; the first to reach the Finish wins.
+/// unless they hold a card they can play (none yet). Commands out of phase are rejected; the first to reach the Finish
+/// wins. STORY-052, DEC-056: Card tiles draw from a deck the server shuffled, up to a full hand, refilling an empty deck
+/// from the discard pile and leavers' hands; each player sees only their own cards.
 /// </summary>
 public class ChogRaceMatchRulesTests
 {
@@ -141,7 +143,9 @@ public class ChogRaceMatchRulesTests
             [Start(0), .. Enumerable.Range(1, 28).Select(Normal), Finish(29)],
             1,
             3,
-            TimeSpan.FromMinutes(20));
+            TimeSpan.FromMinutes(20),
+            [RaceCard.Pump],
+            3);
         var both = new ChogRaceMatchRules([RaceRulesV1.Rules, version2]);
 
         Assert.Equal(28, View(room, players[0].Id, both).GetProperty("tiles").GetArrayLength());
@@ -215,9 +219,9 @@ public class ChogRaceMatchRulesTests
     [InlineData(2, 2, 4, 6, "Boost")]
     [InlineData(7, 2, 9, 7, "Setback")]
     [InlineData(14, 2, 16, 13, "Setback")]
-    [InlineData(0, 2, 2, 2, "Card")]
+    [InlineData(0, 2, 2, 2, "Card", ",\"draw\":\"NoCards\"")]
     [InlineData(10, 2, 12, 15, "Boost")]
-    public void The_tile_landed_on_resolves(int from, int roll, int landed, int to, string effect)
+    public void The_tile_landed_on_resolves(int from, int roll, int landed, int to, string effect, string draw = "")
     {
         var (room, players) = Started(2);
         var dice = new Dice(roll);
@@ -227,7 +231,7 @@ public class ChogRaceMatchRulesTests
         Assert.True(decision.EndsTurn);
         Assert.Single(dice.Draws);
         Assert.Equal([to, 0], Tiles(decision));
-        Assert.Equal($$"""{"seat":1,"roll":{{roll}},"from":{{from}},"landed":{{landed}},"to":{{to}},"effect":"{{effect}}"}""", LastMove(decision));
+        Assert.Equal($$"""{"seat":1,"roll":{{roll}},"from":{{from}},"landed":{{landed}},"to":{{to}},"effect":"{{effect}}"{{draw}}}""", LastMove(decision));
     }
 
     [Theory]
@@ -317,6 +321,11 @@ public class ChogRaceMatchRulesTests
     [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":0},{"seat":1,"tile":3}]}""")]
     [InlineData("""{"rulesVersion":1,"pawns":[{"seat":2,"tile":0}]}""")]
     [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":27},{"seat":2,"tile":0}],"winner":1}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Pump","Pump","Rug","Hodl"]},{"seat":2,"tile":0}]}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":[99]},{"seat":2,"tile":0}]}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":0,"hand":["Joker"]},{"seat":2,"tile":0}]}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":0},{"seat":2,"tile":0}],"deck":["Pump",42]}""")]
+    [InlineData("""{"rulesVersion":1,"pawns":[{"seat":1,"tile":0},{"seat":2,"tile":0}],"discard":[-1]}""")]
     [InlineData("""{"rulesVersion":1}""")]
     [InlineData("""[]""")]
     public void A_state_the_server_cant_play_rejects_every_move_and_draws_nothing(string state)
@@ -359,11 +368,11 @@ public class ChogRaceMatchRulesTests
         var moved = Apply(room, players[0].Id, ChogRaceMatchRules.Roll, room.State!, new Dice(2)).State!.Value.GetRawText();
         var playing = StateWith([3, 0, 0], ""","playPhase":1""");
 
-        var views = players.Select(p => ViewOf(room, p.Id, moved)!.Value.GetRawText()).ToArray();
+        var views = players.Skip(1).Select(p => ViewOf(room, p.Id, moved)!.Value.GetRawText()).ToArray();
 
         Assert.Single(views.Distinct());
         var view = ViewOf(room, players[1].Id, moved)!.Value;
-        Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card"}""", view.GetProperty("lastMove").GetRawText());
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"Drawn"}""", view.GetProperty("lastMove").GetRawText());
         Assert.Equal("Move", view.GetProperty("phase").GetString());
         Assert.False(view.TryGetProperty("winner", out _));
         Assert.Equal("Play", ViewOf(room, players[2].Id, playing)!.Value.GetProperty("phase").GetString());
@@ -375,5 +384,183 @@ public class ChogRaceMatchRulesTests
     {
         Assert.Throws<ArgumentException>(() => new ChogRaceMatchRules([]));
         Assert.Throws<ArgumentNullException>(() => new ChogRaceMatchRules(null!));
+    }
+
+    /// <summary>
+    /// A stored state of version 1 with pawns on <paramref name="tiles"/> holding <paramref name="hands"/>, by seat from 1,
+    /// and the deck, top first, and discard pile.
+    /// </summary>
+    private static string CardState(int[] tiles, string[][] hands, string[] deck, string[] discard)
+    {
+        static string Cards(string[] cards) => $"[{string.Join(",", cards.Select(card => $"\"{card}\""))}]";
+        var pawns = tiles.Select((tile, i) =>
+            $$"""{"seat":{{i + 1}},"tile":{{tile}}{{(hands[i].Length == 0 ? "" : $",\"hand\":{Cards(hands[i])}")}}}""");
+        return $$"""{"rulesVersion":1,"pawns":[{{string.Join(",", pawns)}}],"deck":{{Cards(deck)}},"discard":{{Cards(discard)}}}""";
+    }
+
+    private static string[] Cards(JsonElement? cards) =>
+        cards is { ValueKind: JsonValueKind.Array } array ? array.EnumerateArray().Select(card => card.GetString()!).ToArray() : [];
+
+    private static string[] HandOf(MatchRuleDecision decision, int seat) =>
+        Cards(decision.State!.Value.GetProperty("pawns").EnumerateArray()
+            .Single(pawn => pawn.GetProperty("seat").GetInt32() == seat)
+            .TryGetProperty("hand", out var hand) ? hand : null);
+
+    private static string[] Pile(MatchRuleDecision decision, string pile) =>
+        Cards(decision.State!.Value.TryGetProperty(pile, out var cards) ? cards : null);
+
+    [Fact]
+    public void The_match_starts_with_the_whole_deck_shuffled_by_the_server_and_empty_hands()
+    {
+        var (room, _) = Started(2);
+        var random = new Dice([.. Enumerable.Repeat(0, 23)]);
+
+        var start = Rules.StartState(new MatchStartContext(room, random))!.Value;
+
+        // Fisher–Yates over 24 cards: one draw per position from the last, each here swapping it with the first.
+        Assert.Equal(Enumerable.Range(1, 23).Reverse().Select(i => (0, i + 1)), random.Draws);
+        var shuffled = RaceRulesV1.Rules.Deck.Select(card => card.ToString()).ToArray();
+        for (var i = shuffled.Length - 1; i > 0; i--)
+        {
+            (shuffled[i], shuffled[0]) = (shuffled[0], shuffled[i]);
+        }
+
+        Assert.Equal(shuffled, Cards(start.GetProperty("deck")));
+        Assert.Empty(Cards(start.GetProperty("discard")));
+        Assert.All(start.GetProperty("pawns").EnumerateArray(), pawn => Assert.False(pawn.TryGetProperty("hand", out _)));
+    }
+
+    [Fact]
+    public void Every_player_sees_the_deck_size_but_never_its_order()
+    {
+        var (room, players) = Started(2);
+
+        var view = View(room, players[0].Id);
+
+        Assert.Equal(
+            (24, 0, 3),
+            (view.GetProperty("deck").GetInt32(), view.GetProperty("discard").GetInt32(), view.GetProperty("maxHand").GetInt32()));
+        Assert.Empty(Cards(view.GetProperty("hand")));
+        Assert.Equal([0, 0], view.GetProperty("pawns").EnumerateArray().Select(pawn => pawn.GetProperty("cards").GetInt32()));
+        Assert.DoesNotContain("Pump", view.GetRawText());
+    }
+
+    [Fact]
+    public void Landing_on_a_card_tile_draws_the_top_card_and_still_ends_the_turn()
+    {
+        var (room, players) = Started(2);
+        var dice = new Dice(2);
+
+        var decision = Apply(
+            room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0], [["Rug"], []], ["Pump", "Whale"], ["Fomo"]), dice);
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
+        Assert.Single(dice.Draws);
+        Assert.Equal(["Rug", "Pump"], HandOf(decision, 1));
+        Assert.Empty(HandOf(decision, 2));
+        Assert.Equal(["Whale"], Pile(decision, "deck"));
+        Assert.Equal(["Fomo"], Pile(decision, "discard"));
+        Assert.False(decision.State!.Value.TryGetProperty("playPhase", out _));
+        Assert.Equal(
+            """{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"Drawn","card":"Pump"}""",
+            LastMove(decision));
+    }
+
+    [Fact]
+    public void A_full_hand_draws_nothing_and_leaves_the_deck_alone()
+    {
+        var (room, players) = Started(2);
+        var state = CardState([0, 0], [["Rug", "Hodl", "Pump"], []], ["Pump"], []);
+
+        var decision = Apply(room, players[0].Id, ChogRaceMatchRules.Roll, state, new Dice(2));
+
+        Assert.True(decision.EndsTurn);
+        Assert.Equal(["Rug", "Hodl", "Pump"], HandOf(decision, 1));
+        Assert.Equal(["Pump"], Pile(decision, "deck"));
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"HandFull"}""", LastMove(decision));
+    }
+
+    [Fact]
+    public void An_empty_deck_is_refilled_from_the_discard_pile_and_the_hands_of_players_who_left()
+    {
+        var (room, players) = Started(3);
+        room.Leave(players[2].Id, Now.AddMinutes(2));
+        var state = CardState([0, 0, 5], [[], ["Hodl"], ["Whale"]], [], ["Pump", "Rug"]);
+        // The roll of 2, then the shuffle of [Pump, Rug, Whale]: position 2 swaps with 0, position 1 stays.
+        var dice = new Dice(2, 0, 1);
+
+        var decision = Apply(room, players[0].Id, ChogRaceMatchRules.Roll, state, dice);
+
+        Assert.Equal([(1, 4), (0, 3), (0, 2)], dice.Draws);
+        Assert.Equal(["Whale"], HandOf(decision, 1));
+        Assert.Equal(["Hodl"], HandOf(decision, 2));
+        Assert.Empty(HandOf(decision, 3));
+        Assert.Equal(["Rug", "Pump"], Pile(decision, "deck"));
+        Assert.Empty(Pile(decision, "discard"));
+        Assert.Equal(
+            """{"seat":1,"roll":2,"from":0,"landed":2,"to":2,"effect":"Card","draw":"Drawn","card":"Whale","reshuffled":true}""",
+            LastMove(decision));
+    }
+
+    [Fact]
+    public void With_every_card_in_a_hand_nothing_is_drawn()
+    {
+        var (room, players) = Started(2);
+        var dice = new Dice(2);
+
+        var decision = Apply(room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0], [[], ["Pump"]], [], []), dice);
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
+        Assert.Single(dice.Draws);
+        Assert.Empty(HandOf(decision, 1));
+        Assert.Equal(["Pump"], HandOf(decision, 2));
+        Assert.Equal("NoCards", decision.State!.Value.GetProperty("lastMove").GetProperty("draw").GetString());
+    }
+
+    [Fact]
+    public void A_hand_is_shown_only_to_its_owner_and_the_others_see_how_many_cards_it_holds()
+    {
+        var (room, players) = Started(3);
+        var drawn = Apply(
+            room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0, 0], [["Rug"], ["Hodl", "Fomo"], []], ["Pump"], []), new Dice(2));
+        var state = drawn.State!.Value.GetRawText();
+
+        var own = ViewOf(room, players[0].Id, state)!.Value;
+        var other = ViewOf(room, players[1].Id, state)!.Value;
+
+        Assert.Equal(["Rug", "Pump"], Cards(own.GetProperty("hand")));
+        Assert.Equal("Pump", own.GetProperty("lastMove").GetProperty("card").GetString());
+        Assert.Equal(["Hodl", "Fomo"], Cards(other.GetProperty("hand")));
+        Assert.False(other.GetProperty("lastMove").TryGetProperty("card", out _));
+        Assert.DoesNotContain("Rug", other.GetRawText());
+        Assert.DoesNotContain("Pump", other.GetRawText());
+        Assert.Equal([2, 2, 0], other.GetProperty("pawns").EnumerateArray().Select(pawn => pawn.GetProperty("cards").GetInt32()));
+        Assert.Equal((0, 0), (other.GetProperty("deck").GetInt32(), other.GetProperty("discard").GetInt32()));
+    }
+
+    [Fact]
+    public void A_player_who_left_sees_no_hand()
+    {
+        var (room, players) = Started(3);
+        room.Leave(players[2].Id, Now.AddMinutes(2));
+        var state = CardState([0, 0, 0], [[], [], ["Pump"]], [], []);
+
+        var view = ViewOf(room, players[2].Id, state)!.Value;
+
+        Assert.False(view.TryGetProperty("hand", out _));
+        Assert.DoesNotContain("Pump", view.GetRawText());
+    }
+
+    [Fact]
+    public void Holding_cards_doesnt_open_the_play_phase_while_none_can_be_played()
+    {
+        var (room, players) = Started(2);
+
+        var decision = Apply(
+            room, players[0].Id, ChogRaceMatchRules.Roll, CardState([0, 0], [["Pump", "Hodl"], []], ["Whale"], []), new Dice(1));
+
+        Assert.True(decision.EndsTurn);
+        Assert.False(decision.State!.Value.TryGetProperty("playPhase", out _));
+        Assert.Equal(["Pump", "Hodl"], HandOf(decision, 1));
     }
 }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ChogGames.Api.Matches;
+using ChogGames.Games.ChogRace.Rules;
 using ChogGames.Infrastructure.Matches;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -130,9 +131,10 @@ public sealed class ChogRaceBoardTests(MigratedPostgresDatabase database) : ICla
         {
             var room = await StartedAsync(players);
 
-            // Stored as jsonb, which orders keys by length.
+            // Stored as jsonb, which orders keys by length. The deck, shuffled without reordering it here, stays on the server.
+            var deck = string.Join(",", RaceRulesV1.Rules.Deck.Select(card => $"\"{card}\""));
             Assert.Equal(
-                """{"pawns":[""" + string.Join(",", Enumerable.Range(1, count).Select(s => $$"""{"seat":{{s}},"tile":0}""")) + """],"rulesVersion":1}""",
+                $$"""{"deck":[{{deck}}],"pawns":[""" + string.Join(",", Enumerable.Range(1, count).Select(s => $$"""{"seat":{{s}},"tile":0}""")) + """],"discard":[],"rulesVersion":1}""",
                 (await StoredAsync(room)).State);
             Assert.Equal(("Active", (DateTimeOffset?)null), (room.Status, room.MatchEndsAt));
             foreach (var player in players)

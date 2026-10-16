@@ -787,7 +787,7 @@
 
 #### STORY-052 — Deck and hand management
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E08
 - **Implementation:** Define shuffled deck, discard, draw and max hand of 3.
