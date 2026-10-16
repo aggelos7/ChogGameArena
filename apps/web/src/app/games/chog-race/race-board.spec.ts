@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { RoomMember } from '../../rooms/rooms-api';
+import { RoomAbility, RoomMember } from '../../rooms/rooms-api';
 import { RACE_BOARD, RACE_TILES } from '../../testing';
 import { seatColor } from '../seats';
 import { RaceBoardView } from './race-board';
@@ -625,6 +625,208 @@ describe('Chog Race board attacks and defense (STORY-054)', () => {
     expect(page.querySelector('[data-seat="3"] [data-skipping]')).not.toBeNull();
     render({ phase: 'Move', lastMove: { seat: 2, ...roll, play: { card: 'Liquidated', target: 1 } } }, bobsTurn);
     expect(text('[data-last-play]')).toBe('Bob played Liquidated: you skip your next turn.');
+  });
+});
+
+describe('Chog Race board abilities (STORY-055)', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+  let uses: unknown[];
+
+  const pawns = [
+    { seat: 1, tile: 5, cards: 1 },
+    { seat: 2, tile: 0, cards: 0 },
+    { seat: 3, tile: 12, cards: 2 },
+  ];
+  const ability = (id: string, name: string, usesLeft = 1) => ({
+    id,
+    name,
+    description: '',
+    target: (id === 'card_steal' ? 'Opponent' : 'None') as RoomAbility['target'],
+    maxUses: 1,
+    usesLeft,
+  });
+  const players = (yours: RoomAbility, yourTurn = true) => [
+    member('Alice', 1, { isYou: true, isTurn: yourTurn, ability: yours, hasAbility: true }),
+    member('Bob', 2, { isTurn: !yourTurn, ability: ability('attack_block', 'Shield'), hasAbility: true }),
+    member('Carol', 3, { ability: ability('card_steal', 'Card Steal'), hasAbility: true }),
+  ];
+
+  function render(board: Partial<RaceBoard>, members: RoomMember[], rolling = false): void {
+    fixture.componentRef.setInput('board', { ...RACE_BOARD, pawns, deck: 5, maxHand: 3, hand: ['Pump'], ...board });
+    fixture.componentRef.setInput('members', members);
+    fixture.componentRef.setInput('rolling', rolling);
+    fixture.detectChanges();
+  }
+
+  const text = (selector: string) => page.querySelector(selector)?.textContent?.trim();
+  const labels = () => Array.from(page.querySelectorAll('[data-ability]')).map((button) => button.textContent?.trim());
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+    uses = [];
+    fixture.componentInstance.useAbility.subscribe((use) => uses.push(use));
+  });
+
+  it('reads armed abilities, the card Card Vision shows and the latest ability used', () => {
+    const board = {
+      ...RACE_BOARD,
+      pawns: [{ seat: 1, tile: 0, cards: 1, boost: 2, shielded: true }],
+      lastMove: { seat: 1, roll: 2, from: 0, landed: 4, to: 6, effect: 'Boost', boost: 2, play: { card: 'Rug', target: 2, reply: 'Shielded' } },
+      next: 'Whale',
+      ability: { seat: 1, ability: 'card_steal', target: 2, card: 'Hodl' },
+    };
+    expect(toRaceBoard(board)).toBe(board);
+    expect(toRaceBoard({ ...board, next: 'Joker' })).toBeNull();
+    expect(toRaceBoard({ ...board, ability: { seat: 1 } })).toBeNull();
+    expect(toRaceBoard({ ...board, ability: { seat: 1, ability: 'card_steal', card: 'Joker' } })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, shielded: 'yes' }] })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, boost: -2 }] })).toBeNull();
+    const pushedDraw = { card: 'Reverse', pushed: [{ seat: 2, from: 8, landed: 7, to: 7, draw: 'Drawn', card: 'Rug', reshuffled: true }] };
+    const withPush = { ...board, lastMove: { seat: 1, roll: 1, from: 0, landed: 1, to: 1, play: pushedDraw } };
+    expect(toRaceBoard(withPush)).toBe(withPush);
+    expect(toRaceBoard({ ...withPush, lastMove: { ...withPush.lastMove, play: { card: 'Reverse', pushed: [{ seat: 2, from: 8, landed: 7, to: 7, draw: 'Lost' }] } } })).toBeNull();
+    expect(toRaceBoard({ ...withPush, lastMove: { ...withPush.lastMove, play: { card: 'Reverse', pushed: [{ seat: 2, from: 8, landed: 7, to: 7, card: 'Joker' }] } } })).toBeNull();
+  });
+
+  it('offers Speed Boost only before the roll and while not armed', () => {
+    const speed = ability('movement_boost', 'Speed Boost');
+    render({ phase: 'Move' }, players(speed));
+    expect(labels()).toEqual(['Use Speed Boost: +2 to your roll']);
+    page.querySelector<HTMLButtonElement>('[data-ability]')?.click();
+    expect(uses).toEqual([{ abilityId: 'movement_boost', target: undefined }]);
+
+    render({ phase: 'Play', playable: ['Pump'] }, players(speed));
+    expect(labels()).toEqual([]);
+    render({ phase: 'Move', pawns: [{ seat: 1, tile: 5, cards: 1, boost: 2 }, ...pawns.slice(1)] }, players(speed));
+    expect(labels()).toEqual([]);
+    expect(text('[data-seat="1"] [data-boosted]')).toBe('Boost +2');
+  });
+
+  it('offers Card Steal on each opponent holding a card while your hand has room', () => {
+    render({ phase: 'Move' }, players(ability('card_steal', 'Card Steal')));
+    expect(labels()).toEqual(['Card Steal: from Carol']);
+    page.querySelector<HTMLButtonElement>('[data-ability]')?.click();
+    expect(uses).toEqual([{ abilityId: 'card_steal', target: 3 }]);
+
+    render({ phase: 'Play', hand: ['Pump', 'Rug', 'Hodl'], playable: ['Pump', 'Rug'] }, players(ability('card_steal', 'Card Steal')));
+    expect(labels()).toEqual([]);
+  });
+
+  it('offers Shield and Card Vision before or after the roll, once, and nothing off your turn', () => {
+    render({ phase: 'Play', playable: ['Pump'] }, players(ability('attack_block', 'Shield')));
+    expect(labels()).toEqual(['Use Shield']);
+    render({ phase: 'Move' }, players(ability('card_preview', 'Card Vision')));
+    expect(labels()).toEqual(['Use Card Vision: see the next card']);
+
+    render({ phase: 'Move', deck: 0 }, players(ability('card_preview', 'Card Vision')));
+    expect(labels()).toEqual([]);
+    render({ phase: 'Move' }, players(ability('card_preview', 'Card Vision', 0)));
+    expect(labels()).toEqual([]);
+    render({ phase: 'Move' }, players(ability('card_preview', 'Card Vision'), false));
+    expect(labels()).toEqual([]);
+    render({ phase: 'Reply', reply: { seat: 1, card: 'Rug', target: 2 } }, players(ability('card_preview', 'Card Vision')));
+    expect(labels()).toEqual([]);
+    render({ phase: 'Move' }, players(ability('card_preview', 'Card Vision')), true);
+    expect(page.querySelector<HTMLButtonElement>('[data-ability]')?.disabled).toBe(true);
+  });
+
+  it('shows raised Shields, the card Card Vision shows you and the latest ability used', () => {
+    render(
+      {
+        phase: 'Move',
+        pawns: [pawns[0], { seat: 2, tile: 0, cards: 0, shielded: true }, pawns[2]],
+        next: 'Whale',
+        ability: { seat: 3, ability: 'card_steal', target: 1, card: 'Hodl' },
+      },
+      players(ability('card_preview', 'Card Vision', 0)),
+    );
+
+    expect(page.querySelector('[data-seat="2"] [data-shielded]')?.textContent?.trim()).toBe('Shielded');
+    expect(page.querySelector('[data-seat="1"] [data-shielded]')).toBeNull();
+    expect(text('[data-next-card]')).toBe('Next card in the deck: Whale. Only you can see this.');
+    expect(text('[data-last-ability]')).toBe('Carol used Card Steal and took HODL from you.');
+
+    render({ phase: 'Move', ability: { seat: 3, ability: 'card_steal', target: 2 } }, players(ability('card_preview', 'Card Vision', 0)));
+    expect(text('[data-last-ability]')).toBe('Carol used Card Steal and took a card from Bob.');
+    expect(page.querySelector('[data-next-card]')).toBeNull();
+    render({ phase: 'Move', ability: { seat: 2, ability: 'attack_block' } }, players(ability('card_preview', 'Card Vision', 0)));
+    expect(text('[data-last-ability]')).toBe('Bob used Shield.');
+  });
+
+  it('always shows your ability, its uses left and why it can’t be used now', () => {
+    const steal = ability('card_steal', 'Card Steal');
+    const status = () => text('[data-ability-status]');
+
+    render({ phase: 'Move' }, players(steal, false));
+    expect(text('[data-your-ability] h3')).toContain('Your ability: Card Steal');
+    expect(text('[data-uses-left]')).toBe('1/1 left');
+    expect(status()).toBe('Use it on your turn.');
+    render({ phase: 'Move' }, players(steal));
+    expect(page.querySelector('[data-your-ability] [data-ability="card_steal"]')).not.toBeNull();
+    expect(page.querySelector('[data-ability-status]')).toBeNull();
+    render({ phase: 'Move', pawns: [pawns[0], pawns[1], { seat: 3, tile: 12, cards: 0 }] }, players(steal));
+    expect(status()).toBe('No opponent holds a card.');
+    render({ phase: 'Move', hand: ['Pump', 'Rug', 'Hodl'] }, players(steal));
+    expect(status()).toBe('Your hand is full.');
+    render({ phase: 'Reply', reply: { seat: 2, card: 'Rug', target: 3 } }, players(steal, false));
+    expect(status()).toBe('Not while an attack waits for an answer.');
+
+    render({ phase: 'Play', playable: ['Pump'] }, players(ability('movement_boost', 'Speed Boost')));
+    expect(status()).toBe('Only before you roll.');
+    render({ phase: 'Move', pawns: [{ seat: 1, tile: 5, cards: 1, boost: 2 }, ...pawns.slice(1)] }, players(ability('movement_boost', 'Speed Boost', 0), false));
+    expect(status()).toBe('Armed: your next roll moves 2 more.');
+    render({ phase: 'Move', pawns: [{ seat: 1, tile: 5, cards: 1, shielded: true }, ...pawns.slice(1)] }, players(ability('attack_block', 'Shield', 0)));
+    expect(status()).toBe('Raised: it blocks the next Rug, Liquidated or Whale played on you.');
+    render({ phase: 'Move' }, players(ability('card_preview', 'Card Vision', 0)));
+    expect(status()).toBe('Used.');
+    expect(text('[data-uses-left]')).toBe('0/1 left');
+    render({ phase: 'Move', deck: 0 }, players(ability('card_preview', 'Card Vision')));
+    expect(status()).toBe('The deck is empty.');
+
+    // Not once the match is over.
+    render({ phase: undefined }, players(steal));
+    expect(page.querySelector('[data-your-ability]')).toBeNull();
+  });
+
+  it('says what a pawn pushed onto a Card tile drew, naming the card only to its player', () => {
+    render(
+      {
+        phase: 'Move',
+        lastMove: {
+          seat: 3,
+          roll: 1,
+          from: 11,
+          landed: 12,
+          to: 15,
+          effect: 'Boost',
+          play: {
+            card: 'Reverse',
+            pushed: [
+              { seat: 1, from: 8, landed: 7, to: 7, draw: 'Drawn', card: 'Rug' },
+              { seat: 2, from: 10, landed: 9, to: 7, effect: 'Setback', draw: 'Drawn' },
+            ],
+          },
+        },
+      },
+      players(ability('card_preview', 'Card Vision'), false),
+    );
+
+    expect(text('[data-last-play]')).toBe(
+      'Carol played Reverse: you back to tile 7 and drew Rug, Bob back to tile 9, then set back to tile 7 and drew a card.',
+    );
+  });
+
+  it('says when a Speed Boost added to the roll and when a Shield blocked an attack', () => {
+    render(
+      { phase: 'Move', lastMove: { seat: 1, roll: 3, from: 0, landed: 5, to: 5, boost: 2, play: { card: 'Rug', target: 2, reply: 'Shielded' } } },
+      players(ability('movement_boost', 'Speed Boost', 0), false),
+    );
+
+    expect(text('[data-last-move]')).toBe('You rolled 3 (+2 Speed Boost) and moved to tile 5.');
+    expect(text('[data-last-play]')).toBe('You played Rug on Bob, blocked by a Shield.');
   });
 });
 

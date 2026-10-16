@@ -957,6 +957,26 @@ describe('Room page', () => {
       expect(pass.request.body).toMatchObject({ expectedVersion: 7, type: 'PASS', payload: {} });
     });
 
+    it('uses a Chog Race ability on your turn, naming Card Steal’s target (STORY-055)', () => {
+      const steal = { id: 'card_steal', name: 'Card Steal', description: '', target: 'Opponent' as const, maxUses: 1, usesLeft: 1 };
+      const started: Room = {
+        ...room,
+        version: 9,
+        gameType: 'chog-race',
+        status: 'Active',
+        state: { ...RACE_BOARD, phase: 'Move', pawns: [{ seat: 1, tile: 0, cards: 2 }, { seat: 2, tile: 0, cards: 0 }], hand: [], maxHand: 3 },
+        members: [
+          member('Alice', { isHost: true, seat: 1 }),
+          member('Bob', { isYou: true, seat: 2, isTurn: true, ability: steal, hasAbility: true }),
+        ],
+      };
+      load(started);
+
+      element().querySelector<HTMLButtonElement>('[data-ability="card_steal"]')?.click();
+      const use = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(use.request.body).toMatchObject({ expectedVersion: 9, type: 'USE_ABILITY', payload: { abilityId: 'card_steal', target: 1 } });
+    });
+
     it('keeps the final Chog Race board once the game is over', () => {
       load({
         ...room,

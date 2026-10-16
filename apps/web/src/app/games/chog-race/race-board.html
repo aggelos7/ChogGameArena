@@ -15,6 +15,12 @@
         @if (skipping().has(member.seat)) {
           <span class="tag" data-skipping>Skips a turn</span>
         }
+        @if (armed().get(member.seat)?.shielded) {
+          <span class="tag" data-shielded>Shielded</span>
+        }
+        @if (armed().get(member.seat)?.boost; as boost) {
+          <span class="tag" data-boosted>Boost +{{ boost }}</span>
+        }
       </li>
     }
   </ul>
@@ -35,6 +41,12 @@
   @if (lastPlay(); as play) {
     <p class="last-move" data-last-play>{{ play }}</p>
   }
+  @if (lastAbility(); as used) {
+    <p class="last-move" data-last-ability>{{ used }}</p>
+  }
+  @if (nextCard(); as next) {
+    <p class="last-move" data-next-card>Next card in the deck: {{ next }}. Only you can see this.</p>
+  }
   @if (hand(); as cards) {
     <section class="hand" aria-labelledby="race-hand-title" data-hand>
       <h3 id="race-hand-title">
@@ -51,6 +63,31 @@
         </ul>
       } @else {
         <p class="empty">None yet. Land on a Card tile to draw one.</p>
+      }
+    </section>
+  }
+  @if (yourAbility(); as ability) {
+    <section class="hand ability" aria-labelledby="race-ability-title" data-your-ability>
+      <h3 id="race-ability-title">
+        Your ability: {{ ability.name }} <span class="count" data-uses-left>{{ ability.usesLeft }}/{{ ability.maxUses }} left</span>
+      </h3>
+      <p class="card-text">{{ ability.description }}</p>
+      @if (abilityPlays().length > 0) {
+        <div class="plays" role="group" aria-label="Use your ability" data-abilities>
+          @for (use of abilityPlays(); track use.label) {
+            <button
+              type="button"
+              class="action"
+              [disabled]="rolling()"
+              (click)="useAbility.emit({ abilityId: use.abilityId, target: use.target })"
+              [attr.data-ability]="use.abilityId"
+            >
+              {{ use.label }}
+            </button>
+          }
+        </div>
+      } @else if (ability.status) {
+        <p class="empty" data-ability-status>{{ ability.status }}</p>
       }
     </section>
   }

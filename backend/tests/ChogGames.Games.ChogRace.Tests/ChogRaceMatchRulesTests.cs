@@ -778,7 +778,7 @@ public class ChogRaceMatchRulesTests
             room, players[0].Id, PlayState([10, 0, 5, 24, 8], [["Reverse"], [], [], [], []], deck: ["Rug"]), new NoDraws(), """{"card":"Reverse"}""");
 
         // Seat 2 is on the start already; seat 3 lands on the Boost at 4 and jumps to 6; seat 4 on the Setback at 23 and
-        // falls back to 21; seat 5 left. Nobody draws on another player's turn.
+        // falls back to 21; seat 5 left. None ends on a Card tile, so nobody draws.
         Assert.Equal([10, 0, 6, 21, 8], Tiles(decision));
         Assert.Equal(
             """{"card":"Reverse","pushed":[{"seat":3,"from":5,"landed":4,"to":6,"effect":"Boost"},{"seat":4,"from":24,"landed":23,"to":21,"effect":"Setback"}]}""",
@@ -787,15 +787,43 @@ public class ChogRaceMatchRulesTests
     }
 
     [Fact]
-    public void A_pawn_reverse_pushes_onto_a_card_tile_draws_nothing()
+    public void A_pawn_reverse_pushes_onto_a_card_tile_draws_there_seen_only_by_its_player()
+    {
+        var (room, players) = Started(3);
+
+        // Seat 2 lands on the Card tile at 7; seat 3 on the Setback at 9, which sends it to 7 as well. Both draw, in seat
+        // order, on seat 1's turn (DEC-057, revised in STORY-055).
+        var decision = Play(
+            room, players[0].Id, PlayState([10, 8, 10], [["Reverse"], [], []], deck: ["Rug", "Hodl"]), new NoDraws(), """{"card":"Reverse"}""");
+
+        Assert.Equal([10, 7, 7], Tiles(decision));
+        Assert.Equal(
+            """{"card":"Reverse","pushed":[{"seat":2,"from":8,"landed":7,"to":7,"draw":"Drawn","card":"Rug"},{"seat":3,"from":10,"landed":9,"to":7,"effect":"Setback","draw":"Drawn","card":"Hodl"}]}""",
+            PlayOf(decision));
+        Assert.Equal(["Rug"], HandOf(decision, 2));
+        Assert.Equal(["Hodl"], HandOf(decision, 3));
+        Assert.Empty(Pile(decision, "deck"));
+
+        var state = decision.State!.Value.GetRawText();
+        string Pushes(Player viewer) =>
+            ViewOf(room, viewer.Id, state)!.Value.GetProperty("lastMove").GetProperty("play").GetProperty("pushed").GetRawText();
+        Assert.Equal(
+            """[{"seat":2,"from":8,"landed":7,"to":7,"draw":"Drawn"},{"seat":3,"from":10,"landed":9,"to":7,"effect":"Setback","draw":"Drawn"}]""",
+            Pushes(players[0]));
+        Assert.Equal(
+            """[{"seat":2,"from":8,"landed":7,"to":7,"draw":"Drawn","card":"Rug"},{"seat":3,"from":10,"landed":9,"to":7,"effect":"Setback","draw":"Drawn"}]""",
+            Pushes(players[1]));
+    }
+
+    [Fact]
+    public void A_pushed_pawn_with_a_full_hand_draws_nothing()
     {
         var (room, players) = Started(2);
 
-        var decision = Play(room, players[0].Id, PlayState([10, 8], [["Reverse"], []], deck: ["Rug"]), new NoDraws(), """{"card":"Reverse"}""");
+        var decision = Play(
+            room, players[0].Id, PlayState([10, 8], [["Reverse"], ["Pump", "Pump", "Fomo"]], deck: ["Rug"]), new NoDraws(), """{"card":"Reverse"}""");
 
-        Assert.Equal([10, 7], Tiles(decision));
-        Assert.Equal("""{"card":"Reverse","pushed":[{"seat":2,"from":8,"landed":7,"to":7}]}""", PlayOf(decision));
-        Assert.Empty(HandOf(decision, 2));
+        Assert.Equal("""{"card":"Reverse","pushed":[{"seat":2,"from":8,"landed":7,"to":7,"draw":"HandFull"}]}""", PlayOf(decision));
         Assert.Equal(["Rug"], Pile(decision, "deck"));
     }
 
@@ -887,7 +915,7 @@ public class ChogRaceMatchRulesTests
     }
 
     [Theory]
-    [InlineData(13, 9, 7, "Setback")] // onto the Setback at 9, back to 7, a Card tile that draws nothing
+    [InlineData(13, 9, 7, "Setback")] // onto the Setback at 9, back to 7, a Card tile that draws (revised in STORY-055)
     [InlineData(8, 4, 6, "Boost")] // onto the Boost at 4, on to 6
     [InlineData(3, 0, 0, null)] // no further back than the Start
     public void Rug_stops_at_the_start_and_follows_the_boost_or_setback_it_lands_on(int from, int landed, int to, string? effect)
@@ -897,10 +925,13 @@ public class ChogRaceMatchRulesTests
         var decision = Play(room, players[0].Id, PlayState([5, from], [["Rug"], []], deck: ["Pump"]), new NoDraws(), """{"card":"Rug","target":2}""");
 
         Assert.Equal([5, to], Tiles(decision));
-        var push = $$"""{"seat":2,"from":{{from}},"landed":{{landed}},"to":{{to}}""" + (effect is null ? "}" : $$""","effect":"{{effect}}"}""");
+        var drew = to == 7;
+        var push = $$"""{"seat":2,"from":{{from}},"landed":{{landed}},"to":{{to}}"""
+            + (effect is null ? "" : $",\"effect\":\"{effect}\"")
+            + (drew ? ""","draw":"Drawn","card":"Pump"}""" : "}");
         Assert.Equal($$"""{"card":"Rug","target":2,"pushed":[{{push}}]}""", PlayOf(decision));
-        Assert.Empty(HandOf(decision, 2));
-        Assert.Equal(["Pump"], Pile(decision, "deck"));
+        Assert.Equal(drew ? ["Pump"] : [], HandOf(decision, 2));
+        Assert.Equal(drew ? [] : ["Pump"], Pile(decision, "deck"));
     }
 
     [Fact]

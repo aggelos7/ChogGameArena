@@ -20,7 +20,7 @@ namespace ChogGames.Api.Tests.Matches;
 /// Ability execution and usage tracking (STORY-034, NFT-014, NFT-015, NFT-016, DEC-036): <c>USE_ABILITY</c> goes to the
 /// shared engine under the room's lock, so only the ability a player locked at start can be used, on their own turn, at
 /// most its max uses, with the values locked then; a use is counted once even when sent concurrently, and every refusal
-/// changes nothing. Chog Life plays a small shield-and-steal game here; Chog Race has no abilities.
+/// changes nothing. Chog Life plays a small shield-and-steal game here; Chog Race's catalog is taken out, as by the test host.
 /// </summary>
 public sealed class AbilityExecutionTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
