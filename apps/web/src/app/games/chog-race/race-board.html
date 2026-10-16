@@ -27,6 +27,9 @@
   @if (lastMove(); as move) {
     <p class="last-move" data-last-move>{{ move }}</p>
   }
+  @if (lastPlay(); as play) {
+    <p class="last-move" data-last-play>{{ play }}</p>
+  }
   @if (hand(); as cards) {
     <section class="hand" aria-labelledby="race-hand-title" data-hand>
       <h3 id="race-hand-title">
@@ -35,7 +38,10 @@
       @if (cards.length > 0) {
         <ul>
           @for (card of cards; track $index) {
-            <li class="card" data-card>{{ card }}</li>
+            <li class="card" data-card>
+              <span class="card-name">{{ card.name }}</span>
+              <span class="card-text">{{ card.description }}</span>
+            </li>
           }
         </ul>
       } @else {
@@ -49,6 +55,21 @@
   @if (yourPhase() === 'Move') {
     <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
   } @else if (yourPhase() === 'Play') {
+    @if (plays().length > 0) {
+      <div class="plays" role="group" aria-label="Play a card, which ends your turn" data-plays>
+        @for (play of plays(); track play.label) {
+          <button
+            type="button"
+            class="action"
+            [disabled]="rolling()"
+            (click)="playCard.emit({ card: play.card, target: play.target })"
+            [attr.data-play]="play.card"
+          >
+            {{ play.label }}
+          </button>
+        }
+      </div>
+    }
     <button type="button" class="action" [disabled]="rolling()" (click)="endTurn.emit()" data-end-turn>End turn</button>
   }
 

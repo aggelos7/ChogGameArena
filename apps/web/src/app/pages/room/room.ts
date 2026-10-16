@@ -24,8 +24,8 @@ import { LifeResultsView, toLifeResult } from '../../games/chog-life/life-result
 import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
-import { RaceBoardView } from '../../games/chog-race/race-board';
-import { RACE_END_TURN, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
+import { RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
+import { RACE_END_TURN, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
 
 /** NFT Chogs have no colour of their own here; they use the brand colour. */
 const NFT_COLOR = 'var(--brand)';
@@ -241,6 +241,11 @@ export class RoomPage implements OnInit {
   /** Ends a Chog Race turn in its Play phase without playing a card (STORY-051, DEC-055); refusals as for a roll. */
   protected endTurn(): void {
     this.command(RACE_END_TURN);
+  }
+
+  /** Plays a Chog Race card in the Play phase, which ends the turn (STORY-053, DEC-057); refusals as for a roll. */
+  protected playCard(play: RaceCardPlay): void {
+    this.command(RACE_PLAY_CARD, play.target === undefined ? { card: play.card } : { card: play.card, target: play.target });
   }
 
   /** Chooses the route to leave a fork by, after a roll stopped there (STORY-039, DEC-041); refusals as for a roll. */
