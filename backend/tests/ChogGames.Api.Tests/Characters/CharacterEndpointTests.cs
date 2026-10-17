@@ -36,6 +36,16 @@ public sealed class CharacterEndpointTests(MigratedPostgresDatabase database) : 
 
     private sealed record ProblemDto(Dictionary<string, string[]>? Errors, string? Detail);
 
+    private sealed record BadgeDto(string Id, string Name);
+
+    private sealed record MilestoneDto(string Id, string Name, int MinChogs);
+
+    private sealed record CollectorDto(int ChogsHeld, BadgeDto? Badge, MilestoneDto? Next);
+
+    private sealed record TiersDto(MilestoneDto[] Tiers);
+
+    private sealed record ProfileDto(CollectorDto Collector);
+
     public async Task InitializeAsync()
     {
         if (database.ConnectionString.Length > 0)
@@ -83,6 +93,12 @@ public sealed class CharacterEndpointTests(MigratedPostgresDatabase database) : 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<CharactersDto>(Json))!;
     }
+
+    private static async Task<CollectorDto> CollectorAsync(HttpClient client) =>
+        (await client.GetFromJsonAsync<ProfileDto>("/api/profile", Json))!.Collector;
+
+    private static OwnedNft[] Chogs(int count) =>
+        [.. Enumerable.Range(1, count).Select(i => Nft((ulong)i, $"CHOG #{i}", []))];
 
     private static Task<HttpResponseMessage> SelectAsync(HttpClient client, object? body) =>
         client.PutAsJsonAsync("/api/characters/selected", body);
@@ -335,6 +351,106 @@ public sealed class CharacterEndpointTests(MigratedPostgresDatabase database) : 
         await using var db = database.CreateDbContext();
         var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync(
             "UPDATE \"Players\" SET \"SelectedCharacterKind\" = 'Nft', \"SelectedCharacterId\" = '1'"));
+
+        Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
+    }
+
+    [PostgresFact]
+    public async Task A_gallery_read_records_the_chogs_held_and_the_profile_shows_the_collector_tier()
+    {
+        var (client, _) = await HolderAsync(Chogs(3));
+        var before = await CollectorAsync(client);
+
+        await GetAsync(client);
+
+        Assert.Equal(new CollectorDto(0, null, new MilestoneDto("holder", "Holder", 1)), before);
+        Assert.Equal(new CollectorDto(3, new BadgeDto("collector", "Collector"), new MilestoneDto("patron", "Patron", 5)), await CollectorAsync(client));
+    }
+
+    [PostgresFact]
+    public async Task The_profile_lists_every_collector_tier_from_the_lowest_for_guests_and_holders()
+    {
+        using var guest = await GuestAsync();
+        var (holder, _) = await HolderAsync(Chogs(12));
+        await GetAsync(holder);
+
+        MilestoneDto[] expected =
+            [new("holder", "Holder", 1), new("collector", "Collector", 3), new("patron", "Patron", 5), new("whale", "Whale", 10)];
+        foreach (var client in new[] { guest, holder })
+        {
+            var profile = await client.GetFromJsonAsync<JsonElement>("/api/profile", Json);
+            Assert.Equal(expected, profile.GetProperty("collector").Deserialize<TiersDto>(Json)!.Tiers);
+        }
+    }
+
+    [PostgresTheory]
+    [InlineData(1, "holder", "collector")]
+    [InlineData(4, "collector", "patron")]
+    [InlineData(5, "patron", "whale")]
+    [InlineData(12, "whale", null)]
+    public async Task The_highest_milestone_reached_is_the_tier(int held, string tier, string? next)
+    {
+        var (client, _) = await HolderAsync(Chogs(held));
+
+        await GetAsync(client);
+        var collector = await CollectorAsync(client);
+
+        Assert.Equal((held, tier, next), (collector.ChogsHeld, collector.Badge?.Id, collector.Next?.Id));
+    }
+
+    [PostgresFact]
+    public async Task The_tier_follows_current_holdings_down_as_well_as_up()
+    {
+        var (client, wallet) = await HolderAsync(Chogs(5));
+        await GetAsync(client);
+
+        _chain.Holdings[wallet] = [Chog1];
+        await GetAsync(client);
+        var sold = await CollectorAsync(client);
+        _chain.Holdings[wallet] = [];
+        await GetAsync(client);
+
+        Assert.Equal((1, "holder"), (sold.ChogsHeld, sold.Badge?.Id));
+        Assert.Equal(new CollectorDto(0, null, new MilestoneDto("holder", "Holder", 1)), await CollectorAsync(client));
+    }
+
+    [PostgresFact]
+    public async Task A_failed_ownership_read_keeps_the_recorded_holdings()
+    {
+        var (client, wallet) = await HolderAsync(Chogs(3));
+        await GetAsync(client);
+
+        _chain.Holdings[wallet] = [];
+        _chain.Down = true;
+        await GetAsync(client);
+        var collector = await CollectorAsync(client);
+
+        Assert.Equal((3, "collector"), (collector.ChogsHeld, collector.Badge?.Id));
+    }
+
+    [PostgresFact]
+    public async Task A_guest_holds_no_chogs_and_profile_reads_never_touch_the_chain()
+    {
+        using var client = await GuestAsync();
+
+        await GetAsync(client);
+
+        Assert.Equal(new CollectorDto(0, null, new MilestoneDto("holder", "Holder", 1)), await CollectorAsync(client));
+        Assert.Equal(0, _chain.Calls);
+    }
+
+    [PostgresTheory]
+    [InlineData("UPDATE \"Players\" SET \"ChogsHeld\" = 1 WHERE \"Kind\" = 'Guest'")]
+    [InlineData("UPDATE \"Players\" SET \"ChogsHeld\" = -1")]
+    public async Task The_database_refuses_holdings_for_a_guest_or_below_zero(string sql)
+    {
+        using var guest = await GuestAsync();
+        var (holder, _) = await HolderAsync(Chogs(1));
+        await GetAsync(guest);
+        await GetAsync(holder);
+
+        await using var db = database.CreateDbContext();
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlRawAsync(sql));
 
         Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
     }

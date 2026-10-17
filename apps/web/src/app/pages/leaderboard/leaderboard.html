@@ -59,9 +59,12 @@
 
 <ng-template #row let-entry>
   <span class="place">{{ entry.place }}</span>
-  <app-avatar-badge [avatar]="entry.avatar" [name]="entry.displayName" [size]="2" />
+  <app-avatar-badge [avatar]="entry.avatar" [name]="entry.displayName" [size]="2" [frame]="entry.collector" />
   <span class="player">
     <span class="name">{{ entry.displayName }}</span>
+    @if (entry.collector; as collector) {
+      <app-collector-chip [badge]="collector" />
+    }
     @if (entry.isYou) {
       <span class="tag">You</span>
     }

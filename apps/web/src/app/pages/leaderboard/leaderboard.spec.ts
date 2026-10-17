@@ -11,6 +11,7 @@ describe('Leaderboard page', () => {
     place,
     displayName,
     avatar,
+    collector: null,
     xp,
     wins,
     isYou,
@@ -66,6 +67,16 @@ describe('Leaderboard page', () => {
     expect(second.querySelector('[data-wins]')?.textContent).toBe('1 win');
     expect(element().querySelector('[data-own-place]')).toBeNull();
     expect(element().querySelector('[data-season]')).toBeNull();
+  });
+
+  it('shows a collector badge and avatar frame only for players who have one', () => {
+    load({ ...board, entries: [{ ...entry(1, 'Alice', 40, 2), collector: { id: 'whale', name: 'Whale' } }, entry(2, 'Bob', 10, 0)] });
+
+    const [alice, bob] = places();
+    expect(alice.querySelector('[data-collector="whale"]')?.textContent).toBe('Whale');
+    expect(alice.querySelector('[data-frame]')?.getAttribute('data-frame')).toBe('whale');
+    expect(bob.querySelector('app-collector-chip')).toBeNull();
+    expect(bob.querySelector('[data-frame]')).toBeNull();
   });
 
   it('offers a board per catalog game besides all games, and all-time or this season', () => {

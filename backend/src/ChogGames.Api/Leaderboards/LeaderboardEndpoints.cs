@@ -26,7 +26,9 @@ public static class LeaderboardEndpoints
 
     public const string CurrentSeason = "season";
 
-    public sealed record LeaderboardEntryResponse(int Place, string DisplayName, ProfileEndpoints.AvatarResponse Avatar, int Xp, int Wins, bool IsYou);
+    /// <param name="Collector">The player's cosmetic collector badge, null below the first tier (STORY-060, DEC-065).</param>
+    public sealed record LeaderboardEntryResponse(
+        int Place, string DisplayName, ProfileEndpoints.AvatarResponse Avatar, ProfileEndpoints.CollectorBadgeResponse? Collector, int Xp, int Wins, bool IsYou);
 
     public sealed record SeasonResponse(DateTimeOffset StartsAt, DateTimeOffset EndsAt);
 
@@ -92,6 +94,7 @@ public static class LeaderboardEndpoints
             entry.Place,
             entry.DisplayName,
             ProfileEndpoints.ToResponse(ProfileEndpoints.AvatarOf(entry.AvatarId)),
+            ProfileEndpoints.CollectorBadgeOf(entry.ChogsHeld),
             entry.Xp,
             entry.Wins,
             entry.PlayerId == viewerId);

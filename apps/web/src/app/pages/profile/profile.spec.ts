@@ -2,6 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { PlayerSession } from '../../identity/player-session';
 import { Achievement, Avatar, Profile } from '../../profile/profile-api';
 import { WalletPanel } from '../../wallet/wallet-panel';
@@ -16,6 +17,12 @@ describe('Profile page', () => {
     { id: 'classic', name: 'Classic', color: '#5b2bd6' },
     { id: 'ocean', name: 'Ocean', color: '#1d4ed8' },
   ];
+  const tiers = [
+    { id: 'holder', name: 'Holder', minChogs: 1 },
+    { id: 'collector', name: 'Collector', minChogs: 3 },
+    { id: 'patron', name: 'Patron', minChogs: 5 },
+    { id: 'whale', name: 'Whale', minChogs: 10 },
+  ];
   const profile: Profile = {
     playerId: 'p-1',
     displayName: 'Chog 4821',
@@ -24,6 +31,7 @@ describe('Profile page', () => {
     gamesPlayed: 5,
     wins: 2,
     xp: 70,
+    collector: { chogsHeld: 0, badge: null, next: tiers[0], tiers },
   };
 
   const achievements: Achievement[] = [
@@ -39,7 +47,7 @@ describe('Profile page', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [ProfilePage],
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
     }).overrideComponent(ProfilePage, { remove: { imports: [WalletPanel] }, add: { imports: [StubWalletPanel] } });
     http = TestBed.inject(HttpTestingController);
     session = TestBed.inject(PlayerSession);
@@ -85,6 +93,8 @@ describe('Profile page', () => {
     fixture.detectChanges();
   }
 
+  const collectorStatus = () => element().querySelector('[data-collector-status]')?.textContent?.replace(/\s+/g, ' ').trim();
+
   function typeName(value: string) {
     nameInput().value = value;
     nameInput().dispatchEvent(new Event('input'));
@@ -107,6 +117,59 @@ describe('Profile page', () => {
     expect(nameInput().value).toBe('Chog 4821');
     expect(radio('classic').checked).toBe(true);
     expect(element().querySelectorAll('input[type="radio"]')).toHaveLength(2);
+  });
+
+  it('invites a guest to sign in with a wallet for a collector badge, with no frame', () => {
+    load();
+
+    expect(element().querySelector('[data-collector-status]')?.textContent).toContain('Sign in with a wallet that holds Chogs');
+    expect(element().querySelector('.summary app-collector-chip')).toBeNull();
+    expect(element().querySelector('[data-frame]')).toBeNull();
+  });
+
+  it('shows a holder their collector badge, frame, Chogs held and the next milestone', () => {
+    load({
+      ...profile,
+      kind: 'Wallet',
+      collector: { chogsHeld: 3, badge: { id: 'collector', name: 'Collector' }, next: tiers[2], tiers },
+    });
+
+    expect(element().querySelector('.name [data-collector="collector"]')?.textContent).toBe('Collector');
+    expect(element().querySelector('.summary [data-frame]')?.getAttribute('data-frame')).toBe('collector');
+    expect(collectorStatus()).toBe('3 Chogs held · 2 more for Patron');
+    expect(element().querySelector('.collector a')?.getAttribute('href')).toBe('/chogs');
+  });
+
+  it('lists every collector tier with the Chogs it takes, marking those reached and the player’s own', () => {
+    load({ ...profile, kind: 'Wallet', collector: { chogsHeld: 4, badge: { id: 'collector', name: 'Collector' }, next: tiers[2], tiers } });
+
+    const items = [...element().querySelectorAll<HTMLElement>('[data-tier]')];
+    expect(items.map((li) => li.querySelector('app-collector-chip')?.textContent)).toEqual(['Holder', 'Collector', 'Patron', 'Whale']);
+    expect(items.map((li) => li.querySelector('.hint')?.textContent)).toEqual(['1 Chog', '3 Chogs', '5 Chogs', '10 Chogs']);
+    expect(items.map((li) => li.classList.contains('reached'))).toEqual([true, true, false, false]);
+    expect(items.map((li) => li.querySelector('.tier-status')?.textContent ?? null)).toEqual(['Reached', 'Your tier', null, null]);
+    expect(element().querySelectorAll('.current')).toHaveLength(1);
+  });
+
+  it('shows a guest the tiers to aim for, none reached', () => {
+    load();
+
+    const items = [...element().querySelectorAll<HTMLElement>('[data-tier]')];
+    expect(items.map((li) => li.dataset['tier'])).toEqual(['holder', 'collector', 'patron', 'whale']);
+    expect(element().querySelector('.tiers .reached')).toBeNull();
+  });
+
+  it('tells a whale they reached the top tier', () => {
+    load({ ...profile, kind: 'Wallet', collector: { chogsHeld: 12, badge: { id: 'whale', name: 'Whale' }, next: null, tiers } });
+
+    expect(collectorStatus()).toBe('12 Chogs held · top tier reached');
+  });
+
+  it('tells a wallet without Chogs how far the first milestone is, with no badge', () => {
+    load({ ...profile, kind: 'Wallet' });
+
+    expect(collectorStatus()).toBe('0 Chogs held · 1 more for Holder');
+    expect(element().querySelector('.summary app-collector-chip')).toBeNull();
   });
 
   it('lists every achievement with its progress, or when it was unlocked', () => {

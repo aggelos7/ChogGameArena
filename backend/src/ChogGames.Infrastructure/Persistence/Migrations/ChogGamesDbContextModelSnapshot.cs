@@ -136,6 +136,11 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasDefaultValue("classic");
 
+                    b.Property<int>("ChogsHeld")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -184,6 +189,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                     b.ToTable("Players", null, t =>
                         {
+                            t.HasCheckConstraint("CK_Players_ChogsHeld", "\"ChogsHeld\" >= 0 AND (\"Kind\" = 'Wallet' OR \"ChogsHeld\" = 0)");
+
                             t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");
 
                             t.HasCheckConstraint("CK_Players_SelectedCharacter", "(\"SelectedCharacterKind\" = 'Standard' AND \"SelectedCharacterId\" ~ '^[a-z0-9-]{1,32}$') OR (\"SelectedCharacterKind\" = 'Nft' AND \"Kind\" = 'Wallet' AND \"SelectedCharacterId\" ~ '^(0|[1-9][0-9]{0,77})$')");

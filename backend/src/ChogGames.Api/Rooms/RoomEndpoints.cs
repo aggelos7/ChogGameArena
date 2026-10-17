@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.RateLimiting;
+using ChogGames.Api.Profile;
 using ChogGames.Api.Realtime;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Players;
@@ -71,7 +72,8 @@ public static class RoomEndpoints
         bool IsTurn,
         int? Rank,
         int? Seat,
-        JsonElement? Result);
+        JsonElement? Result,
+        ProfileEndpoints.CollectorBadgeResponse? Collector);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>

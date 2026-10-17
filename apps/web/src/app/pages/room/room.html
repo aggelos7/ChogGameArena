@@ -84,10 +84,13 @@
           <ul class="members" data-list="members">
             @for (member of current.members; track $index) {
               <li [attr.data-ready]="member.isReady">
-                <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="2.5" />
+                <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="2.5" [frame]="member.collector" />
                 <div class="who">
                   <p class="line">
                     <span class="name">{{ member.displayName }}</span>
+                    @if (member.collector; as collector) {
+                      <app-collector-chip [badge]="collector" />
+                    }
                     @if (member.isHost) {
                       <span class="tag host">Host</span>
                     }

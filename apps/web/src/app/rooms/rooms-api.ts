@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import { CollectorBadge } from '../profile/profile-api';
 
 /**
  * Mirrors `RoomCharacterResponse`: the member's selected Chog, or the one locked at start once the game has started.
@@ -63,6 +64,8 @@ export interface RoomMember {
    * (STORY-043, DEC-046); its shape is the game's own. Null for players who left and in every other status.
    */
   result: unknown;
+  /** The member's cosmetic collector badge (DEC-065); null below the first tier. Never how many Chogs they hold. */
+  collector: CollectorBadge | null;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */
