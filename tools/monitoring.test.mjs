@@ -61,7 +61,7 @@ test('nginx gives every API request an id and logs it, never query strings or he
 
 test('nginx exposes the API readiness only; liveness and metrics stay internal', () => {
   const proxied = Object.entries(locations(read(production, 'nginx.conf.template'))).filter(([, body]) => body.includes('proxy_pass'));
-  assert.deepEqual(proxied.map(([path]) => path).sort(), ['/api/', '/api/hubs/', '= /api/health/ready']);
+  assert.deepEqual(proxied.map(([path]) => path).sort(), ['/api/', '/api/hubs/', '= /api/health/ready', '= /api/profile/avatar-image']);
   const ready = Object.fromEntries(proxied)['= /api/health/ready'];
   assert.match(ready, /proxy_pass \$api\/health\/ready;/);
   assert.match(ready, /proxy_set_header X-Forwarded-For \$remote_addr;/);

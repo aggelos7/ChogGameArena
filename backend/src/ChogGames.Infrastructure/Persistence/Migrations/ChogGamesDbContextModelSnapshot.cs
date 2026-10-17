@@ -124,6 +124,32 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ChogGames.Core.Players.AvatarImage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlayerId")
+                        .IsUnique();
+
+                    b.ToTable("AvatarImages", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AvatarImages_Data", "octet_length(\"Data\") BETWEEN 1 AND 1048576");
+                        });
+                });
+
             modelBuilder.Entity("ChogGames.Core.Players.Player", b =>
                 {
                     b.Property<Guid>("Id")
@@ -135,6 +161,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasDefaultValue("classic");
+
+                    b.Property<Guid?>("AvatarImageId")
+                        .HasColumnType("uuid");
 
                     b.Property<int>("ChogsHeld")
                         .ValueGeneratedOnAdd()
@@ -183,6 +212,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasDefaultValue(0);
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AvatarImageId")
+                        .IsUnique();
 
                     b.HasIndex("WalletAddress")
                         .IsUnique();
@@ -673,6 +705,23 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasForeignKey("RoomId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Players.AvatarImage", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithOne()
+                        .HasForeignKey("ChogGames.Core.Players.AvatarImage", "PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Players.Player", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.AvatarImage", null)
+                        .WithOne()
+                        .HasForeignKey("ChogGames.Core.Players.Player", "AvatarImageId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("ChogGames.Core.Progression.XpAward", b =>

@@ -265,6 +265,26 @@ $C exec -T api bash -c "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /metrics 
 Counters start from zero when the API restarts. A Prometheus server could scrape `api:8080/metrics` from the
 Compose network later, without any API change.
 
+## Removing a profile photo
+
+Players can remove their own photo from their profile at any time. An operator removes one that breaks the rules,
+or deletes it when someone asks (DEC-018). Photos are re-encoded server-side and kept only in the `AvatarImages`
+table, one row per player. Deleting the row deletes the photo, and the player's built-in avatar shows again: the
+database clears `Players.AvatarImageId` itself.
+
+Every photo is served at `/api/avatar-images/<id>`. Take the id from the reported image's address (in the browser:
+open the image in a new tab, or inspect it), then:
+
+```bash
+D="docker compose -f infrastructure/production/docker-compose.yml"
+$D exec postgres psql -U choggames -d choggames \
+  -c "DELETE FROM \"AvatarImages\" WHERE \"Id\" = '<id>'"   # DELETE 1; DELETE 0 means it was already gone
+```
+
+Browsers may keep showing a photo they already loaded for up to `AvatarImages:CacheDuration` (1 hour). Deleted
+photos stay in the encrypted backups until retention removes those archives, after about four weeks (7 daily +
+4 weekly). Say so when you confirm a deletion request.
+
 ## Restarts and upgrades
 
 - Containers restart on failure and after a reboot (`restart: unless-stopped`; enable the Docker service).

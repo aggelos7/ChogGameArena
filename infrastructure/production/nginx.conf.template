@@ -104,6 +104,18 @@ server {
         proxy_set_header Connection "";
     }
 
+    # Profile photo uploads (STORY-062, DEC-018): the one route with a body larger than 64k. The API itself refuses
+    # anything over AvatarImages:MaxUploadBytes (2 MB by default); keep the two in step.
+    location = /api/profile/avatar-image {
+        client_max_body_size 2m;
+        proxy_pass $api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-Id $request_id;
+        proxy_set_header Connection "";
+    }
+
     # The API's readiness, for an external uptime check (STORY-048, DEC-052): check names, statuses and
     # durations only. Liveness and /metrics are outside /api/, so they stay internal.
     location = /api/health/ready {

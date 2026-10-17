@@ -76,6 +76,36 @@
         </ul>
       </section>
 
+      <section class="photo" aria-labelledby="photo-heading">
+        <h2 id="photo-heading">Photo</h2>
+        <p class="hint">
+          Your photo shows instead of your avatar colour, to every player. We store it as a small square, without
+          location or camera data.
+        </p>
+        <div class="photo-actions">
+          <label class="photo-pick">
+            <span>{{ current.avatar.imageUrl ? 'Replace photo' : 'Upload photo' }}</span>
+            <input type="file" data-photo-input [accept]="photoTypes" [disabled]="photoState() !== 'idle'" (change)="choosePhoto($event)" />
+          </label>
+          @if (current.avatar.imageUrl) {
+            <button type="button" class="secondary" data-remove-photo [disabled]="photoState() !== 'idle'" (click)="removePhoto()">
+              Remove photo
+            </button>
+          }
+        </div>
+        @switch (photoState()) {
+          @case ('uploading') {
+            <p role="status" class="hint">Uploading photo…</p>
+          }
+          @case ('removing') {
+            <p role="status" class="hint">Removing photo…</p>
+          }
+        }
+        @if (photoError(); as message) {
+          <p role="alert" class="field-error" data-photo-error>{{ message }}</p>
+        }
+      </section>
+
       <form [formGroup]="form" (ngSubmit)="save()" novalidate>
         <div class="field">
           <label for="displayName">Display name</label>
@@ -98,6 +128,9 @@
 
         <fieldset class="field">
           <legend>Avatar</legend>
+          @if (current.avatar.imageUrl) {
+            <p class="hint" data-avatar-under-photo>Shown when you remove your photo.</p>
+          }
           <div class="avatar-options">
             @for (avatar of avatars(); track avatar.id) {
               <label class="avatar-option">

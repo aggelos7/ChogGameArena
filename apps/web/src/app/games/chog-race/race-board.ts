@@ -1,7 +1,5 @@
 import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, input, output, signal } from '@angular/core';
-import { AvatarBadge } from '../../profile/avatar-badge';
-import { Avatar } from '../../profile/profile-api';
-import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
+import { RoomMember } from '../../rooms/rooms-api';
 import { timeLeft } from '../chog-life/life-board-model';
 import { seatColor } from '../seats';
 import {
@@ -23,9 +21,6 @@ import {
   raceTileLabel,
 } from './race-board-model';
 
-/** NFT Chogs have no colour of their own here; they use the brand colour. */
-const NFT_COLOR = 'var(--brand)';
-
 /** A card you can play now, and for Whale, Rug and Liquidated the opponent it's played on (DEC-057, DEC-058). */
 export interface RaceCardPlay {
   card: RaceCard;
@@ -45,6 +40,8 @@ type Landing = Pick<RaceMove, 'landed' | 'to' | 'effect' | 'draw' | 'reshuffled'
 interface DrawnPawn {
   seat: number;
   color: string;
+  /** The player's profile photo, drawn as the pawn inside a ring of the seat colour (STORY-062); null for a numbered pawn. */
+  imageUrl: string | null;
   name: string;
   isYou: boolean;
   isTurn: boolean;
@@ -68,7 +65,6 @@ interface DrawnPawn {
  */
 @Component({
   selector: 'app-race-board',
-  imports: [AvatarBadge],
   templateUrl: './race-board.html',
   styleUrl: './race-board.scss',
 })
@@ -122,6 +118,7 @@ export class RaceBoardView {
       const drawn: DrawnPawn = {
         seat: pawn.seat,
         color: seatColor(pawn.seat),
+        imageUrl: member?.avatarImageUrl ?? null,
         name: member?.displayName ?? `Seat ${pawn.seat}`,
         isYou: !!member?.isYou,
         isTurn: !!member?.isTurn,
@@ -496,7 +493,4 @@ export class RaceBoardView {
     return what.join(', ');
   }
 
-  protected badge(character: RoomCharacter): Avatar {
-    return { id: character.id, name: character.name, color: character.color ?? NFT_COLOR };
-  }
 }

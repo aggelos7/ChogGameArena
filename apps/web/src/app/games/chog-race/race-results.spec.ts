@@ -7,6 +7,7 @@ function member(displayName: string, seat: number, rank: number | null, result: 
     displayName,
     avatarId: 'classic',
     collector: null,
+    avatarImageUrl: null,
     isHost: false,
     isYou: false,
     isReady: false,

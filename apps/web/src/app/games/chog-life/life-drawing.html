@@ -56,7 +56,11 @@
         <circle class="turn-ring" r="14" data-turn-ring />
       }
       <circle class="pawn-body" [class.you]="pawn.isYou" r="10" [attr.fill]="pawn.color" />
-      <text class="pawn-seat" text-anchor="middle" dy="4">{{ pawn.seat }}</text>
+      @if (pawn.imageUrl; as src) {
+        <image class="pawn-photo" [attr.href]="src" x="-8" y="-8" width="16" height="16" preserveAspectRatio="xMidYMid slice" />
+      } @else {
+        <text class="pawn-seat" text-anchor="middle" dy="4">{{ pawn.seat }}</text>
+      }
     </g>
   }
 </svg>

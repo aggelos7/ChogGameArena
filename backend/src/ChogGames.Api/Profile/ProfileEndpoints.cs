@@ -16,7 +16,11 @@ namespace ChogGames.Api.Profile;
 /// </summary>
 public static class ProfileEndpoints
 {
-    public sealed record AvatarResponse(string Id, string Name, string Color);
+    /// <param name="ImageUrl">
+    /// The player's uploaded photo, shown instead of the built-in avatar while there is one (STORY-062, DEC-018); null
+    /// otherwise and for the built-in avatars listed.
+    /// </param>
+    public sealed record AvatarResponse(string Id, string Name, string Color, string? ImageUrl = null);
 
     /// <summary>A cosmetic collector tier (STORY-060, DEC-065), all that other players see of someone's holdings.</summary>
     public sealed record CollectorBadgeResponse(string Id, string Name);
@@ -52,7 +56,7 @@ public static class ProfileEndpoints
         profile.MapGet("", GetProfileAsync).WithName("GetProfile");
         profile.MapPatch("", UpdateProfileAsync).WithName("UpdateProfile");
         profile.MapGet("/achievements", GetAchievementsAsync).WithName("GetAchievements");
-        profile.MapGet("/avatars", () => TypedResults.Ok(DefaultAvatar.All.Select(ToResponse).ToArray())).WithName("GetAvatars");
+        profile.MapGet("/avatars", () => TypedResults.Ok(DefaultAvatar.All.Select(a => ToResponse(a)).ToArray())).WithName("GetAvatars");
 
         return endpoints;
     }
@@ -63,6 +67,12 @@ public static class ProfileEndpoints
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         return player is null ? TypedResults.NotFound() : TypedResults.Ok(await ToResponseAsync(player, db, cancellationToken));
     }
+
+    /// <summary>The profile of <paramref name="playerId"/> as stored now, read untracked; null for an unknown player.</summary>
+    internal static async Task<ProfileResponse?> FindProfileAsync(Guid playerId, ChogGamesDbContext db, CancellationToken cancellationToken) =>
+        await db.Players.AsNoTracking().SingleOrDefaultAsync(p => p.Id == playerId, cancellationToken) is { } player
+            ? await ToResponseAsync(player, db, cancellationToken)
+            : null;
 
     /// <summary>Every achievement of the catalog, in its order, for the caller only.</summary>
     private static async Task<Results<Ok<AchievementResponse[]>, NotFound>> GetAchievementsAsync(
@@ -147,7 +157,7 @@ public static class ProfileEndpoints
             player.Id,
             player.DisplayName,
             player.Kind.ToString(),
-            ToResponse(AvatarOf(player.AvatarId)),
+            ToResponse(AvatarOf(player.AvatarId), player.AvatarImageId),
             player.GamesPlayed,
             player.Wins,
             xp,
@@ -167,5 +177,7 @@ public static class ProfileEndpoints
     /// <summary>An avatar retired from the built-in list falls back to the default rather than failing.</summary>
     internal static DefaultAvatar AvatarOf(string avatarId) => DefaultAvatar.TryFind(avatarId, out var found) ? found : DefaultAvatar.Classic;
 
-    internal static AvatarResponse ToResponse(DefaultAvatar avatar) => new(avatar.Id, avatar.Name, avatar.Color);
+    /// <param name="imageId">The player's uploaded photo, if any; null for the built-in avatar alone.</param>
+    internal static AvatarResponse ToResponse(DefaultAvatar avatar, Guid? imageId = null) =>
+        new(avatar.Id, avatar.Name, avatar.Color, imageId is { } id ? AvatarImageEndpoints.UrlFor(id) : null);
 }

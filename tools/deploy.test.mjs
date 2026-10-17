@@ -171,7 +171,7 @@ test('nginx serves the app and proxies the API and its WebSocket hub on one orig
   assert.match(nginx, /resolver 127\.0\.0\.11 /, 'the API address must be re-resolved after it is recreated');
   assert.match(nginx, /set \$api http:\/\/api:8080;/);
   // proxy_set_header isn't inherited into a location that sets its own, so each API location must set it.
-  for (const location of ['/api/hubs/', '/api/']) {
+  for (const location of ['/api/hubs/', '/api/', '= /api/profile/avatar-image']) {
     const block = nginx.match(new RegExp(`location ${location.replaceAll('/', '\\/')} \\{([^}]*)\\}`))?.[1] ?? '';
     assert.match(block, /proxy_set_header X-Forwarded-For \$remote_addr;/, `${location} must overwrite, never append, the client address`);
     assert.match(block, /proxy_set_header X-Forwarded-Proto \$scheme;/, location);
@@ -179,6 +179,9 @@ test('nginx serves the app and proxies the API and its WebSocket hub on one orig
   assert.doesNotMatch(nginx, /\$proxy_add_x_forwarded_for/);
   assert.match(nginx, /location \/api\/hubs\/ \{[^}]*proxy_set_header Upgrade \$http_upgrade;[^}]*proxy_set_header Connection \$connection_upgrade;/s);
   assert.match(nginx, /location \/api\/ \{[^}]*proxy_pass \$api;/s);
+  assert.match(nginx, /client_max_body_size 64k;/, 'small bodies everywhere else');
+  // Photo uploads only (STORY-062): the API caps them at AvatarImages:MaxUploadBytes, 2 MB by default.
+  assert.match(nginx, /location = \/api\/profile\/avatar-image \{[^}]*client_max_body_size 2m;[^}]*proxy_pass \$api;/s);
   assert.match(nginx, /try_files \$uri \$uri\/ \/index\.html;/);
   assert.match(nginx, /server_tokens off;/);
   const web = read(production, 'web.Dockerfile');

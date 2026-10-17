@@ -4,8 +4,13 @@
     <ul class="players" aria-label="Players and pawns" data-list="pawns">
       @for (member of players(); track member.seat) {
         <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
-          <span class="pawn" [style.background]="color(member.seat)" aria-hidden="true">{{ member.seat }}</span>
-          <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="1.75" />
+          <span class="pawn" [class.photo]="member.avatarImageUrl" [style.background]="color(member.seat)" aria-hidden="true">
+            @if (member.avatarImageUrl; as src) {
+              <img [src]="src" alt="" />
+            } @else {
+              {{ member.seat }}
+            }
+          </span>
           <span class="who">
             <span class="name">{{ member.displayName }}</span>
             @if (member.isYou) {
@@ -193,8 +198,12 @@
     <span class="label" aria-hidden="true">{{ label(tile) }}</span>
     <span class="pawns" aria-hidden="true">
       @for (pawn of pawnsOn(tile); track pawn.seat) {
-        <span class="pawn" [class.turn]="pawn.isTurn" [class.you]="pawn.isYou" [style.background]="pawn.color" [attr.data-pawn]="pawn.seat">
-          {{ pawn.seat }}
+        <span class="pawn" [class.turn]="pawn.isTurn" [class.you]="pawn.isYou" [class.photo]="pawn.imageUrl" [style.background]="pawn.color" [attr.data-pawn]="pawn.seat">
+          @if (pawn.imageUrl; as src) {
+            <img [src]="src" alt="" />
+          } @else {
+            {{ pawn.seat }}
+          }
         </span>
       }
     </span>

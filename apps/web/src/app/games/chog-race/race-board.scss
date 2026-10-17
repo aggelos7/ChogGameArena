@@ -250,6 +250,18 @@
   font-size: 0.75rem;
 }
 
+// A profile photo as the pawn (STORY-062), inside a ring of the seat colour so seats still tell apart.
+.pawn.photo {
+  padding: 2px;
+
+  img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+}
+
 .pawn.you {
   outline: 2px solid var(--text);
   outline-offset: 1px;
