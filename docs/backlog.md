@@ -884,10 +884,10 @@
 
 #### STORY-058 — Cross-game achievements
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E09
-- **Implementation:** Award cosmetic achievements from verified match results.
+- **Implementation:** Award cosmetic achievements from verified match results. Catalog, history backfill and display confirmed by the product owner (DEC-063).
 - **Acceptance criteria:**
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** duplicate event does not award twice; progress shown on profile.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.

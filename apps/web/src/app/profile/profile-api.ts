@@ -19,6 +19,20 @@ export interface Profile {
   wins: number;
 }
 
+/**
+ * Mirrors `AchievementResponse` from `GET /api/profile/achievements` (STORY-058, DEC-063): one achievement of the
+ * catalog, unlocked by the server from completed matches only. An unlocked one shows its target as its progress.
+ */
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  progress: number;
+  target: number;
+  /** When it was unlocked (ISO 8601); null while locked. */
+  unlockedAt: string | null;
+}
+
 export interface ProfileUpdate {
   displayName?: string;
   avatarId?: string;
@@ -38,6 +52,10 @@ export class ProfileApi {
 
   get(): Observable<Profile> {
     return this.http.get<Profile>('/api/profile');
+  }
+
+  achievements(): Observable<Achievement[]> {
+    return this.http.get<Achievement[]>('/api/profile/achievements');
   }
 
   avatars(): Observable<Avatar[]> {

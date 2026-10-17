@@ -25,6 +25,7 @@ const snapshot = (code: string, version: number): Room => ({
   members: [],
   state: null,
   abilities: [],
+  achievements: [],
 });
 
 /** Runs pending promise callbacks and timers that are due now; the spec moves the fake clock itself. */

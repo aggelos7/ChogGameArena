@@ -107,7 +107,11 @@ public static class RoomEndpoints
         DateTimeOffset? MatchEndsAt,
         RoomMemberResponse[] Members,
         JsonElement? State,
-        RoomAbilityResponse[] Abilities);
+        RoomAbilityResponse[] Abilities,
+        RoomAchievementResponse[] Achievements);
+
+    /// <summary>An achievement the viewer unlocked with this completed match (STORY-058, DEC-063).</summary>
+    public sealed record RoomAchievementResponse(string Id, string Name, string Description);
 
     /// <summary>Stable error codes; clients rely on these, never on the message text.</summary>
     public static class ErrorCodes

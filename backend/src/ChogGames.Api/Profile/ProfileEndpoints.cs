@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using ChogGames.Core.Achievements;
 using ChogGames.Core.Players;
+using ChogGames.Infrastructure.Achievements;
 using ChogGames.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +18,12 @@ public static class ProfileEndpoints
 
     public sealed record ProfileResponse(Guid PlayerId, string DisplayName, string Kind, AvatarResponse Avatar, int GamesPlayed, int Wins);
 
+    /// <summary>
+    /// One achievement of the catalog (STORY-058, DEC-063): how far the player is towards its target, and when it was
+    /// unlocked (null while locked). An unlocked achievement shows its target as its progress.
+    /// </summary>
+    public sealed record AchievementResponse(string Id, string Name, string Description, int Progress, int Target, DateTimeOffset? UnlockedAt);
+
     /// <summary>Only these fields are editable; anything else in the body (ids, counters) is ignored.</summary>
     public sealed record UpdateProfileRequest(string? DisplayName, string? AvatarId);
 
@@ -25,6 +33,7 @@ public static class ProfileEndpoints
 
         profile.MapGet("", GetProfileAsync).WithName("GetProfile");
         profile.MapPatch("", UpdateProfileAsync).WithName("UpdateProfile");
+        profile.MapGet("/achievements", GetAchievementsAsync).WithName("GetAchievements");
         profile.MapGet("/avatars", () => TypedResults.Ok(DefaultAvatar.All.Select(ToResponse).ToArray())).WithName("GetAvatars");
 
         return endpoints;
@@ -35,6 +44,28 @@ public static class ProfileEndpoints
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
         return player is null ? TypedResults.NotFound() : TypedResults.Ok(ToResponse(player));
+    }
+
+    /// <summary>Every achievement of the catalog, in its order, for the caller only.</summary>
+    private static async Task<Results<Ok<AchievementResponse[]>, NotFound>> GetAchievementsAsync(
+        ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
+    {
+        var playerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var counts = await db.AchievementCountsAsync([playerId], cancellationToken);
+        if (!counts.TryGetValue(playerId, out var totals))
+        {
+            return TypedResults.NotFound();
+        }
+
+        var unlocked = await db.PlayerAchievements.AsNoTracking()
+            .Where(a => a.PlayerId == playerId)
+            .ToDictionaryAsync(a => a.AchievementId, a => a.UnlockedAt, cancellationToken);
+
+        return TypedResults.Ok(Achievement.All
+            .Select(a => unlocked.TryGetValue(a.Id, out var at)
+                ? new AchievementResponse(a.Id, a.Name, a.Description, a.Target, a.Target, at)
+                : new AchievementResponse(a.Id, a.Name, a.Description, a.ProgressFrom(totals), a.Target, null))
+            .ToArray());
     }
 
     private static async Task<Results<Ok<ProfileResponse>, ValidationProblem, NotFound>> UpdateProfileAsync(
