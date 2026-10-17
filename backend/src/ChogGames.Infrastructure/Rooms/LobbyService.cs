@@ -24,6 +24,7 @@ public sealed class LobbyService(
     ChogGamesDbContext db,
     CharacterEligibilityService eligibility,
     AbilityPool abilities,
+    LobbyCharacters lobbyCharacters,
     IEnumerable<IMatchRules> rules,
     IOptions<MatchOptions> matchOptions,
     IRandomSource random,
@@ -49,7 +50,7 @@ public sealed class LobbyService(
             // Ready is for the Chog selected now, read under the player's lock rather than from the caller's copy.
             await db.LockPlayersAsync([player.Id], cancellationToken);
             var current = await db.Players.AsNoTracking().SingleAsync(p => p.Id == player.Id, cancellationToken);
-            if (!HasAbilityFor(room, current))
+            if (!await HasAbilityForAsync(room, current, cancellationToken))
             {
                 return new RoomResult(RoomOutcome.AbilityRequired);
             }
@@ -86,7 +87,7 @@ public sealed class LobbyService(
 
         await db.LockPlayersAsync([player.Id], cancellationToken);
         var current = await db.Players.AsNoTracking().SingleAsync(p => p.Id == player.Id, cancellationToken);
-        if (!abilities.Offers(room.GameType, LobbyCharacters.For(current, timeProvider.GetUtcNow()), abilityId))
+        if (!abilities.Offers(room.GameType, await lobbyCharacters.ForAsync(current, cancellationToken), abilityId))
         {
             return new RoomResult(RoomOutcome.UnknownAbility);
         }
@@ -247,9 +248,9 @@ public sealed class LobbyService(
     /// Whether <paramref name="player"/> may mark ready as far as abilities go: in a game with abilities they have chosen
     /// one their pool offers; a game without abilities needs none (DEC-035).
     /// </summary>
-    private bool HasAbilityFor(GameRoom room, Player player)
+    private async Task<bool> HasAbilityForAsync(GameRoom room, Player player, CancellationToken cancellationToken)
     {
-        var character = LobbyCharacters.For(player, timeProvider.GetUtcNow());
+        var character = await lobbyCharacters.ForAsync(player, cancellationToken);
         var chosen = room.Members.Single(m => m.PlayerId == player.Id).AbilityId;
         return abilities.For(room.GameType, character).Count == 0 || abilities.Offers(room.GameType, character, chosen);
     }

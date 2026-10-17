@@ -14,7 +14,8 @@ namespace ChogGames.Api.Tests.Rooms;
 /// <summary>
 /// Lobby ability selection and lock (STORY-033, NFT-013, NFT-015, DEC-035): in a game with abilities each player chooses
 /// one from their pool before marking ready; others only see that they chose until the start, which locks it with the
-/// catalog version. Chog Life gets a test catalog here; Chog Race's is taken out, as by the test host.
+/// catalog version. Chog Life gets a test catalog here; Chog Race's is taken out, as by the test host. With trait-based
+/// abilities on (STORY-061, DEC-066) a holder's cached traits narrow their lobby pool and the live ones decide at start.
 /// </summary>
 public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -43,7 +44,7 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
         if (database.ConnectionString.Length > 0)
         {
             await using var db = database.CreateDbContext();
-            await db.Database.ExecuteSqlRawAsync("TRUNCATE \"GuestSessions\", \"Players\" CASCADE");
+            await db.Database.ExecuteSqlRawAsync("TRUNCATE \"GuestSessions\", \"Players\", \"ChogNfts\" CASCADE");
         }
 
         _factory = Factory(Catalog(1, Boost(), Reroll()));
@@ -61,10 +62,14 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
     private static AbilityCatalog Catalog(int version, params AbilityDefinition[] abilities) => AbilityCatalog.Create(
         "chog-life", version, abilities, abilities.Select(a => new NoEffect(a.Id, a.Parameters.Keys)), new NoWindow());
 
-    private ApiFactory Factory(AbilityCatalog catalog) =>
+    private ApiFactory Factory(AbilityCatalog catalog, IReadOnlyDictionary<string, string?>? settings = null) =>
         new(
             database.ConnectionString,
-            new Dictionary<string, string?> { ["Games:Items:0:Status"] = "Available", ["Games:Items:1:Status"] = "Available" },
+            new Dictionary<string, string?>(settings ?? new Dictionary<string, string?>())
+            {
+                ["Games:Items:0:Status"] = "Available",
+                ["Games:Items:1:Status"] = "Available",
+            },
             services =>
             {
                 services.AddScoped<INftProvider>(_ => _chain);
@@ -96,7 +101,9 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
     /// A guest who signs in with a fresh wallet holding token 7, with traits, and <paramref name="others"/> more Chogs,
     /// and selects token 7.
     /// </summary>
-    private async Task<HttpClient> HolderAsync(string name, int others = 0)
+    private async Task<HttpClient> HolderAsync(string name, int others = 0) => (await HolderWithWalletAsync(name, others)).Client;
+
+    private async Task<(HttpClient Client, WalletAddress Wallet)> HolderWithWalletAsync(string name, int others = 0)
     {
         var client = await GuestAsync(name);
         var wallet = TestWallet.Random();
@@ -120,7 +127,7 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
         ];
         using var select = await client.PutAsJsonAsync("/api/characters/selected", new { kind = "Nft", id = "7" });
         Assert.Equal(HttpStatusCode.OK, select.StatusCode);
-        return client;
+        return (client, wallet.Address);
     }
 
     private static async Task<RoomDto> RoomAsync(HttpResponseMessage response, HttpStatusCode expected = HttpStatusCode.OK)
@@ -563,6 +570,117 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
         await _factory.DisposeAsync();
         _factory = Factory(catalog);
         _factory.CreateClient().Dispose();
+    }
+
+    /// <summary>STORY-061, DEC-066: Legendary Chogs may only reroll in Chog Life, with trait-based abilities on or off.</summary>
+    private static Dictionary<string, string?> LegendaryRerolls(bool enabled) => new()
+    {
+        ["Abilities:TraitBased:Enabled"] = enabled ? "true" : "false",
+        ["Abilities:TraitBased:Rules:0:Game"] = "chog-life",
+        ["Abilities:TraitBased:Rules:0:Traits:0:Type"] = "Rarity",
+        ["Abilities:TraitBased:Rules:0:Traits:0:Value"] = "Legendary",
+        ["Abilities:TraitBased:Rules:0:Abilities:0"] = "event_reroll",
+    };
+
+    private async Task UseTraitRulesAsync(bool enabled)
+    {
+        await _factory.DisposeAsync();
+        _factory = Factory(Catalog(1, Boost(), Reroll()), LegendaryRerolls(enabled));
+    }
+
+    /// <summary>What the metadata cache stored for token 7 while <paramref name="owner"/> held it (STORY-016).</summary>
+    private async Task CacheTraitsAsync(WalletAddress owner, string type, string value)
+    {
+        await using var db = database.CreateDbContext();
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "ChogNfts" ("ChainId", "ContractAddress", "TokenId", "OwnerAddress", "OwnerRefreshedAt", "MetadataStatus")
+            VALUES (143, '0xc96d31f8626c6d03fae5dcd3d61e3fb9f4a73763', 7, {owner.Value}, now(), 'Ok');
+            INSERT INTO "ChogNftTraits" ("ChainId", "ContractAddress", "TokenId", "Position", "TraitType", "TraitValue")
+            VALUES (143, '0xc96d31f8626c6d03fae5dcd3d61e3fb9f4a73763', 7, 0, {type}, {value});
+            """);
+    }
+
+    [PostgresFact]
+    public async Task With_trait_rules_off_a_legendary_holder_is_offered_what_a_guest_is()
+    {
+        await UseTraitRulesAsync(enabled: false);
+        var (holder, wallet) = await HolderWithWalletAsync("Bob");
+        await CacheTraitsAsync(wallet, "Rarity", "Legendary");
+        var (code, alice, bob) = await PairAsync(bob: holder);
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(["reward_boost", "event_reroll"], (await ViewAsync(bob, code)).Abilities.Select(a => a.Id));
+            Assert.Equal((await ViewAsync(alice, code)).Abilities, (await ViewAsync(bob, code)).Abilities);
+            await ChosenAsync(bob, code, "reward_boost");
+        }
+    }
+
+    [PostgresFact]
+    public async Task With_trait_rules_on_a_legendary_holder_gets_their_rule_and_a_guest_keeps_the_whole_pool()
+    {
+        await UseTraitRulesAsync(enabled: true);
+        var (holder, wallet) = await HolderWithWalletAsync("Bob");
+        await CacheTraitsAsync(wallet, " rarity ", "LEGENDARY");
+        var (code, alice, bob) = await PairAsync(bob: holder);
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(["reward_boost", "event_reroll"], (await ViewAsync(alice, code)).Abilities.Select(a => a.Id));
+            Assert.Equal(["event_reroll"], (await ViewAsync(bob, code)).Abilities.Select(a => a.Id));
+
+            var before = await ViewAsync(bob, code);
+            await ProblemAsync(await ChooseAsync(bob, code, "reward_boost"), HttpStatusCode.BadRequest, "unknown_ability");
+            var after = await ViewAsync(bob, code);
+            Assert.Equal((before.Version, false), (after.Version, after.Member("Bob").HasAbility));
+
+            await ChosenAsync(alice, code, "reward_boost");
+            await ChosenAsync(bob, code, "event_reroll");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            var room = await RoomAsync(started);
+
+            Assert.Equal(("reward_boost", "event_reroll"), (room.Member("Alice").Ability!.Id, room.Member("Bob").Ability!.Id));
+        }
+    }
+
+    [PostgresFact]
+    public async Task With_trait_rules_on_the_live_traits_at_start_decide_over_the_cache()
+    {
+        await UseTraitRulesAsync(enabled: true);
+        var (code, alice, bob) = await PairAsync(bob: await HolderAsync("Bob"));
+        using (alice)
+        using (bob)
+        {
+            // Nothing cached yet: the lobby offers the whole pool, but token 7 is Legendary on chain.
+            Assert.Equal(["reward_boost", "event_reroll"], (await ViewAsync(bob, code)).Abilities.Select(a => a.Id));
+            await ChosenAsync(alice, code, "reward_boost");
+            await ChosenAsync(bob, code, "reward_boost");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+
+            await ProblemAsync(await StartAsync(alice, code), HttpStatusCode.Conflict, "ability_unavailable");
+
+            var after = await ViewAsync(bob, code);
+            Assert.Equal("Waiting", after.Status);
+            Assert.Equal((false, false), (after.Member("Bob").IsReady, after.Member("Bob").HasAbility));
+            Assert.Equal((true, true), (after.Member("Alice").IsReady, after.Member("Alice").HasAbility));
+        }
+    }
+
+    [PostgresFact]
+    public async Task With_trait_rules_on_cached_traits_of_a_token_the_wallet_no_longer_holds_are_ignored()
+    {
+        await UseTraitRulesAsync(enabled: true);
+        var (holder, _) = await HolderWithWalletAsync("Bob");
+        await CacheTraitsAsync(TestWallet.Random().Address, "Rarity", "Legendary");
+        var (code, alice, bob) = await PairAsync(bob: holder);
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(["reward_boost", "event_reroll"], (await ViewAsync(bob, code)).Abilities.Select(a => a.Id));
+        }
     }
 
     private sealed class NoEffect(string abilityId, IEnumerable<string> parameters) : IAbilityHandler

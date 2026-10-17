@@ -26,7 +26,7 @@ public sealed class RoomSnapshots(
     IEnumerable<IMatchRules> rules,
     AbilityEngine abilityEngine,
     AbilityPool abilityPool,
-    TimeProvider timeProvider)
+    LobbyCharacters lobbyCharacters)
 {
     private readonly Dictionary<string, IMatchRules> _rulesByGame = rules.ToDictionary(r => r.GameType, StringComparer.Ordinal);
 
@@ -50,14 +50,24 @@ public sealed class RoomSnapshots(
                 .ToLookup(a => a.PlayerId, a => a.AchievementId)
             : null;
 
+        // Only the viewers' own options are shown, and only while the room waits.
+        var lobby = room.Status == RoomStatus.Waiting
+            ? await lobbyCharacters.ForEachAsync([.. viewerIds.Where(players.ContainsKey).Select(id => players[id])], cancellationToken)
+            : new Dictionary<Guid, CharacterSnapshot>();
+
         using var state = room.State is not null && _rulesByGame.ContainsKey(room.GameType) ? JsonDocument.Parse(room.State) : null;
         return viewerIds.Distinct().ToDictionary(
             viewerId => viewerId,
-            viewerId => Build(room, players, state, viewerId, unlocked?[viewerId] ?? []));
+            viewerId => Build(room, players, lobby, state, viewerId, unlocked?[viewerId] ?? []));
     }
 
     private RoomResponse Build(
-        GameRoom room, Dictionary<Guid, Player> players, JsonDocument? state, Guid viewerId, IEnumerable<string> unlocked)
+        GameRoom room,
+        Dictionary<Guid, Player> players,
+        IReadOnlyDictionary<Guid, CharacterSnapshot> lobby,
+        JsonDocument? state,
+        Guid viewerId,
+        IEnumerable<string> unlocked)
     {
         var members = room.Members
             .OrderBy(m => m.JoinedAt)
@@ -101,7 +111,7 @@ public sealed class RoomSnapshots(
             room.MatchEndsAt,
             members,
             view,
-            AbilityOptions(room, players, viewerId),
+            AbilityOptions(room, lobby, viewerId),
             [.. Achievement.All.Where(a => unlocked.Contains(a.Id)).Select(a => new RoomAchievementResponse(a.Id, a.Name, a.Description))]);
     }
 
@@ -136,14 +146,14 @@ public sealed class RoomSnapshots(
     }
 
     /// <summary>What the viewer may choose from while the room waits: their pool for the Chog they have selected.</summary>
-    private RoomAbilityResponse[] AbilityOptions(GameRoom room, Dictionary<Guid, Player> players, Guid viewerId)
+    private RoomAbilityResponse[] AbilityOptions(GameRoom room, IReadOnlyDictionary<Guid, CharacterSnapshot> lobby, Guid viewerId)
     {
-        if (room.Status != RoomStatus.Waiting || !room.IsPlaying(viewerId) || !players.TryGetValue(viewerId, out var viewer))
+        if (room.Status != RoomStatus.Waiting || !room.IsPlaying(viewerId) || !lobby.TryGetValue(viewerId, out var character))
         {
             return [];
         }
 
-        return [.. abilityPool.For(room.GameType, LobbyCharacters.For(viewer, timeProvider.GetUtcNow())).Select(ToAbility)];
+        return [.. abilityPool.For(room.GameType, character).Select(ToAbility)];
     }
 
     private static RoomAbilityResponse ToAbility(AbilityDefinition ability) =>

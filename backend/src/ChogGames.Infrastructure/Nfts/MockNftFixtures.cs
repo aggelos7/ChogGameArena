@@ -73,6 +73,9 @@ public static class MockNftFixtures
     /// <summary>The highest token id of the collection, with no traits at all.</summary>
     public static readonly OwnedNft NoTraits = new(NftTokenId.From(1969), "Chog #1969", Image(1969, "#ff6b9a"), []);
 
+    /// <summary>Every fixture token, whoever holds it.</summary>
+    public static IReadOnlyList<OwnedNft> All => [Classic, Golden, MissingImage, UnknownTraits, NoTraits];
+
     public static IReadOnlyList<OwnedNft> Holding(MockNftHolding holding) => holding switch
     {
         MockNftHolding.None => [],

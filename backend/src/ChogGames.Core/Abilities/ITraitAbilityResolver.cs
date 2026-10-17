@@ -3,10 +3,10 @@ using ChogGames.Core.Nfts;
 namespace ChogGames.Core.Abilities;
 
 /// <summary>
-/// The contract a future trait-based ability strategy is built on (STORY-032, NFT-017, ADR-007, DEC-034). Nothing
-/// implements it yet; MVP registers only <see cref="SharedAbilityPoolStrategy"/>. A trait-based
-/// <see cref="IAbilityAssignmentStrategy"/> wraps a resolver and replaces the shared strategy's one registration, so the
-/// engine, <see cref="AbilityPool"/> and the games stay as they are. It must follow these rules:
+/// The contract the trait-based ability strategy is built on (STORY-032, NFT-017, ADR-007, DEC-034).
+/// <see cref="ConfiguredTraitAbilityResolver"/> implements it (STORY-061, DEC-066); <see cref="TraitBasedAbilityStrategy"/>
+/// wraps it and replaces the shared strategy's one registration when the flag is on, so the engine,
+/// <see cref="AbilityPool"/> and the games stay as they are. A resolver must follow these rules:
 /// <list type="bullet">
 /// <item>The resolver sees the game's catalog and the character's normalized <see cref="TraitSet"/>, nothing else: no
 /// wallet, token id, room or match.</item>

@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using ChogGames.Core.Abilities;
+using ChogGames.Infrastructure.Abilities;
+using ChogGames.Infrastructure.Nfts;
 using ChogGames.Core.Games;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
@@ -25,6 +27,7 @@ public class LobbyServiceTests(MigratedPostgresDatabase database) : IClassFixtur
         db,
         new CharacterEligibilityService(chain, clock, NullLogger<CharacterEligibilityService>.Instance),
         new AbilityPool(new AbilityEngine([]), new SharedAbilityPoolStrategy()),
+        new LobbyCharacters(db, Options.Create(new TraitAbilityOptions()), Options.Create(new NftOptions()), clock),
         [],
         Options.Create(new MatchOptions()),
         ScriptedRandomSource.KeepOrder,
