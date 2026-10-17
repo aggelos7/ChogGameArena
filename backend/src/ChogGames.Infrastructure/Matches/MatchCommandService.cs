@@ -4,9 +4,11 @@ using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Progression;
 using ChogGames.Infrastructure.Rooms;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Options;
 
 namespace ChogGames.Infrastructure.Matches;
 
@@ -74,7 +76,12 @@ public sealed record MatchCommandResult(
 /// a use is applied and counted once, and a refused one changes nothing (STORY-034, DEC-036).
 /// </summary>
 public sealed class MatchCommandService(
-    ChogGamesDbContext db, IEnumerable<IMatchRules> rules, AbilityEngine abilities, IRandomSource random, TimeProvider timeProvider)
+    ChogGamesDbContext db,
+    IEnumerable<IMatchRules> rules,
+    AbilityEngine abilities,
+    IRandomSource random,
+    TimeProvider timeProvider,
+    IOptions<ProgressionOptions> progression)
 {
     /// <summary>Why an ability can't be used while the turn waits for another player's reply (DEC-058).</summary>
     public const string ReplyPending = "reply_pending";
@@ -162,7 +169,7 @@ public sealed class MatchCommandService(
         db.MatchActions.Add(action);
         if (room.Status == RoomStatus.Completed)
         {
-            await db.RecordStatsAsync(room, cancellationToken);
+            await db.RecordStatsAsync(room, progression.Value.Xp.ToRules(), cancellationToken);
         }
 
         await db.SaveChangesAsync(cancellationToken);

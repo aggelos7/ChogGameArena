@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using ChogGames.Core.Achievements;
+using ChogGames.Core.Collectors;
 using ChogGames.Core.Players;
 using ChogGames.Infrastructure.Achievements;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Progression;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,7 +18,23 @@ public static class ProfileEndpoints
 {
     public sealed record AvatarResponse(string Id, string Name, string Color);
 
-    public sealed record ProfileResponse(Guid PlayerId, string DisplayName, string Kind, AvatarResponse Avatar, int GamesPlayed, int Wins);
+    /// <summary>A cosmetic collector tier (STORY-060, DEC-065), all that other players see of someone's holdings.</summary>
+    public sealed record CollectorBadgeResponse(string Id, string Name);
+
+    /// <summary>The next collector tier and how many Chogs it takes.</summary>
+    public sealed record CollectorMilestoneResponse(string Id, string Name, int MinChogs);
+
+    /// <summary>
+    /// The caller's own collector standing: Chogs held at the last gallery read, the tier, the next one and every tier
+    /// from the lowest.
+    /// </summary>
+    public sealed record CollectorResponse(
+        int ChogsHeld, CollectorBadgeResponse? Badge, CollectorMilestoneResponse? Next, CollectorMilestoneResponse[] Tiers);
+
+    /// <param name="Xp">All the XP the player has earned (STORY-059, DEC-064).</param>
+    /// <param name="Collector">The player's collector tier and progress (STORY-060, DEC-065).</param>
+    public sealed record ProfileResponse(
+        Guid PlayerId, string DisplayName, string Kind, AvatarResponse Avatar, int GamesPlayed, int Wins, int Xp, CollectorResponse Collector);
 
     /// <summary>
     /// One achievement of the catalog (STORY-058, DEC-063): how far the player is towards its target, and when it was
@@ -43,7 +61,7 @@ public static class ProfileEndpoints
         ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
-        return player is null ? TypedResults.NotFound() : TypedResults.Ok(ToResponse(player));
+        return player is null ? TypedResults.NotFound() : TypedResults.Ok(await ToResponseAsync(player, db, cancellationToken));
     }
 
     /// <summary>Every achievement of the catalog, in its order, for the caller only.</summary>
@@ -113,7 +131,7 @@ public static class ProfileEndpoints
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        return TypedResults.Ok(ToResponse(player));
+        return TypedResults.Ok(await ToResponseAsync(player, db, cancellationToken));
     }
 
     private static Task<Player?> FindCurrentPlayerAsync(ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
@@ -122,12 +140,32 @@ public static class ProfileEndpoints
         return db.Players.SingleOrDefaultAsync(p => p.Id == playerId, cancellationToken);
     }
 
-    private static ProfileResponse ToResponse(Player player)
+    private static async Task<ProfileResponse> ToResponseAsync(Player player, ChogGamesDbContext db, CancellationToken cancellationToken)
     {
-        // An avatar retired from the built-in list falls back to the default rather than failing.
-        var avatar = DefaultAvatar.TryFind(player.AvatarId, out var found) ? found : DefaultAvatar.Classic;
-        return new ProfileResponse(player.Id, player.DisplayName, player.Kind.ToString(), ToResponse(avatar), player.GamesPlayed, player.Wins);
+        var xp = await db.TotalXpAsync(player.Id, cancellationToken);
+        return new ProfileResponse(
+            player.Id,
+            player.DisplayName,
+            player.Kind.ToString(),
+            ToResponse(AvatarOf(player.AvatarId)),
+            player.GamesPlayed,
+            player.Wins,
+            xp,
+            new CollectorResponse(
+                player.ChogsHeld,
+                CollectorBadgeOf(player.ChogsHeld),
+                CollectorTier.NextAfter(player.ChogsHeld) is { } next ? ToMilestone(next) : null,
+                [.. CollectorTier.All.Select(ToMilestone)]));
     }
 
-    private static AvatarResponse ToResponse(DefaultAvatar avatar) => new(avatar.Id, avatar.Name, avatar.Color);
+    private static CollectorMilestoneResponse ToMilestone(CollectorTier tier) => new(tier.Id, tier.Name, tier.MinChogs);
+
+    /// <summary>The badge for <paramref name="chogsHeld"/> Chogs, or null below the first tier.</summary>
+    internal static CollectorBadgeResponse? CollectorBadgeOf(int chogsHeld) =>
+        CollectorTier.For(chogsHeld) is { } tier ? new CollectorBadgeResponse(tier.Id, tier.Name) : null;
+
+    /// <summary>An avatar retired from the built-in list falls back to the default rather than failing.</summary>
+    internal static DefaultAvatar AvatarOf(string avatarId) => DefaultAvatar.TryFind(avatarId, out var found) ? found : DefaultAvatar.Classic;
+
+    internal static AvatarResponse ToResponse(DefaultAvatar avatar) => new(avatar.Id, avatar.Name, avatar.Color);
 }

@@ -75,7 +75,7 @@ describe('App shell', () => {
 
       expect(element.querySelector('.brand')?.textContent).toContain('Chog Game Arena');
       const links = Array.from(element.querySelectorAll('nav[aria-label="Main"] a'));
-      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/games', '/chogs', '/profile']);
+      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/games', '/chogs', '/leaderboard', '/profile']);
       expect(element.querySelector('main router-outlet')).not.toBeNull();
     });
 

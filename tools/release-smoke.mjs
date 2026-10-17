@@ -5,7 +5,7 @@
 // sign-in refusing a bad signature; a six-player room up to its limit; lobby and match rules refusing the wrong player,
 // the wrong turn, a stale version and outsiders without any change; a player's forfeit; a dropped live connection
 // reconnecting and catching up; a six-player and a two-player match played over match commands to the finish, with
-// ranks, profile stats and achievements (STORY-058); and (STORY-057, DEC-061) a two-player Chog Race match played at the same time as the
+// ranks, profile stats, achievements (STORY-058), XP and leaderboards (STORY-059); and (STORY-057, DEC-061) a two-player Chog Race match played at the same time as the
 // two-player Chog Life one, with commands meant for the other game or match refused. It creates eight guests and three
 // rooms on the target and leaves them there, so it is never run against production. Wallet sign-in with a real
 // wallet, choosing a real Chog NFT, the mobile UI and the deployment rollback are the manual part of
@@ -246,6 +246,8 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
       const unlocked = await unlockedAchievements(guest);
       check(unlocked.includes('first_match'), `${guest.name} must have unlocked First Match`);
       if (member.rank === 1) check(unlocked.includes('first_win'), `${guest.name} won and must have unlocked First Win`);
+      // XP (STORY-059, DEC-064): only players still playing earn it.
+      if (!member.hasLeft) check(profile.json.xp > 0, `${guest.name} played to the end and must have earned XP`);
       expectStatus(await guest.get('/api/rooms/current'), 204, `GET /api/rooms/current after ${what} as ${guest.name}`);
     }
   };
@@ -446,7 +448,15 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
       const profile = await guest.get('/api/profile');
       check(profile.json.gamesPlayed >= 2, `${guest.name}'s profile must count both games`);
       check((await unlockedAchievements(guest)).includes('explorer'), `${guest.name} played both games and must have unlocked Explorer`);
+      // Leaderboards (STORY-059, DEC-064): each racer finds their own place, and no board names a player by id.
+      for (const query of ['game=chog-race&period=all-time', 'game=all&period=season']) {
+        const board = await guest.get(`/api/leaderboards?${query}`);
+        expectStatus(board, 200, `GET /api/leaderboards?${query} as ${guest.name}`);
+        check(board.json.you?.isYou === true && board.json.you.xp > 0, `${guest.name} must have a place on the ${query} board`);
+        check(!/playerId|wallet/i.test(board.text), `the ${query} board must not return player ids or wallets`);
+      }
     }
+    expectProblem(await racers[0].get('/api/leaderboards?game=chog-poker'), 400, 'unknown_game', 'a board for an unknown game');
     await duoWatcher.hub.close();
     await raceWatcher.hub.close();
     log('Release smoke test passed.');

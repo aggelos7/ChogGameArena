@@ -24,6 +24,7 @@ describe('Room page', () => {
     return {
       displayName,
       avatarId: 'classic',
+      collector: null,
       isHost: false,
       isYou: false,
       isReady: false,
@@ -122,6 +123,15 @@ describe('Room page', () => {
     expect(element().querySelector('[data-invite-link]')?.textContent).toBe(`${location.origin}/join/K7QF3M`);
     expect(element().querySelector('#players-heading')?.textContent).toBe('Players 2/6');
     expect(members()).toEqual(['Alice Host', 'Bob You']);
+  });
+
+  it('shows each member’s collector badge and avatar frame, and none for members without one', () => {
+    load({ ...room, members: [member('Alice', { isHost: true, collector: { id: 'patron', name: 'Patron' } }), member('Bob', { isYou: true })] });
+
+    expect(members()).toEqual(['Alice Patron Host', 'Bob You']);
+    const [alice, bob] = Array.from(element().querySelectorAll('[data-list="members"] li'));
+    expect(alice.querySelector('[data-frame]')?.getAttribute('data-frame')).toBe('patron');
+    expect(bob.querySelector('[data-frame]')).toBeNull();
   });
 
   it('copies the invite link', async () => {

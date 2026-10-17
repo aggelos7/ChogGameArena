@@ -25,7 +25,9 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
 
     private sealed record AbilityDto(string Id, string Name, string Description, string Target, int MaxUses);
 
-    private sealed record MemberDto(string DisplayName, bool IsYou, bool IsReady, AbilityDto? Ability, bool HasAbility);
+    private sealed record BadgeDto(string Id, string Name);
+
+    private sealed record MemberDto(string DisplayName, bool IsYou, bool IsReady, AbilityDto? Ability, bool HasAbility, BadgeDto? Collector = null);
 
     private sealed record RoomDto(string Code, long Version, string Status, MemberDto[] Members, AbilityDto[] Abilities)
     {
@@ -90,8 +92,11 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
         return client;
     }
 
-    /// <summary>A guest who signs in with a fresh wallet holding token 7, with traits, and selects it.</summary>
-    private async Task<HttpClient> HolderAsync(string name)
+    /// <summary>
+    /// A guest who signs in with a fresh wallet holding token 7, with traits, and <paramref name="others"/> more Chogs,
+    /// and selects token 7.
+    /// </summary>
+    private async Task<HttpClient> HolderAsync(string name, int others = 0)
     {
         var client = await GuestAsync(name);
         var wallet = TestWallet.Random();
@@ -108,7 +113,11 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
             client.DefaultRequestHeaders.Add("Cookie", cookies.Single().Split(';')[0]);
         }
 
-        _chain.Holdings[wallet.Address] = [new OwnedNft(NftTokenId.From(7), "Chog #7", null, [new NftTrait("Rarity", "Legendary")])];
+        _chain.Holdings[wallet.Address] =
+        [
+            new OwnedNft(NftTokenId.From(7), "Chog #7", null, [new NftTrait("Rarity", "Legendary")]),
+            .. Enumerable.Range(100, others).Select(id => new OwnedNft(NftTokenId.From((ulong)id), $"Chog #{id}", null, [])),
+        ];
         using var select = await client.PutAsJsonAsync("/api/characters/selected", new { kind = "Nft", id = "7" });
         Assert.Equal(HttpStatusCode.OK, select.StatusCode);
         return client;
@@ -200,6 +209,28 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
                 ],
                 guestOptions);
             Assert.Equal(guestOptions, holderOptions);
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_whale_is_offered_the_same_abilities_as_a_guest_and_others_see_only_the_badge()
+    {
+        var whale = await HolderAsync("Bob", others: 11);
+        (await whale.GetAsync("/api/characters")).Dispose(); // the gallery read that records the holdings (DEC-065)
+        var (code, alice, bob) = await PairAsync(bob: whale);
+        using (alice)
+        using (bob)
+        {
+            var guestView = await ViewAsync(alice, code);
+            var whaleView = await ViewAsync(bob, code);
+            var raw = await alice.GetStringAsync($"/api/rooms/{code}");
+
+            Assert.Equal(guestView.Abilities, whaleView.Abilities);
+            Assert.Equal(2, guestView.Abilities.Length);
+            Assert.Equal(new BadgeDto("whale", "Whale"), guestView.Member("Bob").Collector);
+            Assert.Null(guestView.Member("Alice").Collector);
+            Assert.DoesNotContain("chogsHeld", raw, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("wallet", raw, StringComparison.OrdinalIgnoreCase);
         }
     }
 

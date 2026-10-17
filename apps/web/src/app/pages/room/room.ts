@@ -6,6 +6,7 @@ import { GameCatalog } from '../../games/game-catalog';
 import { Observable, Subject, Subscription, catchError, of, switchMap } from 'rxjs';
 import { Avatar } from '../../profile/profile-api';
 import { AvatarBadge } from '../../profile/avatar-badge';
+import { CollectorChip } from '../../profile/collector-chip';
 import {
   Room,
   RoomAbility,
@@ -45,7 +46,7 @@ const NFT_COLOR = 'var(--brand)';
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, LifeBoardView, LifeResultsView, RaceBoardView, RaceResultsView, TurnTimer],
+  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, CollectorChip, LifeBoardView, LifeResultsView, RaceBoardView, RaceResultsView, TurnTimer],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })

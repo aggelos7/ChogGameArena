@@ -9,6 +9,30 @@ export interface Avatar {
   color: string;
 }
 
+/**
+ * Mirrors `CollectorBadgeResponse` (STORY-060, DEC-065): a cosmetic collector tier for holding Chog NFTs, all that other
+ * players see of someone's holdings. Purely visual.
+ */
+export interface CollectorBadge {
+  id: string;
+  name: string;
+}
+
+/** Mirrors `CollectorMilestoneResponse`: a collector tier and the Chogs it takes. */
+export interface CollectorMilestone extends CollectorBadge {
+  minChogs: number;
+}
+
+/** Mirrors `CollectorResponse`: the player's own Chogs held at the last gallery read, their tier and the next one. */
+export interface CollectorProgress {
+  chogsHeld: number;
+  badge: CollectorBadge | null;
+  /** The next milestone; null at the top tier. */
+  next: CollectorMilestone | null;
+  /** Every tier, from the lowest. */
+  tiers: CollectorMilestone[];
+}
+
 /** Mirrors `ProfileResponse` from `GET/PATCH /api/profile`. Counters are maintained by the server only. */
 export interface Profile {
   playerId: string;
@@ -17,6 +41,9 @@ export interface Profile {
   avatar: Avatar;
   gamesPlayed: number;
   wins: number;
+  /** All the XP earned from completed matches (STORY-059, DEC-064). */
+  xp: number;
+  collector: CollectorProgress;
 }
 
 /**

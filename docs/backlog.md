@@ -897,10 +897,10 @@
 
 #### STORY-059 — XP and leaderboards
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E09
-- **Implementation:** Calculate configurable XP and per-game/season rankings.
+- **Implementation:** Calculate configurable XP and per-game/season rankings. XP rules, boards, seasons, ties and display confirmed by the product owner (DEC-064).
 - **Acceptance criteria:**
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** only completed valid matches count; ties deterministic.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change.
@@ -910,7 +910,7 @@
 
 #### STORY-060 — Collector cosmetics
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E09
 - **Implementation:** Add cosmetic-only rewards for NFT collection milestones.

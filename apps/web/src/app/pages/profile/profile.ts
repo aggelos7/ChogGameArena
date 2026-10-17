@@ -2,9 +2,11 @@ import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { PlayerSession } from '../../identity/player-session';
 import { AvatarBadge } from '../../profile/avatar-badge';
+import { CollectorChip } from '../../profile/collector-chip';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { WalletPanel } from '../../wallet/wallet-panel';
 import {
@@ -26,7 +28,7 @@ function displayNameValidator(control: AbstractControl<string>): ValidationError
 
 @Component({
   selector: 'app-profile',
-  imports: [ReactiveFormsModule, DatePipe, AvatarBadge, LoadingState, ErrorState, WalletPanel],
+  imports: [RouterLink, ReactiveFormsModule, DatePipe, AvatarBadge, CollectorChip, LoadingState, ErrorState, WalletPanel],
   templateUrl: './profile.html',
   styleUrl: './profile.scss',
 })

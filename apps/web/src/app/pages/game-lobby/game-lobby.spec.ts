@@ -25,6 +25,7 @@ describe('Game lobby page', () => {
       {
         displayName: 'Alice',
         avatarId: 'classic',
+        collector: null,
         isHost: true,
         isYou: true,
         isReady: false,

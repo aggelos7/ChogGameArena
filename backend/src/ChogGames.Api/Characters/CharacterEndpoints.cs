@@ -16,7 +16,8 @@ namespace ChogGames.Api.Characters;
 /// <summary>
 /// The caller's character gallery (STORY-017, NFT-002/004/005/006): verified Chog NFTs of the signed-in wallet and
 /// the standard Chogs everyone can use, plus the one preferred character. The token list always comes from the
-/// server's ownership check; nothing the browser sends about ownership is trusted.
+/// server's ownership check; nothing the browser sends about ownership is trusted. Each read also stores how many Chogs
+/// the wallet holds, for the cosmetic collector tier (STORY-060, DEC-065).
 /// </summary>
 public static class CharacterEndpoints
 {
@@ -91,6 +92,13 @@ public static class CharacterEndpoints
             {
                 owned = await nfts.GetOwnedAsync(wallet, cancellationToken);
                 status = NftGalleryStatus.Available;
+
+                // Collector tiers follow the holdings the server has just read (DEC-065); a failed read changes nothing.
+                if (player.ChogsHeld != owned.Count)
+                {
+                    player.RecordChogsHeld(owned.Count);
+                    await db.SaveChangesAsync(cancellationToken);
+                }
             }
             catch (NftProviderUnavailableException)
             {

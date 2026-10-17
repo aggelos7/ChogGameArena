@@ -12,7 +12,7 @@ public sealed class ProfileTests(MigratedPostgresDatabase database) : IClassFixt
 
     private sealed record AvatarDto(string Id, string Name, string Color);
 
-    private sealed record ProfileDto(Guid PlayerId, string DisplayName, string Kind, AvatarDto Avatar, int GamesPlayed, int Wins);
+    private sealed record ProfileDto(Guid PlayerId, string DisplayName, string Kind, AvatarDto Avatar, int GamesPlayed, int Wins, int Xp);
 
     public async Task InitializeAsync()
     {
@@ -53,6 +53,7 @@ public sealed class ProfileTests(MigratedPostgresDatabase database) : IClassFixt
         Assert.Equal(new AvatarDto("classic", "Classic", "#5b2bd6"), profile.Avatar);
         Assert.Equal(0, profile.GamesPlayed);
         Assert.Equal(0, profile.Wins);
+        Assert.Equal(0, profile.Xp);
     }
 
     [PostgresFact]
@@ -147,12 +148,12 @@ public sealed class ProfileTests(MigratedPostgresDatabase database) : IClassFixt
     {
         using var client = await GuestAsync("Alice");
 
-        using var response = await PatchAsync(client, new { displayName = "Alice Two", gamesPlayed = 99, wins = 42 });
+        using var response = await PatchAsync(client, new { displayName = "Alice Two", gamesPlayed = 99, wins = 42, xp = 500 });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var profile = await GetProfileAsync(client);
         Assert.Equal("Alice Two", profile.DisplayName);
-        Assert.Equal((0, 0), (profile.GamesPlayed, profile.Wins));
+        Assert.Equal((0, 0, 0), (profile.GamesPlayed, profile.Wins, profile.Xp));
     }
 
     [PostgresFact]
