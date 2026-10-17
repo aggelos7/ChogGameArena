@@ -3,6 +3,7 @@ using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Nfts;
+using ChogGames.Core.Progression;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Matches;
@@ -12,6 +13,7 @@ using ChogGames.Infrastructure.Nfts.Cache;
 using ChogGames.Infrastructure.Nfts.Metadata;
 using ChogGames.Infrastructure.Nfts.Monad;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Progression;
 using ChogGames.Infrastructure.Rooms;
 using ChogGames.Infrastructure.Wallets;
 using Microsoft.EntityFrameworkCore;
@@ -84,6 +86,12 @@ public static class ConfigurationServiceCollectionExtensions
             .Validate(o => o.MaxMissedTurns is >= 1 and <= 20, "Matches:MaxMissedTurns must be between 1 and 20.")
             .Validate(o => o.TimeoutCheckInterval >= TimeSpan.FromMilliseconds(100) && o.TimeoutCheckInterval <= TimeSpan.FromMinutes(1),
                 "Matches:TimeoutCheckInterval must be between 100 milliseconds and 1 minute.")
+            .ValidateOnStart();
+        services.AddOptions<ProgressionOptions>()
+            .Bind(configuration.GetSection(ProgressionOptions.SectionName))
+            .Validate(o => o.Xp.Version >= 1, "Progression:Xp:Version must be at least 1.")
+            .Validate(o => o.Xp.PerMatch is >= 0 and <= XpRules.MaxValue && o.Xp.PerOpponentBeaten is >= 0 and <= XpRules.MaxValue,
+                $"Progression:Xp:PerMatch and PerOpponentBeaten must be between 0 and {XpRules.MaxValue}.")
             .ValidateOnStart();
         services.AddSingleton<IRandomSource, SecureRandomSource>();
         services.AddScoped<MatchCommandService>();

@@ -196,6 +196,52 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ChogGames.Core.Progression.XpAward", b =>
+                {
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("EarnedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GameType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("OpponentsBeaten")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RulesVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Won")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Xp")
+                        .HasColumnType("integer");
+
+                    b.HasKey("RoomId", "PlayerId");
+
+                    b.HasIndex("EarnedAt");
+
+                    b.HasIndex("PlayerId");
+
+                    b.HasIndex("GameType", "EarnedAt");
+
+                    b.ToTable("XpAwards", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_XpAwards_OpponentsBeaten_Range", "\"OpponentsBeaten\" >= 0 AND \"OpponentsBeaten\" < 6");
+
+                            t.HasCheckConstraint("CK_XpAwards_RulesVersion_Positive", "\"RulesVersion\" >= 1");
+
+                            t.HasCheckConstraint("CK_XpAwards_Xp_Range", "\"Xp\" >= 0 AND \"Xp\" <= 6000");
+                        });
+                });
+
             modelBuilder.Entity("ChogGames.Core.Rooms.GameRoom", b =>
                 {
                     b.Property<Guid>("Id")
@@ -619,6 +665,21 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("RoomId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Progression.XpAward", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ChogGames.Core.Rooms.GameRoom", null)
+                        .WithMany()
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

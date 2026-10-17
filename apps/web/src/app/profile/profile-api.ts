@@ -17,6 +17,8 @@ export interface Profile {
   avatar: Avatar;
   gamesPlayed: number;
   wins: number;
+  /** All the XP earned from completed matches (STORY-059, DEC-064). */
+  xp: number;
 }
 
 /**

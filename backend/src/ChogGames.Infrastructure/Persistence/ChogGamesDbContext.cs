@@ -2,6 +2,7 @@ using ChogGames.Core.Achievements;
 using ChogGames.Core.Games;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
+using ChogGames.Core.Progression;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Nfts.Cache;
@@ -33,6 +34,8 @@ public sealed class ChogGamesDbContext(DbContextOptions<ChogGamesDbContext> opti
     public DbSet<MatchAction> MatchActions => Set<MatchAction>();
 
     public DbSet<PlayerAchievement> PlayerAchievements => Set<PlayerAchievement>();
+
+    public DbSet<XpAward> XpAwards => Set<XpAward>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -1,0 +1,70 @@
+<h1>Leaderboard</h1>
+
+<div class="choices">
+  <div class="segmented" role="group" aria-label="Game">
+    @for (choice of games(); track choice.value) {
+      <button type="button" [attr.aria-pressed]="game() === choice.value" [attr.data-game]="choice.value" (click)="choose(choice.value, period())">
+        {{ choice.label }}
+      </button>
+    }
+  </div>
+  <div class="segmented" role="group" aria-label="Period">
+    @for (choice of periods; track choice.value) {
+      <button type="button" [attr.aria-pressed]="period() === choice.value" [attr.data-period]="choice.value" (click)="choose(game(), choice.value)">
+        {{ choice.label }}
+      </button>
+    }
+  </div>
+</div>
+
+<p class="hint">
+  XP from completed matches: 10 for playing, plus 5 for every player you finish ahead of. Ties go to more wins, then to
+  whoever got there first.
+</p>
+
+@switch (loadState()) {
+  @case ('loading') {
+    <app-loading-state message="Loading leaderboard…" />
+  }
+  @case ('error') {
+    <app-error-state message="The leaderboard could not be loaded." (retry)="load()" />
+  }
+  @case ('ready') {
+    @if (board(); as current) {
+      @if (current.season; as season) {
+        <p class="season" data-season>Season: {{ season.startsAt | date: 'MMMM y' : 'UTC' }} (UTC)</p>
+      }
+      @if (current.entries.length === 0) {
+        <p class="empty" data-empty>No one has XP on this board yet. Complete a match to be the first.</p>
+      } @else {
+        <ol class="places" aria-label="Places">
+          @for (entry of current.entries; track entry.place) {
+            <li [class.you]="entry.isYou" [attr.data-place]="entry.place">
+              <ng-container *ngTemplateOutlet="row; context: { $implicit: entry }" />
+            </li>
+          }
+          @if (ownPlaceBelow(); as own) {
+            <li class="you own" [attr.data-place]="own.place" data-own-place>
+              <ng-container *ngTemplateOutlet="row; context: { $implicit: own }" />
+            </li>
+          }
+        </ol>
+      }
+      @if (!current.you) {
+        <p class="hint" data-not-ranked>You're not on this board yet: complete a match to earn XP.</p>
+      }
+    }
+  }
+}
+
+<ng-template #row let-entry>
+  <span class="place">{{ entry.place }}</span>
+  <app-avatar-badge [avatar]="entry.avatar" [name]="entry.displayName" [size]="2" />
+  <span class="player">
+    <span class="name">{{ entry.displayName }}</span>
+    @if (entry.isYou) {
+      <span class="tag">You</span>
+    }
+  </span>
+  <span class="score"><strong data-xp>{{ entry.xp }} XP</strong><span class="wins" data-wins>{{ entry.wins }} {{ entry.wins === 1 ? 'win' : 'wins' }}</span></span>
+</ng-template>
