@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ChogGames.Core.Abilities;
+using ChogGames.Core.Achievements;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
 using ChogGames.Core.Rooms;
@@ -15,7 +16,8 @@ namespace ChogGames.Api.Rooms;
 /// tagged with the room's version so clients keep the newest. Player ids stay on the server; members are described only
 /// by what the lobby shows. The game's state is shown only through its rules' per-player view (ENG-013), and never for a
 /// game without rules. A member's ability choice is shown only to themselves until the start locks it (DEC-035); once
-/// locked, everyone sees its uses left and each member's seat, which ability targets name (DEC-036).
+/// locked, everyone sees its uses left and each member's seat, which ability targets name (DEC-036). Achievements a
+/// completed match unlocked are shown only to the player who earned them (DEC-063).
 /// </summary>
 public sealed class RoomSnapshots(
     ChogGamesDbContext db,
@@ -38,11 +40,22 @@ public sealed class RoomSnapshots(
             .Where(p => memberIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, cancellationToken);
 
+        var unlocked = room.Status == RoomStatus.Completed
+            ? (await db.PlayerAchievements.AsNoTracking()
+                .Where(a => a.RoomId == room.Id && viewerIds.Contains(a.PlayerId))
+                .Select(a => new { a.PlayerId, a.AchievementId })
+                .ToListAsync(cancellationToken))
+                .ToLookup(a => a.PlayerId, a => a.AchievementId)
+            : null;
+
         using var state = room.State is not null && _rulesByGame.ContainsKey(room.GameType) ? JsonDocument.Parse(room.State) : null;
-        return viewerIds.Distinct().ToDictionary(viewerId => viewerId, viewerId => Build(room, players, state, viewerId));
+        return viewerIds.Distinct().ToDictionary(
+            viewerId => viewerId,
+            viewerId => Build(room, players, state, viewerId, unlocked?[viewerId] ?? []));
     }
 
-    private RoomResponse Build(GameRoom room, Dictionary<Guid, Player> players, JsonDocument? state, Guid viewerId)
+    private RoomResponse Build(
+        GameRoom room, Dictionary<Guid, Player> players, JsonDocument? state, Guid viewerId, IEnumerable<string> unlocked)
     {
         var members = room.Members
             .OrderBy(m => m.JoinedAt)
@@ -85,7 +98,8 @@ public sealed class RoomSnapshots(
             room.MatchEndsAt,
             members,
             view,
-            AbilityOptions(room, players, viewerId));
+            AbilityOptions(room, players, viewerId),
+            [.. Achievement.All.Where(a => unlocked.Contains(a.Id)).Select(a => new RoomAchievementResponse(a.Id, a.Name, a.Description))]);
     }
 
     private static JsonElement? ResultOf(RoomMember member)

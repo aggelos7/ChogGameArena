@@ -23,6 +23,31 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ChogGames.Core.Achievements.PlayerAchievement", b =>
+                {
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AchievementId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UnlockedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("PlayerId", "AchievementId");
+
+                    b.HasIndex("RoomId");
+
+                    b.ToTable("PlayerAchievements", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PlayerAchievements_AchievementId_Format", "\"AchievementId\" ~ '^[a-z][a-z0-9_]{0,31}$'");
+                        });
+                });
+
             modelBuilder.Entity("ChogGames.Core.Games.GameDefinition", b =>
                 {
                     b.Property<string>("Id")
@@ -565,6 +590,21 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.HasIndex("PlayerId");
 
                     b.ToTable("WalletChallenges", (string)null);
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Achievements.PlayerAchievement", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ChogGames.Core.Rooms.GameRoom", null)
+                        .WithMany()
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ChogGames.Core.Matches.MatchAction", b =>

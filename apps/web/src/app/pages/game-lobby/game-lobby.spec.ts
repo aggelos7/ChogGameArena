@@ -20,6 +20,7 @@ describe('Game lobby page', () => {
     matchEndsAt: null,
     state: null,
     abilities: [],
+    achievements: [],
     members: [
       {
         displayName: 'Alice',

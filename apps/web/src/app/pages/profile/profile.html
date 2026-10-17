@@ -20,6 +20,30 @@
         </div>
       </section>
 
+      <section class="achievements" aria-labelledby="achievements-heading">
+        <h2 id="achievements-heading">Achievements</h2>
+        <p class="hint" data-unlocked-count>{{ unlockedCount() }} of {{ achievements().length }} unlocked</p>
+        <ul>
+          @for (achievement of achievements(); track achievement.id) {
+            <li [class.unlocked]="achievement.unlockedAt" [attr.data-achievement]="achievement.id">
+              <span class="badge" aria-hidden="true">{{ achievement.unlockedAt ? '★' : '☆' }}</span>
+              <div>
+                <p class="achievement-name">{{ achievement.name }}</p>
+                <p class="hint">{{ achievement.description }}</p>
+                @if (achievement.unlockedAt) {
+                  <p class="achievement-status" data-unlocked>Unlocked {{ achievement.unlockedAt | date: 'mediumDate' }}</p>
+                } @else {
+                  <p class="achievement-status">
+                    <progress [value]="achievement.progress" [max]="achievement.target" [attr.aria-label]="achievement.name"></progress>
+                    <span data-progress>{{ achievement.progress }}/{{ achievement.target }}</span>
+                  </p>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      </section>
+
       <form [formGroup]="form" (ngSubmit)="save()" novalidate>
         <div class="field">
           <label for="displayName">Display name</label>

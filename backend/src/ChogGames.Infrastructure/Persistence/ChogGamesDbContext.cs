@@ -1,3 +1,4 @@
+using ChogGames.Core.Achievements;
 using ChogGames.Core.Games;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Players;
@@ -30,6 +31,8 @@ public sealed class ChogGamesDbContext(DbContextOptions<ChogGamesDbContext> opti
     public DbSet<GameRoom> GameRooms => Set<GameRoom>();
 
     public DbSet<MatchAction> MatchActions => Set<MatchAction>();
+
+    public DbSet<PlayerAchievement> PlayerAchievements => Set<PlayerAchievement>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

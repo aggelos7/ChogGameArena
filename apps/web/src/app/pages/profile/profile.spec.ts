@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { PlayerSession } from '../../identity/player-session';
-import { Avatar, Profile } from '../../profile/profile-api';
+import { Achievement, Avatar, Profile } from '../../profile/profile-api';
 import { WalletPanel } from '../../wallet/wallet-panel';
 import { ProfilePage } from './profile';
 
@@ -24,6 +24,12 @@ describe('Profile page', () => {
     gamesPlayed: 5,
     wins: 2,
   };
+
+  const achievements: Achievement[] = [
+    { id: 'first_match', name: 'First Match', description: 'Complete a match.', progress: 1, target: 1, unlockedAt: '2026-10-14T12:22:11Z' },
+    { id: 'regular', name: 'Regular', description: 'Complete 10 matches.', progress: 5, target: 10, unlockedAt: null },
+    { id: 'full_degen', name: 'Full Degen', description: 'Reach a Degen Score of 100 in a match.', progress: 90, target: 100, unlockedAt: null },
+  ];
 
   let fixture: ComponentFixture<ProfilePage>;
   let http: HttpTestingController;
@@ -71,9 +77,10 @@ describe('Profile page', () => {
   const nameInput = () => element().querySelector('#displayName') as HTMLInputElement;
   const radio = (id: string) => element().querySelector(`input[type="radio"][data-avatar-id="${id}"]`) as HTMLInputElement;
 
-  function load(body: Profile = profile) {
+  function load(body: Profile = profile, unlocked: Achievement[] = achievements) {
     http.expectOne('/api/profile').flush(body);
     http.expectOne('/api/profile/avatars').flush(avatars);
+    http.expectOne('/api/profile/achievements').flush(unlocked);
     fixture.detectChanges();
   }
 
@@ -98,6 +105,35 @@ describe('Profile page', () => {
     expect(nameInput().value).toBe('Chog 4821');
     expect(radio('classic').checked).toBe(true);
     expect(element().querySelectorAll('input[type="radio"]')).toHaveLength(2);
+  });
+
+  it('lists every achievement with its progress, or when it was unlocked', () => {
+    load();
+
+    const items = [...element().querySelectorAll<HTMLElement>('[data-achievement]')];
+    expect(items.map((item) => item.dataset['achievement'])).toEqual(['first_match', 'regular', 'full_degen']);
+    expect(element().querySelector('[data-unlocked-count]')?.textContent).toBe('1 of 3 unlocked');
+
+    const [firstMatch, regular, fullDegen] = items;
+    expect(firstMatch.classList).toContain('unlocked');
+    expect(firstMatch.querySelector('[data-unlocked]')?.textContent).toBe('Unlocked Oct 14, 2026');
+    expect(firstMatch.querySelector('progress')).toBeNull();
+    expect(regular.textContent).toContain('Complete 10 matches.');
+    expect(regular.classList).not.toContain('unlocked');
+    expect(regular.querySelector('[data-progress]')?.textContent).toBe('5/10');
+    const bar = fullDegen.querySelector('progress') as HTMLProgressElement;
+    expect([bar.value, bar.max, bar.getAttribute('aria-label')]).toEqual([90, 100, 'Full Degen']);
+  });
+
+  it('shows the achievements of the player the session switched to', async () => {
+    load();
+
+    session.player.set({ playerId: 'p-2', displayName: 'Wallet Chog', kind: 'Wallet', walletAddress: '0x' + 'a'.repeat(40) });
+    await fixture.whenStable();
+    load({ ...profile, playerId: 'p-2' }, achievements.map((a) => ({ ...a, progress: 0, unlockedAt: null })));
+
+    expect(element().querySelector('[data-unlocked-count]')?.textContent).toBe('0 of 3 unlocked');
+    expect(element().querySelector('[data-unlocked]')).toBeNull();
   });
 
   it('saves only changed fields, without any player id, and updates the header name', () => {
@@ -156,8 +192,9 @@ describe('Profile page', () => {
 
   it('shows an error with retry when the profile cannot be loaded', () => {
     const avatarsRequest = http.expectOne('/api/profile/avatars');
+    const achievementsRequest = http.expectOne('/api/profile/achievements');
     http.expectOne('/api/profile').flush(null, { status: 503, statusText: 'Unavailable' });
-    expect(avatarsRequest.cancelled).toBe(true);
+    expect([avatarsRequest.cancelled, achievementsRequest.cancelled]).toEqual([true, true]);
     fixture.detectChanges();
 
     expect(element().querySelector('[role="alert"]')?.textContent).toContain('could not be loaded');

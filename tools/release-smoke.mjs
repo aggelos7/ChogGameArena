@@ -5,7 +5,7 @@
 // sign-in refusing a bad signature; a six-player room up to its limit; lobby and match rules refusing the wrong player,
 // the wrong turn, a stale version and outsiders without any change; a player's forfeit; a dropped live connection
 // reconnecting and catching up; a six-player and a two-player match played over match commands to the finish, with
-// ranks and profile stats; and (STORY-057, DEC-061) a two-player Chog Race match played at the same time as the
+// ranks, profile stats and achievements (STORY-058); and (STORY-057, DEC-061) a two-player Chog Race match played at the same time as the
 // two-player Chog Life one, with commands meant for the other game or match refused. It creates eight guests and three
 // rooms on the target and leaves them there, so it is never run against production. Wallet sign-in with a real
 // wallet, choosing a real Chog NFT, the mobile UI and the deployment rollback are the manual part of
@@ -221,6 +221,13 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     return { room, turns };
   };
 
+  const unlockedAchievements = async (guest) => {
+    const achievements = await guest.get('/api/profile/achievements');
+    expectStatus(achievements, 200, `GET /api/profile/achievements as ${guest.name}`);
+    check(Array.isArray(achievements.json) && achievements.json.length === 7, 'the achievement catalog has seven entries');
+    return achievements.json.filter((a) => a.unlockedAt).map((a) => a.id);
+  };
+
   const checkResults = async (room, players, what) => {
     check(room.status === 'Completed', `${what} ended ${room.status}, expected Completed`);
     const stayed = room.members.filter((member) => !member.hasLeft);
@@ -235,6 +242,10 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
       const member = room.members.find((m) => m.displayName === guest.name);
       check(profile.json.gamesPlayed >= 1, `${guest.name}'s profile must count the match`);
       if (member.rank === 1) check(profile.json.wins >= 1, `${guest.name} won and must have a win`);
+      // Achievements (STORY-058, DEC-063): every player has played a match, and a winner has won one.
+      const unlocked = await unlockedAchievements(guest);
+      check(unlocked.includes('first_match'), `${guest.name} must have unlocked First Match`);
+      if (member.rank === 1) check(unlocked.includes('first_win'), `${guest.name} won and must have unlocked First Win`);
       expectStatus(await guest.get('/api/rooms/current'), 204, `GET /api/rooms/current after ${what} as ${guest.name}`);
     }
   };
@@ -434,6 +445,7 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     for (const guest of racers) {
       const profile = await guest.get('/api/profile');
       check(profile.json.gamesPlayed >= 2, `${guest.name}'s profile must count both games`);
+      check((await unlockedAchievements(guest)).includes('explorer'), `${guest.name} played both games and must have unlocked Explorer`);
     }
     await duoWatcher.hub.close();
     await raceWatcher.hub.close();
