@@ -28,7 +28,9 @@ public sealed class LeaderboardTests(MigratedPostgresDatabase database) : IClass
 
     private sealed record AvatarDto(string Id, string Name, string Color);
 
-    private sealed record EntryDto(int Place, string DisplayName, AvatarDto Avatar, int Xp, int Wins, bool IsYou);
+    private sealed record BadgeDto(string Id, string Name);
+
+    private sealed record EntryDto(int Place, string DisplayName, AvatarDto Avatar, int Xp, int Wins, bool IsYou, BadgeDto? Collector = null);
 
     private sealed record SeasonDto(DateTimeOffset StartsAt, DateTimeOffset EndsAt);
 
@@ -472,6 +474,36 @@ public sealed class LeaderboardTests(MigratedPostgresDatabase database) : IClass
             Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
             Assert.Equal(awards, await AwardsAsync());
             Assert.Equal(15, (await ProfileAsync(alice)).Xp);
+        }
+    }
+
+    [PostgresFact]
+    public async Task Entries_show_the_collector_badge_but_never_the_chogs_held()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        using (alice)
+        using (bob)
+        {
+            await PlayAsync("chog-life", alice, bob);
+            await using (var db = database.CreateDbContext())
+            {
+                // As a gallery read of a wallet holding 7 Chogs would record (DEC-065).
+                await db.Database.ExecuteSqlRawAsync("""
+                    UPDATE "Players" SET "Kind" = 'Wallet', "WalletAddress" = '0x' || repeat('a', 40), "ChogsHeld" = 7
+                    WHERE "DisplayName" = 'Alice'
+                    """);
+            }
+
+            var board = await BoardAsync(bob);
+            var raw = await bob.GetStringAsync("/api/leaderboards");
+
+            Assert.Equal(
+                new (string, BadgeDto?)[] { ("Alice", new BadgeDto("patron", "Patron")), ("Bob", null) },
+                board.Entries.Select(e => (e.DisplayName, e.Collector)));
+            Assert.Equal(new BadgeDto("patron", "Patron"), (await BoardAsync(alice)).You!.Collector);
+            Assert.DoesNotContain("chogsHeld", raw, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("aaaaaaaa", raw, StringComparison.OrdinalIgnoreCase);
         }
     }
 

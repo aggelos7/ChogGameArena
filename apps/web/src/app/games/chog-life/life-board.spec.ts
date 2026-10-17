@@ -27,6 +27,7 @@ function member(displayName: string, seat: number, overrides: Partial<RoomMember
   return {
     displayName,
     avatarId: 'classic',
+    collector: null,
     isHost: false,
     isYou: false,
     isReady: false,

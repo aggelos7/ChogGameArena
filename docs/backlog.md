@@ -910,7 +910,7 @@
 
 #### STORY-060 — Collector cosmetics
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E09
 - **Implementation:** Add cosmetic-only rewards for NFT collection milestones.

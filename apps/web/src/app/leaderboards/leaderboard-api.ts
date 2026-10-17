@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { Avatar } from '../profile/profile-api';
+import { Avatar, CollectorBadge } from '../profile/profile-api';
 
 /** The board across every game; any other value is a catalog game id. */
 export const ALL_GAMES = 'all';
@@ -13,6 +13,8 @@ export interface LeaderboardEntry {
   place: number;
   displayName: string;
   avatar: Avatar;
+  /** The player's cosmetic collector badge (DEC-065); null below the first tier. */
+  collector: CollectorBadge | null;
   xp: number;
   wins: number;
   isYou: boolean;

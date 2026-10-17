@@ -37,6 +37,12 @@ public sealed class Player
     /// <summary>Completed matches won. Maintained by the server when matches finish, never by clients.</summary>
     public int Wins { get; private set; }
 
+    /// <summary>
+    /// Chog NFTs the wallet held at the last ownership read of the gallery (STORY-060, DEC-065); 0 for guests. Only
+    /// decides cosmetic collector tiers, never anything in a match.
+    /// </summary>
+    public int ChogsHeld { get; private set; }
+
     private Player()
     {
     }
@@ -71,6 +77,18 @@ public sealed class Player
 
         Kind = PlayerKind.Wallet;
         WalletAddress = wallet.Value;
+    }
+
+    /// <summary>Records how many Chogs the server has just read this player's wallet to hold.</summary>
+    public void RecordChogsHeld(int count)
+    {
+        if (Kind != PlayerKind.Wallet)
+        {
+            throw new InvalidOperationException("Only a wallet player can hold Chogs.");
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ChogsHeld = count;
     }
 
     public void Rename(PlayerDisplayName displayName) => DisplayName = displayName.Value;

@@ -4,6 +4,7 @@ import { Subscription } from 'rxjs';
 import { GameCatalog } from '../../games/game-catalog';
 import { ALL_GAMES, Leaderboard, LeaderboardApi, LeaderboardPeriod } from '../../leaderboards/leaderboard-api';
 import { AvatarBadge } from '../../profile/avatar-badge';
+import { CollectorChip } from '../../profile/collector-chip';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 
 interface BoardChoice<T> {
@@ -17,7 +18,7 @@ interface BoardChoice<T> {
  */
 @Component({
   selector: 'app-leaderboard',
-  imports: [DatePipe, NgTemplateOutlet, AvatarBadge, LoadingState, ErrorState],
+  imports: [DatePipe, NgTemplateOutlet, AvatarBadge, CollectorChip, LoadingState, ErrorState],
   templateUrl: './leaderboard.html',
   styleUrl: './leaderboard.scss',
 })

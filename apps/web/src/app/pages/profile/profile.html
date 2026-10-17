@@ -10,15 +10,46 @@
   @case ('ready') {
     @if (profile(); as current) {
       <section class="summary" aria-label="Summary">
-        <app-avatar-badge [avatar]="current.avatar" [name]="current.displayName" [size]="4" />
+        <app-avatar-badge [avatar]="current.avatar" [name]="current.displayName" [size]="4" [frame]="current.collector.badge" />
         <div>
-          <p class="name">{{ current.displayName }}</p>
+          <p class="name">{{ current.displayName }}@if (current.collector.badge; as badge) { <app-collector-chip [badge]="badge" />}</p>
           <dl class="stats">
             <div><dt>Games played</dt><dd data-stat="games">{{ current.gamesPlayed }}</dd></div>
             <div><dt>Wins</dt><dd data-stat="wins">{{ current.wins }}</dd></div>
             <div><dt>XP</dt><dd data-stat="xp">{{ current.xp }}</dd></div>
           </dl>
         </div>
+      </section>
+
+      <section class="collector" aria-labelledby="collector-heading">
+        <h2 id="collector-heading">Collector</h2>
+        @if (current.kind === 'Guest') {
+          <p class="hint" data-collector-status>Sign in with a wallet that holds Chogs to earn a collector badge and avatar frame.</p>
+        } @else {
+          <p data-collector-status>
+            {{ current.collector.chogsHeld }} {{ current.collector.chogsHeld === 1 ? 'Chog' : 'Chogs' }} held
+            @if (current.collector.next; as next) {
+              · {{ next.minChogs - current.collector.chogsHeld }} more for {{ next.name }}
+            } @else {
+              · top tier reached
+            }
+          </p>
+          <p class="hint">Counted when you open <a routerLink="/chogs">My Chogs</a>. Badges and frames are cosmetic only; they never change a match.</p>
+        }
+        <ul class="tiers" aria-label="Collector tiers">
+          @for (tier of current.collector.tiers; track tier.id) {
+            <li [class.reached]="current.collector.chogsHeld >= tier.minChogs" [class.current]="current.collector.badge?.id === tier.id"
+              [attr.data-tier]="tier.id">
+              <app-collector-chip [badge]="tier" />
+              <span class="hint">{{ tier.minChogs }} {{ tier.minChogs === 1 ? 'Chog' : 'Chogs' }}</span>
+              @if (current.collector.badge?.id === tier.id) {
+                <span class="tier-status" data-tier-current>Your tier</span>
+              } @else if (current.collector.chogsHeld >= tier.minChogs) {
+                <span class="tier-status" data-tier-reached>Reached</span>
+              }
+            </li>
+          }
+        </ul>
       </section>
 
       <section class="achievements" aria-labelledby="achievements-heading">

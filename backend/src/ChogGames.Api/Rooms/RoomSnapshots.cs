@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ChogGames.Api.Profile;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Achievements;
 using ChogGames.Core.Matches;
@@ -17,7 +18,8 @@ namespace ChogGames.Api.Rooms;
 /// by what the lobby shows. The game's state is shown only through its rules' per-player view (ENG-013), and never for a
 /// game without rules. A member's ability choice is shown only to themselves until the start locks it (DEC-035); once
 /// locked, everyone sees its uses left and each member's seat, which ability targets name (DEC-036). Achievements a
-/// completed match unlocked are shown only to the player who earned them (DEC-063).
+/// completed match unlocked are shown only to the player who earned them (DEC-063). Each member shows their cosmetic
+/// collector badge, never how many Chogs they hold (DEC-065).
 /// </summary>
 public sealed class RoomSnapshots(
     ChogGamesDbContext db,
@@ -77,7 +79,8 @@ public sealed class RoomSnapshots(
                     m.PlayerId == room.CurrentPlayerId,
                     m.Rank,
                     m.Seat,
-                    ResultOf(m));
+                    ResultOf(m),
+                    ProfileEndpoints.CollectorBadgeOf(player.ChogsHeld));
             })
             .ToArray();
 
