@@ -1,5 +1,6 @@
 using ChogGames.Core.Abilities;
 using ChogGames.Infrastructure.Abilities;
+using ChogGames.Infrastructure.Avatars;
 using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Matches;
@@ -67,6 +68,26 @@ public static class ConfigurationServiceCollectionExtensions
             .ValidateOnStart();
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<GuestSessionService>();
+
+        // Uploaded profile photos (STORY-062, DEC-018), re-encoded by the server and stored in PostgreSQL.
+        services.AddOptions<AvatarImageOptions>()
+            .Bind(configuration.GetSection(AvatarImageOptions.SectionName))
+            .Validate(o => o.MaxUploadBytes is >= 1024 and <= 10 * 1024 * 1024, "AvatarImages:MaxUploadBytes must be between 1024 and 10485760.")
+            .Validate(o => o.MaxSourceDimension is >= 64 and <= 8192, "AvatarImages:MaxSourceDimension must be between 64 and 8192.")
+            .Validate(o => o.Size is >= 32 and <= 512, "AvatarImages:Size must be between 32 and 512.")
+            .Validate(o => o.Quality is >= 1 and <= 100, "AvatarImages:Quality must be between 1 and 100.")
+            .Validate(o => o.ChangesPerWindowPerPlayer is >= 1 and <= 100, "AvatarImages:ChangesPerWindowPerPlayer must be between 1 and 100.")
+            .Validate(o => o.Window >= TimeSpan.FromSeconds(1) && o.Window <= TimeSpan.FromDays(1),
+                "AvatarImages:Window must be between 1 second and 1 day.")
+            .Validate(o => o.CacheDuration >= TimeSpan.Zero && o.CacheDuration <= TimeSpan.FromDays(1),
+                "AvatarImages:CacheDuration must be between 0 and 1 day.")
+            .ValidateOnStart();
+        services.AddSingleton(provider =>
+        {
+            var avatarImages = provider.GetRequiredService<IOptions<AvatarImageOptions>>().Value;
+            return new AvatarImageEncoder(avatarImages.MaxSourceDimension, avatarImages.Size, avatarImages.Quality);
+        });
+        services.AddScoped<AvatarImageService>();
 
         services.AddSingleton<IValidateOptions<WalletAuthOptions>, WalletAuthOptionsValidator>();
         services.AddOptions<WalletAuthOptions>()

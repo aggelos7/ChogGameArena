@@ -15,6 +15,12 @@ public sealed class Player
 
     public string AvatarId { get; private set; } = DefaultAvatar.Classic.Id;
 
+    /// <summary>
+    /// The uploaded photo shown instead of <see cref="AvatarId"/> while there is one (STORY-062, DEC-018); null otherwise.
+    /// Set only by the server's avatar image service; the database clears it when the image is deleted.
+    /// </summary>
+    public Guid? AvatarImageId { get; private set; }
+
     public PlayerKind Kind { get; private set; }
 
     /// <summary>Lowercase address bound by a verified wallet sign-in; null for guests. One wallet per player.</summary>

@@ -3,7 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { forkJoin } from 'rxjs';
+import { Observable, forkJoin } from 'rxjs';
 import { PlayerSession } from '../../identity/player-session';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { CollectorChip } from '../../profile/collector-chip';
@@ -16,9 +16,19 @@ import {
   DISPLAY_NAME_MIN,
   DISPLAY_NAME_PATTERN,
   DISPLAY_NAME_RULE,
+  PHOTO_MAX_BYTES,
+  PHOTO_TYPES,
   Profile,
   ProfileApi,
 } from '../../profile/profile-api';
+
+/** What the player is told when the server refuses a photo, by the problem's `code`. */
+const PHOTO_ERRORS: Record<string, string> = {
+  avatar_too_large: 'That photo is too big. Choose one of 2 MB or less.',
+  avatar_unsupported_type: 'Choose a JPEG, PNG or WebP photo.',
+  avatar_not_an_image: "That file isn't a photo we can read. Choose a JPEG, PNG or WebP photo.",
+  avatar_too_many_pixels: 'That photo has too many pixels. Choose a smaller one.',
+};
 
 function displayNameValidator(control: AbstractControl<string>): ValidationErrors | null {
   const value = (control.value ?? '').trim();
@@ -44,6 +54,9 @@ export class ProfilePage implements OnInit {
   protected readonly loadState = signal<'loading' | 'ready' | 'error'>('loading');
   protected readonly saveState = signal<'idle' | 'saving' | 'saved' | 'error'>('idle');
   protected readonly serverErrors = signal<Record<string, string[]>>({});
+  protected readonly photoTypes = PHOTO_TYPES.join(',');
+  protected readonly photoState = signal<'idle' | 'uploading' | 'removing'>('idle');
+  protected readonly photoError = signal<string | null>(null);
 
   protected readonly form = inject(FormBuilder).nonNullable.group({
     displayName: ['', displayNameValidator],
@@ -111,8 +124,57 @@ export class ProfilePage implements OnInit {
     });
   }
 
+  /** Uploads the chosen file. Type and size are checked here only to answer quickly; the server decides. */
+  protected choosePhoto(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const photo = input.files?.[0];
+    input.value = '';
+    if (!photo) {
+      return;
+    }
+
+    if (!PHOTO_TYPES.includes(photo.type)) {
+      this.photoError.set(PHOTO_ERRORS['avatar_unsupported_type']);
+      return;
+    }
+
+    if (photo.size > PHOTO_MAX_BYTES) {
+      this.photoError.set(PHOTO_ERRORS['avatar_too_large']);
+      return;
+    }
+
+    this.photoState.set('uploading');
+    this.changePhoto(this.api.uploadPhoto(photo));
+  }
+
+  protected removePhoto(): void {
+    this.photoState.set('removing');
+    this.changePhoto(this.api.removePhoto());
+  }
+
   protected avatarById(id: string): Avatar | undefined {
     return this.avatars().find((avatar) => avatar.id === id);
+  }
+
+  /** Shows the new photo without touching unsaved edits in the form. */
+  private changePhoto(request: Observable<Profile>): void {
+    this.photoError.set(null);
+    request.subscribe({
+      next: (profile) => {
+        this.profile.set(profile);
+        this.photoState.set('idle');
+      },
+      error: (error: unknown) => {
+        const code = error instanceof HttpErrorResponse ? error.error?.code : undefined;
+        const tooMany = error instanceof HttpErrorResponse && error.status === 429;
+        this.photoError.set(
+          tooMany
+            ? 'Too many photo changes. Try again in a few minutes.'
+            : (PHOTO_ERRORS[code] ?? 'Your photo was not changed. Try again.'),
+        );
+        this.photoState.set('idle');
+      },
+    });
   }
 
   private show(profile: Profile): void {

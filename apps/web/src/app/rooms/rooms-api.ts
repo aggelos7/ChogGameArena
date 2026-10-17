@@ -66,6 +66,11 @@ export interface RoomMember {
   result: unknown;
   /** The member's cosmetic collector badge (DEC-065); null below the first tier. Never how many Chogs they hold. */
   collector: CollectorBadge | null;
+  /**
+   * The member's uploaded profile photo, drawn as their pawn on the boards (STORY-062, DEC-018); null without one. Their
+   * match character stays `character`.
+   */
+  avatarImageUrl: string | null;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */

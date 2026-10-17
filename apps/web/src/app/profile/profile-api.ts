@@ -7,6 +7,11 @@ export interface Avatar {
   id: string;
   name: string;
   color: string;
+  /**
+   * The player's uploaded photo, served by the API as a small square WebP (STORY-062, DEC-018). Shown instead of the
+   * colour while there is one; null or absent otherwise.
+   */
+  imageUrl?: string | null;
 }
 
 /**
@@ -65,6 +70,11 @@ export interface ProfileUpdate {
   avatarId?: string;
 }
 
+/** Photo types the server accepts; it checks the content itself, whatever the file says it is. */
+export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+/** The server's default `AvatarImages:MaxUploadBytes`; it remains the authority. */
+export const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+
 /** Mirrors `PlayerDisplayName` rules on the server (which remains the authority). */
 export const DISPLAY_NAME_PATTERN = /^[\p{L}\p{Nd}_-]+( [\p{L}\p{Nd}_-]+)*$/u;
 export const DISPLAY_NAME_MIN = 3;
@@ -91,5 +101,15 @@ export class ProfileApi {
 
   update(changes: ProfileUpdate): Observable<Profile> {
     return this.http.patch<Profile>('/api/profile', changes);
+  }
+
+  /** Sends the file itself as the body; the server re-encodes it and replaces any earlier photo. */
+  uploadPhoto(photo: Blob): Observable<Profile> {
+    return this.http.put<Profile>('/api/profile/avatar-image', photo, { headers: { 'Content-Type': photo.type } });
+  }
+
+  /** Deletes the photo, so the built-in avatar shows again. */
+  removePhoto(): Observable<Profile> {
+    return this.http.delete<Profile>('/api/profile/avatar-image');
   }
 }

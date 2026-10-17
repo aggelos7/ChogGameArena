@@ -8,8 +8,10 @@ using NpgsqlTypes;
 namespace ChogGames.Infrastructure.Progression;
 
 /// <summary>One place on a leaderboard (STORY-059, DEC-064); the player id is for the server only, never returned.</summary>
+/// <param name="AvatarImageId">The player's uploaded photo, if any (STORY-062, DEC-018).</param>
 /// <param name="ChogsHeld">For the cosmetic collector badge only (DEC-065); never returned.</param>
-public sealed record LeaderboardEntry(int Place, Guid PlayerId, string DisplayName, string AvatarId, int ChogsHeld, int Xp, int Wins);
+public sealed record LeaderboardEntry(
+    int Place, Guid PlayerId, string DisplayName, string AvatarId, Guid? AvatarImageId, int ChogsHeld, int Xp, int Wins);
 
 /// <summary>A leaderboard's top places and the viewer's own place, null while they have no XP on it.</summary>
 public sealed record LeaderboardStandings(IReadOnlyList<LeaderboardEntry> Top, LeaderboardEntry? Viewer);
@@ -70,7 +72,7 @@ public static class PlayerXp
                 SELECT *, (ROW_NUMBER() OVER (ORDER BY "Xp" DESC, "Wins" DESC, reached, "PlayerId"))::int AS "Place"
                 FROM totals
             )
-            SELECT k."Place", k."PlayerId", p."DisplayName", p."AvatarId", p."ChogsHeld", k."Xp", k."Wins"
+            SELECT k."Place", k."PlayerId", p."DisplayName", p."AvatarId", p."AvatarImageId", p."ChogsHeld", k."Xp", k."Wins"
             FROM ranked k
             JOIN "Players" p ON p."Id" = k."PlayerId"
             WHERE k."Place" <= @top OR k."PlayerId" = @viewer
@@ -83,7 +85,7 @@ public static class PlayerXp
             new NpgsqlParameter("viewer", NpgsqlDbType.Uuid) { Value = viewerId })
             .ToListAsync(cancellationToken);
 
-        var entries = rows.Select(r => new LeaderboardEntry(r.Place, r.PlayerId, r.DisplayName, r.AvatarId, r.ChogsHeld, r.Xp, r.Wins)).ToList();
+        var entries = rows.Select(r => new LeaderboardEntry(r.Place, r.PlayerId, r.DisplayName, r.AvatarId, r.AvatarImageId, r.ChogsHeld, r.Xp, r.Wins)).ToList();
         return new LeaderboardStandings(
             [.. entries.Where(e => e.Place <= TopPlaces)],
             entries.SingleOrDefault(e => e.PlayerId == viewerId));
@@ -98,6 +100,8 @@ public static class PlayerXp
         public string DisplayName { get; init; } = string.Empty;
 
         public string AvatarId { get; init; } = string.Empty;
+
+        public Guid? AvatarImageId { get; init; }
 
         public int ChogsHeld { get; init; }
 

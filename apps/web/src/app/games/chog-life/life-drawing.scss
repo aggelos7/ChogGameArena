@@ -178,6 +178,11 @@ svg {
   stroke-width: 2.5;
 }
 
+// A CSS clip, not an SVG clipPath: url(#…) references break under <base href> in some browsers.
+.pawn-photo {
+  clip-path: circle(50%);
+}
+
 .pawn-seat {
   font-size: 11px;
   font-weight: 700;

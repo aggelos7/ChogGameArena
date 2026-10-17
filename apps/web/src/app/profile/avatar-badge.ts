@@ -2,12 +2,20 @@ import { Component, computed, input } from '@angular/core';
 import { collectorColor } from './collector-chip';
 import { Avatar, CollectorBadge } from './profile-api';
 
-/** Placeholder avatar: the player's initial on the avatar colour, framed in their collector tier's colour if any. */
+/**
+ * The player's uploaded photo (STORY-062) or, without one, their initial on the avatar colour; framed in their collector
+ * tier's colour if any.
+ */
 @Component({
   selector: 'app-avatar-badge',
   template: `<span class="badge" [style.background]="avatar().color" [style.width.rem]="size()" [style.height.rem]="size()"
-    [style.font-size.rem]="size() / 2" [style.box-shadow]="ring()" [attr.data-frame]="frame()?.id" aria-hidden="true"
-    >{{ initial() }}</span>`,
+    [style.font-size.rem]="size() / 2" [style.box-shadow]="ring()" [attr.data-frame]="frame()?.id" aria-hidden="true">
+    @if (avatar().imageUrl; as src) {
+      <img [src]="src" alt="" loading="lazy" decoding="async" />
+    } @else {
+      {{ initial() }}
+    }
+  </span>`,
   styles: `
     .badge {
       display: inline-flex;
@@ -17,6 +25,13 @@ import { Avatar, CollectorBadge } from './profile-api';
       color: #fff;
       font-weight: 700;
       flex-shrink: 0;
+    }
+
+    img {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
     }
   `,
 })
