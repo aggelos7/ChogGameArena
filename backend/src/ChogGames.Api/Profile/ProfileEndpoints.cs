@@ -3,6 +3,7 @@ using ChogGames.Core.Achievements;
 using ChogGames.Core.Players;
 using ChogGames.Infrastructure.Achievements;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Progression;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,7 +17,8 @@ public static class ProfileEndpoints
 {
     public sealed record AvatarResponse(string Id, string Name, string Color);
 
-    public sealed record ProfileResponse(Guid PlayerId, string DisplayName, string Kind, AvatarResponse Avatar, int GamesPlayed, int Wins);
+    /// <param name="Xp">All the XP the player has earned (STORY-059, DEC-064).</param>
+    public sealed record ProfileResponse(Guid PlayerId, string DisplayName, string Kind, AvatarResponse Avatar, int GamesPlayed, int Wins, int Xp);
 
     /// <summary>
     /// One achievement of the catalog (STORY-058, DEC-063): how far the player is towards its target, and when it was
@@ -43,7 +45,7 @@ public static class ProfileEndpoints
         ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
-        return player is null ? TypedResults.NotFound() : TypedResults.Ok(ToResponse(player));
+        return player is null ? TypedResults.NotFound() : TypedResults.Ok(await ToResponseAsync(player, db, cancellationToken));
     }
 
     /// <summary>Every achievement of the catalog, in its order, for the caller only.</summary>
@@ -113,7 +115,7 @@ public static class ProfileEndpoints
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        return TypedResults.Ok(ToResponse(player));
+        return TypedResults.Ok(await ToResponseAsync(player, db, cancellationToken));
     }
 
     private static Task<Player?> FindCurrentPlayerAsync(ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
@@ -122,12 +124,15 @@ public static class ProfileEndpoints
         return db.Players.SingleOrDefaultAsync(p => p.Id == playerId, cancellationToken);
     }
 
-    private static ProfileResponse ToResponse(Player player)
+    private static async Task<ProfileResponse> ToResponseAsync(Player player, ChogGamesDbContext db, CancellationToken cancellationToken)
     {
-        // An avatar retired from the built-in list falls back to the default rather than failing.
-        var avatar = DefaultAvatar.TryFind(player.AvatarId, out var found) ? found : DefaultAvatar.Classic;
-        return new ProfileResponse(player.Id, player.DisplayName, player.Kind.ToString(), ToResponse(avatar), player.GamesPlayed, player.Wins);
+        var xp = await db.TotalXpAsync(player.Id, cancellationToken);
+        return new ProfileResponse(
+            player.Id, player.DisplayName, player.Kind.ToString(), ToResponse(AvatarOf(player.AvatarId)), player.GamesPlayed, player.Wins, xp);
     }
 
-    private static AvatarResponse ToResponse(DefaultAvatar avatar) => new(avatar.Id, avatar.Name, avatar.Color);
+    /// <summary>An avatar retired from the built-in list falls back to the default rather than failing.</summary>
+    internal static DefaultAvatar AvatarOf(string avatarId) => DefaultAvatar.TryFind(avatarId, out var found) ? found : DefaultAvatar.Classic;
+
+    internal static AvatarResponse ToResponse(DefaultAvatar avatar) => new(avatar.Id, avatar.Name, avatar.Color);
 }

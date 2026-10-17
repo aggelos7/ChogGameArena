@@ -23,6 +23,7 @@ describe('Profile page', () => {
     avatar: avatars[0],
     gamesPlayed: 5,
     wins: 2,
+    xp: 70,
   };
 
   const achievements: Achievement[] = [
@@ -102,6 +103,7 @@ describe('Profile page', () => {
     expect(element().querySelector('.name')?.textContent).toBe('Chog 4821');
     expect(element().querySelector('[data-stat="games"]')?.textContent).toBe('5');
     expect(element().querySelector('[data-stat="wins"]')?.textContent).toBe('2');
+    expect(element().querySelector('[data-stat="xp"]')?.textContent).toBe('70');
     expect(nameInput().value).toBe('Chog 4821');
     expect(radio('classic').checked).toBe(true);
     expect(element().querySelectorAll('input[type="radio"]')).toHaveLength(2);

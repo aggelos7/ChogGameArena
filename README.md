@@ -173,7 +173,7 @@ Player profile (SUITE-004): always the caller's own profile — there is no play
 
 | Endpoint | Request | Responses |
 |---|---|---|
-| `GET /api/profile` | session cookie | `200 { playerId, displayName, kind, avatar: { id, name, color }, gamesPlayed, wins }`; `401` |
+| `GET /api/profile` | session cookie | `200 { playerId, displayName, kind, avatar: { id, name, color }, gamesPlayed, wins, xp }`; `xp` is all the XP earned (STORY-059); `401` |
 | `PATCH /api/profile` | `{ "displayName"?: string, "avatarId"?: string }` | `200` updated profile; `400` invalid name, unknown avatar or no editable field (nothing changes); `401` |
 | `GET /api/profile/achievements` | session cookie | `200 [{ id, name, description, progress, target, unlockedAt }]` the whole achievement catalog in order (STORY-058, DEC-063): `progress` towards `target` (equal to it once unlocked), `unlockedAt` null while locked; `401`. Read only: no client can set an achievement |
 | `GET /api/profile/avatars` | session cookie | `200 [{ id, name, color }]` built-in placeholder avatars (`classic` default, `mint`, `sunset`, `ocean`, `berry`, `gold`) |
@@ -380,6 +380,22 @@ Achievements (STORY-058, DEC-063):
 - **Awarding:** `RecordStatsAsync` unlocks what each member has now earned in the transaction that completes the match, after the stats and with the players locked, dated when the match ended (`INSERT … ON CONFLICT DO NOTHING`, primary key player + achievement), so a retried or concurrent finishing command never awards twice. Games played and wins are the profile stats (forfeits count as played); games tried and the best Degen Score come from completed matches' members and their stored `result.degenScore`. Abandoned matches award nothing.
 - **Snapshots:** a completed room's snapshot has `achievements: [{ id, name, description }]`, those the viewer unlocked with that match; empty for everyone else and in every other status.
 - **Storage:** migration `AddPlayerAchievements` adds `PlayerAchievements` (`PlayerId`, `AchievementId`, `RoomId` of the match that unlocked it, `UnlockedAt`; id format checked) and backfills catalog v1 from the completed matches already played, each dated by the match that earned it.
+
+XP and leaderboards (STORY-059, DEC-064):
+- **XP:** `RecordStatsAsync` also gives every player still playing a completed match `PerMatch` XP plus `PerOpponentBeaten` for each member ranked below them (players who left count as beaten; a shared place beats nobody it shares with), in the same transaction, once per player and match (`INSERT … ON CONFLICT DO NOTHING`, primary key room + player). Players who left and abandoned matches earn nothing; no client can set XP.
+- **Endpoint:**
+
+| Endpoint | Request | Responses |
+|---|---|---|
+| `GET /api/leaderboards?game=all\|<game id>&period=all-time\|season` | session cookie; both default to the first value | `200 { game, period, season: { startsAt, endsAt } \| null, entries: [{ place, displayName, avatar: { id, name, color }, xp, wins, isYou }], you }`: the top 50 places and the viewer's own place (`you`, also when it's lower; null without XP on the board). Ranked by XP, then wins, then the earlier last scoring match, then a hidden stable key, so places never tie. A season is the current UTC calendar month. No player id or wallet is returned. `400 unknown_game` (not in the catalog), `400 unknown_period`; `401`; rate limited per player like rooms (`Rooms:RequestsPerMinutePerPlayer`) |
+
+| Setting (`Progression:Xp:`) | Default | |
+|---|---|---|
+| `Version` | `1` | stored with every award; bump it whenever the values change (at least 1) |
+| `PerMatch` | `10` | XP for completing a match while still playing (0–1000) |
+| `PerOpponentBeaten` | `5` | XP for each member ranked below (0–1000) |
+
+- **Storage:** migration `AddXpAwards` adds `XpAwards` (`RoomId`, `PlayerId`, `GameType`, `EarnedAt` = when the match ended, `OpponentsBeaten`, `Won`, `Xp`, `RulesVersion`; ranges checked, indexed by game and time) and backfills version 1 for the completed matches already played. Changing the settings never rewrites stored XP.
 
 Live room updates (STORY-022, STORY-026, ENG-005, DEC-024, DEC-028): a SignalR hub at `/api/hubs/rooms`, WebSockets only (clients skip negotiation), authenticated by the session cookie (`401` without one).
 - **Client → server:** `SubscribeRoom(code)` starts updates for a room the player is playing in and returns their current room snapshot; anything else (unknown code, someone else's room, malformed code) fails with the hub error `room_not_found`. `UnsubscribeRoom(code)` always succeeds. There are no other hub methods; room changes and match commands go through the endpoints above (DEC-026).

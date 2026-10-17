@@ -1,6 +1,8 @@
+using ChogGames.Core.Progression;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Achievements;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Progression;
 using ChogGames.Infrastructure.Rooms;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,12 +12,13 @@ namespace ChogGames.Infrastructure.Matches;
 /// Player stats from match results (STORY-028, SUITE-004, DEC-030). Only a completed match counts: every member,
 /// including those who left it, has played one more game, and each player ranked first has one more win. An abandoned
 /// match changes no stats. Called in the transaction that completes the match under its row lock, so a match is counted
-/// exactly once. The match also unlocks the achievements its members have now earned (STORY-058, DEC-063).
+/// exactly once. The match also unlocks the achievements its members have now earned (STORY-058, DEC-063) and gives
+/// the players still playing their XP (STORY-059, DEC-064).
 /// </summary>
 internal static class MatchResults
 {
     /// <summary>Adds <paramref name="room"/>'s results to its members' stats; the room has just been completed.</summary>
-    public static async Task RecordStatsAsync(this ChogGamesDbContext db, GameRoom room, CancellationToken cancellationToken)
+    public static async Task RecordStatsAsync(this ChogGamesDbContext db, GameRoom room, XpRules xp, CancellationToken cancellationToken)
     {
         if (room.Status != RoomStatus.Completed)
         {
@@ -40,8 +43,9 @@ internal static class MatchResults
             .Where(p => winnerIds.Contains(p.Id))
             .ExecuteUpdateAsync(set => set.SetProperty(p => p.Wins, p => p.Wins + 1), cancellationToken);
 
-        // The completed room is written first, so the achievement totals count this match; the commit is still the caller's.
+        // The completed room is written first, so the achievement totals and XP count this match; the commit is still the caller's.
         await db.SaveChangesAsync(cancellationToken);
         await db.AwardAchievementsAsync(room, memberIds, cancellationToken);
+        await db.AwardXpAsync(room, xp, cancellationToken);
     }
 }

@@ -35,6 +35,11 @@ export const appRoutes: Route[] = [
     loadComponent: () => import('./pages/my-chogs/my-chogs').then((m) => m.MyChogsPage),
   },
   {
+    path: 'leaderboard',
+    title: 'Leaderboard · Chog Game Arena',
+    loadComponent: () => import('./pages/leaderboard/leaderboard').then((m) => m.LeaderboardPage),
+  },
+  {
     path: 'profile',
     title: 'Profile · Chog Game Arena',
     loadComponent: () => import('./pages/profile/profile').then((m) => m.ProfilePage),

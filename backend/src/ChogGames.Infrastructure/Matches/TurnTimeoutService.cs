@@ -2,6 +2,7 @@ using System.Text.Json;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Persistence;
+using ChogGames.Infrastructure.Progression;
 using ChogGames.Infrastructure.Rooms;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,7 @@ public sealed class TurnTimeoutService(
     IOptions<MatchOptions> options,
     IRandomSource random,
     TimeProvider timeProvider,
+    IOptions<ProgressionOptions> progression,
     ILogger<TurnTimeoutService> logger)
 {
     /// <summary>Most matches handled in one sweep; the rest wait for the next.</summary>
@@ -117,7 +119,7 @@ public sealed class TurnTimeoutService(
                 if (reply is { Standings: { } standings, State: { ValueKind: JsonValueKind.Object } final })
                 {
                     room.FinishOnReplyTimeout(final.GetRawText(), standings, now);
-                    await db.RecordStatsAsync(room, cancellationToken);
+                    await db.RecordStatsAsync(room, progression.Value.Xp.ToRules(), cancellationToken);
                     await db.SaveChangesAsync(cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
                     return new TimedOutTurn(room.Code, null);
@@ -157,7 +159,7 @@ public sealed class TurnTimeoutService(
         }
 
         room.End(ending.State.GetRawText(), ending.Standings, now);
-        await db.RecordStatsAsync(room, cancellationToken);
+        await db.RecordStatsAsync(room, progression.Value.Xp.ToRules(), cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
     }
 }
