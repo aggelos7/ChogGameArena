@@ -27,6 +27,13 @@ export interface RoomAbility {
   usesLeft: number | null;
 }
 
+/** Mirrors `RoomAchievementResponse`: an achievement this player unlocked with the completed match (DEC-063). */
+export interface RoomAchievement {
+  id: string;
+  name: string;
+  description: string;
+}
+
 /** Mirrors `RoomMemberResponse`. Player ids never leave the server. */
 export interface RoomMember {
   displayName: string;
@@ -89,6 +96,8 @@ export interface Room {
   state: unknown;
   /** What this player may choose from while the room waits; empty for a game without abilities and once started. */
   abilities: RoomAbility[];
+  /** Achievements this player unlocked with the completed match (STORY-058); empty otherwise and for everyone else's. */
+  achievements: RoomAchievement[];
 }
 
 /** Mirrors `MatchCommandResponse`: the room's `version` after the command and whether it was a replayed retry. */

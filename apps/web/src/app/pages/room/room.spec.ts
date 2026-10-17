@@ -57,6 +57,7 @@ describe('Room page', () => {
     ],
     state: null,
     abilities: [],
+    achievements: [],
   };
   const withCarol = (version: number): Room => ({ ...room, version, members: [...room.members, member('Carol')] });
 
@@ -1059,6 +1060,33 @@ describe('Room page', () => {
       expect(members()).toEqual(['Alice Host 1st', 'Bob 2nd', 'Carol You Left 3rd']);
       expect(element().querySelector('[data-result]')?.textContent).toContain('The game is over: you finished 3rd.');
       expect(element().querySelector('[data-left]')).toBeNull();
+    });
+
+    it('tells the player which achievements the finished game unlocked for them', () => {
+      load({
+        ...room,
+        status: 'Completed',
+        members: [member('Alice', { isHost: true, isYou: true, rank: 1 }), member('Bob', { rank: 2 })],
+        achievements: [
+          { id: 'first_match', name: 'First Match', description: 'Complete a match.' },
+          { id: 'first_win', name: 'First Win', description: 'Win a match.' },
+        ],
+      });
+
+      const unlocked = element().querySelector('[data-achievements]');
+      expect(unlocked?.getAttribute('role')).toBe('status');
+      expect(Array.from(unlocked?.querySelectorAll('[data-achievement]') ?? []).map((a) => a.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+        '★ Achievement unlocked: First Match. Complete a match.',
+        '★ Achievement unlocked: First Win. Win a match.',
+      ]);
+      expect(unlocked?.querySelector('a')?.getAttribute('href')).toBe('/profile');
+    });
+
+    it('shows no achievements when the game unlocked none for this player', () => {
+      load({ ...room, status: 'Completed', members: [member('Alice', { isHost: true, rank: 1 }), member('Bob', { isYou: true, rank: 2 })] });
+
+      expect(element().querySelector('[data-result]')).not.toBeNull();
+      expect(element().querySelector('[data-achievements]')).toBeNull();
     });
 
     it('shows no places before a game is over', () => {

@@ -57,6 +57,17 @@
           }
           <a routerLink="/games">Play again</a>
         </p>
+        @if (current.achievements.length > 0) {
+          <div class="unlocked" role="status" data-achievements>
+            @for (achievement of current.achievements; track achievement.id) {
+              <p [attr.data-achievement]="achievement.id">
+                <span aria-hidden="true">★</span> Achievement unlocked: <strong>{{ achievement.name }}</strong>.
+                <span class="unlocked-description">{{ achievement.description }}</span>
+              </p>
+            }
+            <a routerLink="/profile">See your achievements</a>
+          </div>
+        }
       } @else if (current.status === 'Abandoned') {
         <p class="started" role="status" data-closed>
           This game ended early: too many players left. <a routerLink="/games">Find another game</a>

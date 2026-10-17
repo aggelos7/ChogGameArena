@@ -25,6 +25,7 @@ const room = (status: RoomStatus, code = 'K7QF3M'): Room => ({
   members: [],
   state: null,
   abilities: [],
+  achievements: [],
 });
 
 const guest = (displayName: string): CurrentPlayer => ({ playerId: displayName, displayName, kind: 'Guest', walletAddress: null });

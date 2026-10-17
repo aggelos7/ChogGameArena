@@ -1,5 +1,6 @@
+import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, effect, inject, signal, untracked } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { PlayerSession } from '../../identity/player-session';
@@ -7,6 +8,7 @@ import { AvatarBadge } from '../../profile/avatar-badge';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { WalletPanel } from '../../wallet/wallet-panel';
 import {
+  Achievement,
   Avatar,
   DISPLAY_NAME_MAX,
   DISPLAY_NAME_MIN,
@@ -24,7 +26,7 @@ function displayNameValidator(control: AbstractControl<string>): ValidationError
 
 @Component({
   selector: 'app-profile',
-  imports: [ReactiveFormsModule, AvatarBadge, LoadingState, ErrorState, WalletPanel],
+  imports: [ReactiveFormsModule, DatePipe, AvatarBadge, LoadingState, ErrorState, WalletPanel],
   templateUrl: './profile.html',
   styleUrl: './profile.scss',
 })
@@ -35,6 +37,8 @@ export class ProfilePage implements OnInit {
   protected readonly displayNameRule = DISPLAY_NAME_RULE;
   protected readonly profile = signal<Profile | null>(null);
   protected readonly avatars = signal<Avatar[]>([]);
+  protected readonly achievements = signal<Achievement[]>([]);
+  protected readonly unlockedCount = computed(() => this.achievements().filter((a) => a.unlockedAt).length);
   protected readonly loadState = signal<'loading' | 'ready' | 'error'>('loading');
   protected readonly saveState = signal<'idle' | 'saving' | 'saved' | 'error'>('idle');
   protected readonly serverErrors = signal<Record<string, string[]>>({});
@@ -61,9 +65,10 @@ export class ProfilePage implements OnInit {
 
   protected load(): void {
     this.loadState.set('loading');
-    forkJoin({ profile: this.api.get(), avatars: this.api.avatars() }).subscribe({
-      next: ({ profile, avatars }) => {
+    forkJoin({ profile: this.api.get(), avatars: this.api.avatars(), achievements: this.api.achievements() }).subscribe({
+      next: ({ profile, avatars, achievements }) => {
         this.avatars.set(avatars);
+        this.achievements.set(achievements);
         this.show(profile);
         this.loadState.set('ready');
       },
