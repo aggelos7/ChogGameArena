@@ -1,4 +1,5 @@
 using ChogGames.Core.Abilities;
+using ChogGames.Infrastructure.Abilities;
 using ChogGames.Infrastructure.Characters;
 using ChogGames.Infrastructure.Health;
 using ChogGames.Core.Matches;
@@ -98,11 +99,19 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddScoped<TurnTimeoutService>();
         services.AddScoped<MatchRecoveryService>();
 
-        // Games add their AbilityCatalog as their abilities are built (DEC-032). Every player gets the shared pool;
-        // a trait-based strategy would replace this one registration (DEC-033).
+        // Games add their AbilityCatalog as their abilities are built (DEC-032). Every player gets the shared pool
+        // unless trait-based abilities are switched on, which replaces only this one registration (DEC-033, DEC-066).
         services.AddSingleton<AbilityEngine>();
-        services.AddSingleton<IAbilityAssignmentStrategy, SharedAbilityPoolStrategy>();
+        services.AddSingleton<IValidateOptions<TraitAbilityOptions>, TraitAbilityOptionsValidator>();
+        services.AddOptions<TraitAbilityOptions>()
+            .Bind(configuration.GetSection(TraitAbilityOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<IAbilityAssignmentStrategy>(provider =>
+            provider.GetRequiredService<IOptions<TraitAbilityOptions>>().Value is { Enabled: true } traitBased
+                ? new TraitBasedAbilityStrategy(new ConfiguredTraitAbilityResolver(traitBased.ToRules()))
+                : new SharedAbilityPoolStrategy());
         services.AddSingleton<AbilityPool>();
+        services.AddScoped<LobbyCharacters>();
 
         services.AddSingleton<IValidateOptions<NftOptions>, NftOptionsValidator>();
         services.AddOptions<NftOptions>()

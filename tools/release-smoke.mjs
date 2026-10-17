@@ -221,6 +221,18 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     return { room, turns };
   };
 
+  /**
+   * A room request that waits out the per-player limit (`Rooms:RequestsPerMinutePerPlayer`): match commands count
+   * towards it, so a long match can leave a player's minute used up. Retries for just over one window.
+   */
+  const getRooms = async (guest, path) => {
+    for (let attempt = 0; ; attempt++) {
+      const response = await guest.get(path);
+      if (response.status !== 429 || attempt === 13) return response;
+      await sleep(5_000);
+    }
+  };
+
   const unlockedAchievements = async (guest) => {
     const achievements = await guest.get('/api/profile/achievements');
     expectStatus(achievements, 200, `GET /api/profile/achievements as ${guest.name}`);
@@ -248,7 +260,7 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
       if (member.rank === 1) check(unlocked.includes('first_win'), `${guest.name} won and must have unlocked First Win`);
       // XP (STORY-059, DEC-064): only players still playing earn it.
       if (!member.hasLeft) check(profile.json.xp > 0, `${guest.name} played to the end and must have earned XP`);
-      expectStatus(await guest.get('/api/rooms/current'), 204, `GET /api/rooms/current after ${what} as ${guest.name}`);
+      expectStatus(await getRooms(guest, '/api/rooms/current'), 204, `GET /api/rooms/current after ${what} as ${guest.name}`);
     }
   };
 

@@ -8,10 +8,14 @@ public class TraitAccessTests
 {
     private static readonly string Src = Path.Combine(FindBackendRoot(), "src");
 
-    /// <summary>The shared engine: Core without its NFT and player types. Only the resolver contract names traits.</summary>
+    /// <summary>
+    /// The shared engine: Core without its NFT and player types. Only the resolver contract and the trait-based strategy
+    /// with its configured resolver and rules (STORY-061, DEC-066) name traits.
+    /// </summary>
     private static readonly string[] EngineFolders = ["Abilities", "Games", "Matches", "Rooms"];
 
-    private static readonly string[] TraitAwareFiles = ["ITraitAbilityResolver.cs"];
+    private static readonly string[] TraitAwareFiles =
+        ["ITraitAbilityResolver.cs", "TraitBasedAbilityStrategy.cs", "ConfiguredTraitAbilityResolver.cs", "TraitAbilityRule.cs"];
 
     private static string FindBackendRoot()
     {
