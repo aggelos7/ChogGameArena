@@ -28,6 +28,7 @@ function member(displayName: string, seat: number, overrides: Partial<RoomMember
     displayName,
     avatarId: 'classic',
     collector: null,
+    avatarImageUrl: null,
     isHost: false,
     isYou: false,
     isReady: false,
@@ -417,6 +418,24 @@ describe('Chog Life board', () => {
     expect(tile(0).querySelector('.pawn.you')?.textContent?.trim()).toBe('1');
     expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s Bob’s turn.');
     expect(tile(0).getAttribute('aria-label')).toContain('Alice (you), Bob');
+  });
+
+  it('draws a player’s profile photo as their pawn in the list and the legend (STORY-062)', () => {
+    const photo = '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10';
+    render({ ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0)] }, [
+      member('Alice', 1, { avatarImageUrl: photo, isTurn: true }),
+      member('Bob', 2, { isYou: true }),
+    ]);
+
+    const [alice, bob] = Array.from(tile(0).querySelectorAll<HTMLElement>('[data-pawn]'));
+    expect(alice.querySelector('img')?.getAttribute('src')).toBe(photo);
+    expect(alice.classList).toContain('photo');
+    expect(bob.querySelector('img')).toBeNull();
+    expect(bob.textContent?.trim()).toBe('2');
+    const legend = Array.from(page.querySelectorAll<HTMLElement>('[data-list="pawns"] [data-seat] .pawn'));
+    expect(legend.map((p) => p.querySelector('img')?.getAttribute('src') ?? p.textContent?.trim())).toEqual([photo, '2']);
+    // The pawns are the players' pictures in a match; no avatar badge beside them.
+    expect(page.querySelector('app-avatar-badge')).toBeNull();
   });
 
   it('puts each pawn on its own tile and tells you when it is your turn', () => {
@@ -957,6 +976,20 @@ describe('Chog Life board', () => {
       // Pawns sharing a tile stand apart.
       const places = pawns.map((p) => (p as SVGElement & { style: CSSStyleDeclaration }).style.transform);
       expect(new Set(places).size).toBe(count);
+    });
+
+    it('draws a player’s profile photo inside their seat-coloured pawn (STORY-062)', () => {
+      const photo = '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10';
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0)] }, [
+        member('Alice', 1, { avatarImageUrl: photo, isYou: true }),
+        member('Bob', 2, { isTurn: true }),
+      ]);
+
+      expect(boardPawn(1)?.querySelector('image.pawn-photo')?.getAttribute('href')).toBe(photo);
+      expect(boardPawn(1)?.querySelector('.pawn-body')?.getAttribute('fill')).toBe(seatColor(1));
+      expect(boardPawn(1)?.querySelector('.pawn-seat')).toBeNull();
+      expect(boardPawn(2)?.querySelector('image')).toBeNull();
+      expect(boardPawn(2)?.textContent?.trim()).toBe('2');
     });
 
     it('switches to the list and back, and remembers the choice on this device', () => {

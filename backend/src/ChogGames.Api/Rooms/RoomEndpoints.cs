@@ -59,6 +59,10 @@ public static class RoomEndpoints
     /// The game's record of how the member did in a completed match (STORY-043, DEC-046), as stored with their rank, the
     /// same for every viewer; null for players who left, for games that record none and in every other status.
     /// </param>
+    /// <param name="AvatarImageUrl">
+    /// The player's uploaded profile photo, which the boards draw as their pawn (STORY-062, DEC-018); read live, not locked
+    /// at the start. Null without one. Their match character stays <paramref name="Character"/>.
+    /// </param>
     public sealed record RoomMemberResponse(
         string DisplayName,
         string AvatarId,
@@ -73,7 +77,8 @@ public static class RoomEndpoints
         int? Rank,
         int? Seat,
         JsonElement? Result,
-        ProfileEndpoints.CollectorBadgeResponse? Collector);
+        ProfileEndpoints.CollectorBadgeResponse? Collector,
+        string? AvatarImageUrl);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>

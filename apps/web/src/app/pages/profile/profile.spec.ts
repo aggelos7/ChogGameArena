@@ -255,6 +255,99 @@ describe('Profile page', () => {
     expect(element().querySelector('[role="status"]')?.textContent).toContain('Profile saved');
   });
 
+  describe('photo', () => {
+    const imageUrl = '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10';
+    const withPhoto: Profile = { ...profile, avatar: { ...avatars[0], imageUrl } };
+    const summaryPhoto = () => element().querySelector('.summary app-avatar-badge img');
+    const removeButton = () => element().querySelector('[data-remove-photo]') as HTMLButtonElement | null;
+    const photoError = () => element().querySelector('[data-photo-error]')?.textContent?.trim();
+
+    function choose(file: File) {
+      const input = element().querySelector('[data-photo-input]') as HTMLInputElement;
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      input.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+    }
+
+    it('offers an upload of JPEG, PNG or WebP and no removal without a photo', () => {
+      load();
+
+      expect((element().querySelector('[data-photo-input]') as HTMLInputElement).accept).toBe('image/jpeg,image/png,image/webp');
+      expect(element().querySelector('.photo-pick')?.textContent).toContain('Upload photo');
+      expect(removeButton()).toBeNull();
+      expect(summaryPhoto()).toBeNull();
+    });
+
+    it('uploads the chosen file as is, without any player id, and shows the photo', () => {
+      load();
+      typeName('Unsaved Name');
+      const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'me.jpg', { type: 'image/jpeg' });
+
+      choose(file);
+      expect(element().querySelector('[role="status"]')?.textContent).toContain('Uploading');
+      const req = http.expectOne({ method: 'PUT', url: '/api/profile/avatar-image' });
+      expect(req.request.body).toBe(file);
+      expect(req.request.headers.get('Content-Type')).toBe('image/jpeg');
+      req.flush(withPhoto);
+      fixture.detectChanges();
+
+      expect(summaryPhoto()?.getAttribute('src')).toBe(imageUrl);
+      expect(element().querySelector('.photo-pick')?.textContent).toContain('Replace photo');
+      expect(element().querySelector('[data-avatar-under-photo]')).not.toBeNull();
+      expect(nameInput().value).toBe('Unsaved Name');
+    });
+
+    it('removes the photo and shows the built-in avatar again', () => {
+      load(withPhoto);
+      expect(summaryPhoto()?.getAttribute('src')).toBe(imageUrl);
+
+      (removeButton() as HTMLButtonElement).click();
+      fixture.detectChanges();
+      http.expectOne({ method: 'DELETE', url: '/api/profile/avatar-image' }).flush(profile);
+      fixture.detectChanges();
+
+      expect(summaryPhoto()).toBeNull();
+      expect(element().querySelector('.summary app-avatar-badge')?.textContent?.trim()).toBe('C');
+      expect(removeButton()).toBeNull();
+    });
+
+    it('refuses other file types and oversized files without sending them', () => {
+      load();
+
+      choose(new File(['<svg/>'], 'me.svg', { type: 'image/svg+xml' }));
+      expect(photoError()).toBe('Choose a JPEG, PNG or WebP photo.');
+
+      choose(new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' }));
+      expect(photoError()).toBe('That photo is too big. Choose one of 2 MB or less.');
+
+      http.expectNone('/api/profile/avatar-image');
+    });
+
+    it('explains a refusal by the server and keeps the current photo', () => {
+      load(withPhoto);
+
+      choose(new File([new Uint8Array([0xff, 0xd8, 0xff])], 'fake.jpg', { type: 'image/jpeg' }));
+      http
+        .expectOne({ method: 'PUT', url: '/api/profile/avatar-image' })
+        .flush({ code: 'avatar_not_an_image' }, { status: 400, statusText: 'Bad Request' });
+      fixture.detectChanges();
+
+      expect(photoError()).toBe("That file isn't a photo we can read. Choose a JPEG, PNG or WebP photo.");
+      expect(summaryPhoto()?.getAttribute('src')).toBe(imageUrl);
+    });
+
+    it('asks to wait after too many changes', () => {
+      load(withPhoto);
+
+      (removeButton() as HTMLButtonElement).click();
+      http.expectOne({ method: 'DELETE', url: '/api/profile/avatar-image' }).flush(null, { status: 429, statusText: 'Too Many Requests' });
+      fixture.detectChanges();
+
+      expect(photoError()).toBe('Too many photo changes. Try again in a few minutes.');
+      expect(removeButton()?.disabled).toBe(false);
+    });
+  });
+
   it('shows an error with retry when the profile cannot be loaded', () => {
     const avatarsRequest = http.expectOne('/api/profile/avatars');
     const achievementsRequest = http.expectOne('/api/profile/achievements');

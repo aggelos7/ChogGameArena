@@ -25,6 +25,7 @@ describe('Room page', () => {
       displayName,
       avatarId: 'classic',
       collector: null,
+      avatarImageUrl: null,
       isHost: false,
       isYou: false,
       isReady: false,

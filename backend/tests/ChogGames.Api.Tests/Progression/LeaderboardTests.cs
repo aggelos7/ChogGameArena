@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ChogGames.Api.Matches;
@@ -9,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using SkiaSharp;
 
 namespace ChogGames.Api.Tests.Progression;
 
@@ -26,7 +28,7 @@ public sealed class LeaderboardTests(MigratedPostgresDatabase database) : IClass
 
     private sealed record ProfileDto(int GamesPlayed, int Wins, int Xp);
 
-    private sealed record AvatarDto(string Id, string Name, string Color);
+    private sealed record AvatarDto(string Id, string Name, string Color, string? ImageUrl = null);
 
     private sealed record BadgeDto(string Id, string Name);
 
@@ -198,6 +200,36 @@ public sealed class LeaderboardTests(MigratedPostgresDatabase database) : IClass
             await PlayAsync("chog-race", bob, alice);
 
             Assert.Equal((30, 30, 10), ((await ProfileAsync(alice)).Xp, (await ProfileAsync(bob)).Xp, (await ProfileAsync(carol)).Xp));
+        }
+    }
+
+    [PostgresFact]
+    public async Task Others_see_a_players_uploaded_photo_on_the_board()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        using (alice)
+        using (bob)
+        {
+            await PlayAsync("chog-life", alice, bob);
+            using var surface = SKSurface.Create(new SKImageInfo(64, 64));
+            using var png = surface.Snapshot().Encode(SKEncodedImageFormat.Png, 100);
+            var photo = new ByteArrayContent(png.ToArray());
+            photo.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            using (var uploaded = await alice.PutAsync("/api/profile/avatar-image", photo))
+            {
+                Assert.Equal(HttpStatusCode.OK, uploaded.StatusCode);
+            }
+
+            var board = await BoardAsync(bob);
+
+            var url = board.Entries[0].Avatar.ImageUrl;
+            Assert.Equal(("Alice", "classic"), (board.Entries[0].DisplayName, board.Entries[0].Avatar.Id));
+            Assert.Equal(url, (await alice.GetFromJsonAsync<JsonElement>("/api/profile")).GetProperty("avatar").GetProperty("imageUrl").GetString());
+            Assert.Null(board.Entries[1].Avatar.ImageUrl);
+            using var seen = await bob.GetAsync(url);
+            Assert.Equal(HttpStatusCode.OK, seen.StatusCode);
+            Assert.Equal("image/webp", seen.Content.Headers.ContentType!.MediaType);
         }
     }
 

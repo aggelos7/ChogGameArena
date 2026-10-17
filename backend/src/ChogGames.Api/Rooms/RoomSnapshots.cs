@@ -90,7 +90,8 @@ public sealed class RoomSnapshots(
                     m.Rank,
                     m.Seat,
                     ResultOf(m),
-                    ProfileEndpoints.CollectorBadgeOf(player.ChogsHeld));
+                    ProfileEndpoints.CollectorBadgeOf(player.ChogsHeld),
+                    player.AvatarImageId is { } imageId ? AvatarImageEndpoints.UrlFor(imageId) : null);
             })
             .ToArray();
 

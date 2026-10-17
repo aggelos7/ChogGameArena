@@ -77,6 +77,38 @@
   }
 }
 
+.photo {
+  margin-bottom: 1.5rem;
+
+  h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1.125rem;
+  }
+
+  p {
+    margin: 0 0 0.5rem;
+  }
+
+  .photo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+  }
+
+  .photo-pick {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-weight: 600;
+  }
+
+  input[type='file'] {
+    min-height: var(--tap-target);
+    font-weight: 400;
+  }
+}
+
 .achievements {
   margin-bottom: 1.5rem;
 

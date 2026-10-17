@@ -936,10 +936,10 @@
 
 #### STORY-062 — Uploaded profile avatar
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E09
-- **Implementation:** Let a player upload a photo from their device as profile avatar. The server decodes and re-encodes every upload to a small square WebP (e.g. 256×256), dropping metadata such as EXIF/GPS, and stores only the re-encoded image in PostgreSQL. One uploaded avatar per player, replacing the previous one; the player can remove it to return to a built-in avatar. Images are served by the API with a fixed content type, `nosniff` and cache headers; original bytes are never served. Upload size cap and per-player rate limit. Independent of the match character (DEC-017). Blocked by DEC-018 (image library and moderation).
+- **Implementation:** Let a player upload a photo from their device as profile avatar. The server decodes and re-encodes every upload to a small square WebP (e.g. 256×256), dropping metadata such as EXIF/GPS, and stores only the re-encoded image in PostgreSQL. One uploaded avatar per player, replacing the previous one; the player can remove it to return to a built-in avatar. Images are served by the API with a fixed content type, `nosniff` and cache headers; original bytes are never served. Upload size cap and per-player rate limit. Independent of the match character (DEC-017). Library, limits and moderation confirmed by the product owner (DEC-018).
 - **Acceptance criteria:**
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a JPEG/PNG/WebP upload becomes the player's avatar as a re-encoded square image without metadata; replacing or removing it works; other players see it wherever the avatar is shown.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** oversized, non-image, malformed or disguised files are refused without changing the avatar, and no player can change another player's avatar.

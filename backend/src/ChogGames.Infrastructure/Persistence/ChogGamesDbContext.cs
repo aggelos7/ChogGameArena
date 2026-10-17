@@ -19,6 +19,8 @@ public sealed class ChogGamesDbContext(DbContextOptions<ChogGamesDbContext> opti
 {
     public DbSet<Player> Players => Set<Player>();
 
+    public DbSet<AvatarImage> AvatarImages => Set<AvatarImage>();
+
     public DbSet<GuestSession> GuestSessions => Set<GuestSession>();
 
     public DbSet<WalletChallenge> WalletChallenges => Set<WalletChallenge>();

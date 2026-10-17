@@ -5,6 +5,8 @@ import { LifeEventKind, LifeLayout, LifeTile, LifeTileType, SPOT_HEIGHT, SPOT_WI
 export interface DrawingPawn {
   seat: number;
   color: string;
+  /** The player's profile photo, drawn inside the seat-coloured pawn instead of its number (STORY-062); null for none. */
+  imageUrl: string | null;
   isYou: boolean;
   isTurn: boolean;
   /** The tile it stands on, or has hopped to. */

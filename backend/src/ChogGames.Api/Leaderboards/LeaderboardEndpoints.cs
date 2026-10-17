@@ -93,7 +93,7 @@ public static class LeaderboardEndpoints
         LeaderboardEntryResponse ToResponse(LeaderboardEntry entry) => new(
             entry.Place,
             entry.DisplayName,
-            ProfileEndpoints.ToResponse(ProfileEndpoints.AvatarOf(entry.AvatarId)),
+            ProfileEndpoints.ToResponse(ProfileEndpoints.AvatarOf(entry.AvatarId), entry.AvatarImageId),
             ProfileEndpoints.CollectorBadgeOf(entry.ChogsHeld),
             entry.Xp,
             entry.Wins,

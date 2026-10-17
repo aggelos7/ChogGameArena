@@ -14,9 +14,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { AvatarBadge } from '../../profile/avatar-badge';
-import { Avatar } from '../../profile/profile-api';
-import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
+import { RoomMember } from '../../rooms/rooms-api';
 import { DrawingPawn, LifeDrawing } from './life-drawing';
 import {
   FORK_ABILITIES,
@@ -40,13 +38,12 @@ import {
   timeLeft,
 } from './life-board-model';
 
-/** NFT Chogs have no colour of their own here; they use the brand colour. */
-const NFT_COLOR = 'var(--brand)';
-
 /** A pawn as drawn: its seat, colour and the player it belongs to. */
 interface DrawnPawn {
   seat: number;
   color: string;
+  /** The player's profile photo, drawn as the pawn inside a ring of the seat colour (STORY-062); null for a numbered pawn. */
+  imageUrl: string | null;
   name: string;
   isYou: boolean;
   isTurn: boolean;
@@ -121,7 +118,7 @@ function reducedMotion(): boolean {
  */
 @Component({
   selector: 'app-life-board',
-  imports: [AvatarBadge, LifeDrawing, NgTemplateOutlet],
+  imports: [LifeDrawing, NgTemplateOutlet],
   templateUrl: './life-board.html',
   styleUrl: './life-board.scss',
 })
@@ -287,6 +284,7 @@ export class LifeBoardView {
           seat: pawn.seat,
           tile: pawn.tile,
           color: seatColor(pawn.seat),
+          imageUrl: member?.avatarImageUrl ?? null,
           name: member?.displayName ?? `Seat ${pawn.seat}`,
           isYou: !!member?.isYou,
           isTurn: !!member?.isTurn,
@@ -513,7 +511,4 @@ export class LifeBoardView {
     return what.join(', ');
   }
 
-  protected badge(character: RoomCharacter): Avatar {
-    return { id: character.id, name: character.name, color: character.color ?? NFT_COLOR };
-  }
 }

@@ -79,6 +79,17 @@ describe('Leaderboard page', () => {
     expect(bob.querySelector('[data-frame]')).toBeNull();
   });
 
+  it('shows a player’s uploaded photo instead of their initial', () => {
+    const photo = { ...avatar, imageUrl: '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10' };
+    load({ ...board, entries: [{ ...entry(1, 'Alice', 40, 2), avatar: photo }, entry(2, 'Bob', 10, 0)] });
+
+    const [alice, bob] = places();
+    expect(alice.querySelector('app-avatar-badge img')?.getAttribute('src')).toBe(photo.imageUrl);
+    expect(alice.querySelector('app-avatar-badge')?.textContent?.trim()).toBe('');
+    expect(bob.querySelector('app-avatar-badge img')).toBeNull();
+    expect(bob.querySelector('app-avatar-badge')?.textContent?.trim()).toBe('B');
+  });
+
   it('offers a board per catalog game besides all games, and all-time or this season', () => {
     load();
 

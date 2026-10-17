@@ -25,6 +25,8 @@ internal sealed class PlayerConfiguration : IEntityTypeConfiguration<Player>
             .HasDefaultValue(CharacterKind.Standard);
         builder.Property(p => p.SelectedCharacterId).HasMaxLength(NftTokenId.MaxDigits).IsRequired().HasDefaultValue(DefaultAvatar.Classic.Id);
         builder.HasIndex(p => p.WalletAddress).IsUnique();
+        // Deleting the image, also by an operator (DEC-018), shows the built-in avatar again.
+        builder.HasOne<AvatarImage>().WithOne().HasForeignKey<Player>(p => p.AvatarImageId).OnDelete(DeleteBehavior.SetNull);
         builder.ToTable(t =>
         {
             t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");

@@ -10,6 +10,7 @@ function member(displayName: string, seat: number, overrides: Partial<RoomMember
     displayName,
     avatarId: 'classic',
     collector: null,
+    avatarImageUrl: null,
     isHost: false,
     isYou: false,
     isReady: false,
@@ -225,6 +226,27 @@ describe('Chog Race board', () => {
     expect(pawns.filter((p) => p.classList.contains('turn')).map((p) => p.dataset['pawn'])).toEqual(['3']);
     expect(pawns.filter((p) => p.classList.contains('you')).map((p) => p.dataset['pawn'])).toEqual(['5']);
     expect(tile(0).getAttribute('aria-label')).toBe('Tile 0, Start, Alice, Bob, Carol, Dave, Erin (you), Frank');
+  });
+
+  it('draws a player’s profile photo as their pawn, ringed in their seat colour (STORY-062)', () => {
+    const photo = '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10';
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 0 }] }, [
+      member('Alice', 1, { avatarImageUrl: photo }),
+      member('Bob', 2, { isYou: true }),
+    ]);
+
+    const [alice, bob] = Array.from(tile(0).querySelectorAll<HTMLElement>('[data-pawn]'));
+    expect(alice.querySelector('img')?.getAttribute('src')).toBe(photo);
+    expect(alice.classList).toContain('photo');
+    expect(alice.style.background).toBe(hexToRgb(seatColor(1)));
+    expect(alice.textContent?.trim()).toBe('');
+    expect(bob.querySelector('img')).toBeNull();
+    expect(bob.textContent?.trim()).toBe('2');
+    const legend = Array.from(page.querySelectorAll<HTMLElement>('[data-list="pawns"] [data-seat] .pawn'));
+    expect(legend.map((p) => p.querySelector('img')?.getAttribute('src') ?? p.textContent?.trim())).toEqual([photo, '2']);
+    expect(tile(0).getAttribute('aria-label')).toBe('Tile 0, Start, Alice, Bob (you)');
+    // The pawns are the players' pictures in a match; no avatar badge beside them.
+    expect(page.querySelector('app-avatar-badge')).toBeNull();
   });
 
   it('shows pawns where the server put them', () => {
