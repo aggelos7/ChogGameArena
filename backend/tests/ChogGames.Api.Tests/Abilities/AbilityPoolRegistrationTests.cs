@@ -3,15 +3,18 @@ using ChogGames.Core.Abilities;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
 using ChogGames.Core.Wallets;
+using ChogGames.Infrastructure.Abilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace ChogGames.Api.Tests.Abilities;
 
 /// <summary>
 /// STORY-031, DEC-033: the API uses the shared ability pool for every player, and a game's abilities reach it by
 /// registering the game's <see cref="AbilityCatalog"/>, with no other change. STORY-032, DEC-034: a trait-based strategy
-/// would replace that one registration, and nothing else.
+/// replaces that one registration, and nothing else. STORY-061, DEC-066: it does so only when
+/// <c>Abilities:TraitBased:Enabled</c> is on, and the rules are checked against the catalogs at startup.
 /// </summary>
 public class AbilityPoolRegistrationTests
 {
@@ -72,7 +75,7 @@ public class AbilityPoolRegistrationTests
         {
             s.AddSingleton(Catalog());
             s.RemoveAll<IAbilityAssignmentStrategy>();
-            s.AddSingleton<IAbilityAssignmentStrategy>(new TraitBasedTestStrategy(new LegendaryRerollResolver()));
+            s.AddSingleton<IAbilityAssignmentStrategy>(new TraitBasedAbilityStrategy(new LegendaryRerollResolver()));
         });
         var pool = factory.Services.GetRequiredService<AbilityPool>();
 
@@ -81,16 +84,107 @@ public class AbilityPoolRegistrationTests
         Assert.Same(factory.Services.GetRequiredService<AbilityEngine>().CatalogFor(GameType), Assert.Single(factory.Services.GetServices<AbilityCatalog>()));
     }
 
-    /// <summary>A stand-in for a future trait-based strategy (DEC-034): resolver ids, else the whole catalog.</summary>
-    private sealed class TraitBasedTestStrategy(ITraitAbilityResolver resolver) : IAbilityAssignmentStrategy
+    private static Dictionary<string, string?> LegendaryRerolls(bool? enabled) => new()
     {
-        public IReadOnlyList<AbilityDefinition> AvailableAbilities(AbilityCatalog catalog, CharacterSnapshot character)
-        {
-            var eligible = resolver.EligibleAbilityIds(catalog, TraitSet.From(character));
-            var chosen = catalog.Definitions.Where(d => eligible.Contains(d.Id)).ToList();
-            return chosen.Count == 0 ? catalog.Definitions : chosen;
-        }
+        ["Abilities:TraitBased:Enabled"] = enabled?.ToString(),
+        ["Abilities:TraitBased:Rules:0:Game"] = GameType,
+        ["Abilities:TraitBased:Rules:0:Traits:0:Type"] = "Rarity",
+        ["Abilities:TraitBased:Rules:0:Traits:0:Value"] = "Legendary",
+        ["Abilities:TraitBased:Rules:0:Abilities:0"] = "event_reroll",
+    };
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    public async Task Trait_rules_change_nothing_while_the_flag_is_off(bool? enabled)
+    {
+        await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, LegendaryRerolls(enabled), s => s.AddSingleton(Catalog()));
+        var pool = factory.Services.GetRequiredService<AbilityPool>();
+
+        Assert.IsType<SharedAbilityPoolStrategy>(Assert.Single(factory.Services.GetServices<IAbilityAssignmentStrategy>()));
+        Assert.Equal(["reward_boost", "event_reroll"], pool.For(GameType, NftChog()).Select(a => a.Id));
     }
+
+    [Fact]
+    public async Task The_flag_swaps_in_the_trait_based_strategy_and_guests_keep_the_whole_pool()
+    {
+        await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, LegendaryRerolls(true), s => s.AddSingleton(Catalog()));
+        var pool = factory.Services.GetRequiredService<AbilityPool>();
+
+        Assert.IsType<TraitBasedAbilityStrategy>(Assert.Single(factory.Services.GetServices<IAbilityAssignmentStrategy>()));
+        Assert.Equal(["event_reroll"], pool.For(GameType, NftChog()).Select(a => a.Id));
+        Assert.Equal(["reward_boost", "event_reroll"], pool.For(GameType, CharacterSnapshot.Standard(DefaultAvatar.Classic, Now)).Select(a => a.Id));
+    }
+
+    [Fact]
+    public async Task The_flag_on_without_rules_gives_everyone_the_whole_pool()
+    {
+        await using var factory = new ApiFactory(
+            ApiFactory.UnusedDatabase, new Dictionary<string, string?> { ["Abilities:TraitBased:Enabled"] = "true" }, s => s.AddSingleton(Catalog()));
+        var pool = factory.Services.GetRequiredService<AbilityPool>();
+
+        Assert.Equal(["reward_boost", "event_reroll"], pool.For(GameType, NftChog()).Select(a => a.Id));
+    }
+
+    [Fact]
+    public void Rules_are_checked_at_startup_even_while_the_flag_is_off()
+    {
+        // The startup check here registers no game catalogs, so no rule's game has abilities.
+        var failure = StartupValidation.Failure(LegendaryRerolls(false));
+
+        Assert.Contains("'Abilities:TraitBased:Rules:0:Game' 'chog-test' has no ability catalog.", failure.Failures);
+    }
+
+    [Fact]
+    public void Valid_rules_pass()
+    {
+        Assert.True(Validate(LegendaryRerollsOptions()).Succeeded);
+        Assert.True(Validate(new TraitAbilityOptions { Enabled = true }).Succeeded);
+    }
+
+    public static TheoryData<string, Action<TraitAbilityOptions>> BadRules => new()
+    {
+        { "'Abilities:TraitBased:Rules:0:Game' 'chog-life' has no ability catalog.", o => o.Rules[0].Game = "chog-life" },
+        { "'Abilities:TraitBased:Rules:0:Game' '' has no ability catalog.", o => o.Rules[0].Game = "" },
+        { "'Abilities:TraitBased:Rules:0:Traits' must have 1–10 traits.", o => o.Rules[0].Traits.Clear() },
+        { "'Abilities:TraitBased:Rules:0:Traits' must have 1–10 traits.", o => o.Rules[0].Traits.AddRange(Enumerable.Range(0, 10).Select(i => new TraitOptions { Type = "T", Value = $"{i}" })) },
+        { "'Abilities:TraitBased:Rules:0:Traits' must each have a Type and a Value of 1–100 printable characters.", o => o.Rules[0].Traits[0].Type = "  " },
+        { "'Abilities:TraitBased:Rules:0:Traits' must each have a Type and a Value of 1–100 printable characters.", o => o.Rules[0].Traits[0].Value = new string('x', 101) },
+        { "'Abilities:TraitBased:Rules:0:Traits' must each have a Type and a Value of 1–100 printable characters.", o => o.Rules[0].Traits[0].Value = "Go\u0007ld" },
+        { "'Abilities:TraitBased:Rules:0:Abilities' must name at least one ability.", o => o.Rules[0].Abilities.Clear() },
+        { "'Abilities:TraitBased:Rules:0:Abilities' 'fireball' is not an ability of chog-test.", o => o.Rules[0].Abilities.Add("fireball") },
+        { "'Abilities:TraitBased:Rules:0:Abilities' 'Event_Reroll' is not an ability of chog-test.", o => o.Rules[0].Abilities[0] = "Event_Reroll" },
+        { "'Abilities:TraitBased:Rules' must have at most 200 rules.", o => o.Rules.AddRange(Enumerable.Range(0, 200).Select(_ => LegendaryRerollsOptions().Rules[0])) },
+    };
+
+    [Theory]
+    [MemberData(nameof(BadRules))]
+    public void A_bad_rule_stops_startup(string error, Action<TraitAbilityOptions> spoil)
+    {
+        var options = LegendaryRerollsOptions();
+        spoil(options);
+
+        var result = Validate(options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(error, result.Failures!);
+    }
+
+    private static TraitAbilityOptions LegendaryRerollsOptions() => new()
+    {
+        Rules =
+        [
+            new TraitAbilityRuleOptions
+            {
+                Game = GameType,
+                Traits = [new TraitOptions { Type = "Rarity", Value = "Legendary" }],
+                Abilities = ["event_reroll"],
+            },
+        ],
+    };
+
+    private static ValidateOptionsResult Validate(TraitAbilityOptions options) =>
+        new TraitAbilityOptionsValidator(new AbilityEngine([Catalog()])).Validate(null, options);
 
     private sealed class LegendaryRerollResolver : ITraitAbilityResolver
     {

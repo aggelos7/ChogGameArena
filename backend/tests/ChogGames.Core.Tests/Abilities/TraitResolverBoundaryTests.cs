@@ -10,8 +10,8 @@ namespace ChogGames.Core.Tests.Abilities;
 /// <summary>
 /// STORY-032, DEC-034: the trait-ready boundary. A trait-based strategy built on <see cref="ITraitAbilityResolver"/> plugs
 /// into the same <see cref="AbilityPool"/> and <see cref="AbilityEngine"/> as the shared pool, with no change to either.
-/// It sees only normalized traits, falls back to the whole catalog, and can never offer more than the catalog. No such
-/// strategy ships; the one here exists only in the tests.
+/// It sees only normalized traits, falls back to the whole catalog, and can never offer more than the catalog. The
+/// strategy is the one that ships behind the flag (STORY-061, DEC-066); the resolvers here exist only in the tests.
 /// </summary>
 public class TraitResolverBoundaryTests
 {
@@ -26,7 +26,7 @@ public class TraitResolverBoundaryTests
     }
 
     private static AbilityPool PoolWith(ITraitAbilityResolver resolver) =>
-        new(new AbilityEngine([Catalog()]), new TraitBasedTestStrategy(resolver));
+        new(new AbilityEngine([Catalog()]), new TraitBasedAbilityStrategy(resolver));
 
     private static string[] Ids(IEnumerable<AbilityDefinition> abilities) => [.. abilities.Select(a => a.Id)];
 
@@ -122,20 +122,6 @@ public class TraitResolverBoundaryTests
         MethodBase m => m.GetParameters().Select(p => p.ParameterType).Concat(m is MethodInfo mi ? [mi.ReturnType] : []),
         _ => [],
     };
-
-    /// <summary>
-    /// What a future trait-based strategy looks like (DEC-034): normalize the character's traits, ask the resolver, and
-    /// fall back to the whole catalog when it names none of the catalog's abilities. Test-only; nothing like it ships.
-    /// </summary>
-    private sealed class TraitBasedTestStrategy(ITraitAbilityResolver resolver) : IAbilityAssignmentStrategy
-    {
-        public IReadOnlyList<AbilityDefinition> AvailableAbilities(AbilityCatalog catalog, CharacterSnapshot character)
-        {
-            var eligible = resolver.EligibleAbilityIds(catalog, TraitSet.From(character)).ToHashSet(StringComparer.Ordinal);
-            var chosen = catalog.Definitions.Where(d => eligible.Contains(d.Id)).ToList();
-            return chosen.Count == 0 ? catalog.Definitions : chosen;
-        }
-    }
 
     /// <summary>Legendary Chogs may only steal; everyone else gets the fallback.</summary>
     private sealed class LegendaryStealResolver : ITraitAbilityResolver

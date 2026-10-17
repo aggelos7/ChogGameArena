@@ -923,7 +923,7 @@
 
 #### STORY-061 — Trait-based ability assignment future
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E09
 - **Implementation:** Implement optional TraitBased resolver with fallback and multiple-trait rules.
