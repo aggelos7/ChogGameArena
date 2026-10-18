@@ -31,6 +31,12 @@ h2 {
 }
 
 .card {
+  // A light box: dark text, also where the page's own text is white over a picture.
+  --text: var(--ink);
+  --text-muted: var(--ink-muted);
+  --link: var(--ink-link);
+  color: var(--text);
+  text-shadow: none;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -58,6 +64,12 @@ h2 {
 }
 
 .art {
+  // A light box: dark text, also where the page's own text is white over a picture.
+  --text: var(--ink);
+  --text-muted: var(--ink-muted);
+  --link: var(--ink-link);
+  color: var(--text);
+  text-shadow: none;
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
@@ -86,6 +98,12 @@ h2 {
   margin: 0;
 
   div {
+    // A light box: dark text, also where the page's own text is white over a picture.
+    --text: var(--ink);
+    --text-muted: var(--ink-muted);
+    --link: var(--ink-link);
+    color: var(--text);
+    text-shadow: none;
     display: flex;
     flex-direction: column;
     padding: 0.125rem 0.5rem;

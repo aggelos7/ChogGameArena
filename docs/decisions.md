@@ -350,3 +350,8 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Hops:** as on the Chog Life board, a new move is shown a tile at a time (`HOP_MS`, 200 ms): the roll to where it landed and on through a Boost or Setback, then a card's own move (Pump, FOMO, Airdrop), then pawns pushed back by Rug or Reverse together. Whale's swap jumps. The first board's move, a move already seen and reduced motion show no hops; tile labels for screen readers always give the server's positions.
   - **Web only:** no API, rules, config or migration change.
 
+
+- DEC-068 (2026-10-18, STORY-068 — requested by product owner): Bigger Chog Life tiles, with folded lanes on wide screens.
+  - **Tiles:** each tile of the illustrated board (DEC-048) is drawn 1.3 times its former size, contents included (`SPOT_SCALE`), with the spacing widened just enough that tiles don't touch.
+  - **Folded lanes:** on the horizontal board each fork's Safe and Degen lanes are folded in two: a lane's tiles alternate between two rows, top then bottom, a column at a time, with an S-bend from one column to the next. A lane of four takes two columns instead of four, so the board is about a third narrower and its tiles are drawn about a quarter larger on a 1920px screen. The lane names sit between the two lanes. Phones keep the vertical board with the lanes side by side, unfolded. Fewer tiles to a row alone was measured first and gained nothing, because the forks' lanes set the board's width; tightening only the space around forks was offered and not chosen.
+  - **Web only:** no API, rules, config or migration change.

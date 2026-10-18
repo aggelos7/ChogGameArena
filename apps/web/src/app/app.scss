@@ -1,4 +1,8 @@
 :host {
+  /* Lets a page lay a full-width backdrop behind its content, such as the home page's logo: it stays above the page
+     background and is cut off at the shell's edges. */
+  isolation: isolate;
+  overflow: clip;
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
@@ -21,11 +25,17 @@
   }
 }
 
+/* The night blue at the top of the arena logo, so the header runs straight into the home page's backdrop. */
 .shell-header {
+  --header-accent: #ffc832; // the logo's gold, visible on the dark header
+  --focus: #fff;
+
   position: relative;
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid var(--border);
+  color: #fff;
+  background: #0b0e43d9;
+  border-bottom: 1px solid rgb(255 255 255 / 0.15);
 }
 
 .header-top {
@@ -55,8 +65,25 @@
   }
 }
 
+// The player's avatar and name lead to their profile.
+a.player {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap-target);
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  color: inherit;
+  text-decoration: none;
+
+  &:hover,
+  &.active {
+    background: rgb(255 255 255 / 0.12);
+  }
+}
+
 .player-error {
-  color: var(--danger);
+  color: #ffb4ab;
 }
 
 /* Phones: the nav is a full-width row of equal, thumb-sized tabs. */
@@ -82,7 +109,12 @@ nav a {
 
 nav a.active {
   font-weight: 600;
-  border-bottom-color: var(--brand);
+  border-bottom-color: var(--header-accent);
+}
+
+// Hovering another item draws a thinner line where the selected one's sits, along the bottom of its border.
+nav a:not(.active):hover {
+  background: linear-gradient(var(--header-accent), var(--header-accent)) bottom / 100% 1px no-repeat border-box;
 }
 
 /* Wider screens: brand, nav and player share one row. */
@@ -131,7 +163,7 @@ nav a.active {
     display: block;
     width: 40%;
     height: 100%;
-    background: var(--brand);
+    background: var(--header-accent);
     animation: slide 1.2s ease-in-out infinite;
   }
 }

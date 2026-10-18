@@ -888,6 +888,19 @@
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Web only: no API, rules, config or migration change, and no change to the Chog Life board beyond exporting its reduced-motion check.
 
+
+#### STORY-068 — Home with games, backgrounds and header refinements
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E08
+- **Implementation:** Refine the suite's look and feel, as the product owner asked. The home page is the game catalogue: `/games` redirects to `/`, the Games tab is gone, and the page shows the arena logo over a blurred, full-width copy of it, fitting the screen without scrolling (phones included), with each game's picture behind its card. The header is the logo's night blue with white text and a gold accent, shows the player's avatar and name as the link to their profile (no Profile tab), and draws a thin line under a hovered tab. The Leaderboard is called the Ladder (`/ladder`; `/leaderboard` redirects). Chog Race and Chog Life matches are played over their own pictures, with clear, blurred side panels; other pages sit over the home picture with white text outside light boxes. Chog Life tiles are drawn 1.3 times larger, and on wide screens each fork's lanes are folded in two (DEC-068). Chog Life results show each player's total MON prominently with its gain or loss, and the race board's rows keep one height.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** `/` lists the games and `/games` and `/leaderboard` redirect; the header links the player's avatar and name to their profile and follows avatar and photo changes; the folded Chog Life board keeps every tile apart at every column count; the results show each total with its change.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: unknown or unavailable games still redirect to the catalogue, and the header shows the name alone when the profile can't be loaded.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Web only: no API, rules, config or migration change.
+
 ## E09 — Post-MVP shared progression
 
 

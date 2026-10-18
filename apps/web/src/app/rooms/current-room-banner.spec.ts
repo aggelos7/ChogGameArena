@@ -42,7 +42,7 @@ describe('CurrentRoomBanner', () => {
       providers: [
         provideRouter([
           { path: '', component: StubPage },
-          { path: 'games', component: StubPage },
+          { path: 'chogs', component: StubPage },
           { path: 'rooms/:code', component: StubPage },
         ]),
         provideHttpClient(),
@@ -95,7 +95,7 @@ describe('CurrentRoomBanner', () => {
     await answer(null);
     expect(banner()).toBeNull();
 
-    await navigate('/games');
+    await navigate('/chogs');
     http.expectOne('/api/rooms/current').flush({ code: 'unknown' }, { status: 500, statusText: 'Error' });
     await fixture.whenStable();
     expect(banner()).toBeNull();
@@ -126,7 +126,7 @@ describe('CurrentRoomBanner', () => {
     expect(banner()).not.toBeNull();
 
     // The game ended (or the player left) meanwhile.
-    await navigate('/games');
+    await navigate('/chogs');
     await answer(null);
     expect(banner()).toBeNull();
   });

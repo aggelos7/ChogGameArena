@@ -48,7 +48,7 @@ describe('Join room page', () => {
     fixture.detectChanges();
 
     expect(element().querySelector('[role="alert"]')?.textContent).toContain(message);
-    expect(element().querySelector('a.back')?.getAttribute('href')).toBe('/games');
+    expect(element().querySelector('a.back')?.getAttribute('href')).toBe('/');
     expect(navigate).not.toHaveBeenCalled();
   });
 

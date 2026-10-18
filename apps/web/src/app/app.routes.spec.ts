@@ -33,19 +33,22 @@ describe('app routes', () => {
     harness.detectChanges();
   }
 
-  it('renders the home page at /', async () => {
+  it('renders the home page with the game catalogue at /', async () => {
     await harness.navigateByUrl('/');
+    http.expectOne('/api/games').flush(CATALOGUE);
+    harness.detectChanges();
 
     expect(heading()).toBe('Chog Game Arena');
+    expect((harness.routeNativeElement as HTMLElement).querySelectorAll('.game-card')).toHaveLength(3);
     expect(TestBed.inject(Title).getTitle()).toBe('Chog Game Arena');
   });
 
-  it('renders the games page at /games', async () => {
+  it('redirects the old /games page to the home page', async () => {
     await harness.navigateByUrl('/games');
     http.expectOne('/api/games').flush(CATALOGUE);
 
-    expect(heading()).toBe('Games');
-    expect(TestBed.inject(Title).getTitle()).toBe('Games · Chog Game Arena');
+    expect(url()).toBe('/');
+    expect(heading()).toBe('Chog Game Arena');
   });
 
   it('renders the My Chogs page at /chogs', async () => {
@@ -54,6 +57,15 @@ describe('app routes', () => {
 
     expect(heading()).toBe('My Chogs');
     expect(TestBed.inject(Title).getTitle()).toBe('My Chogs · Chog Game Arena');
+  });
+
+  it.each(['/ladder', '/leaderboard'])('renders the ladder at %s', async (path) => {
+    await harness.navigateByUrl(path);
+    http.match(() => true); // the ladder's own requests are covered by its spec
+
+    expect(url()).toBe('/ladder');
+    expect(heading()).toBe('Ladder');
+    expect(TestBed.inject(Title).getTitle()).toBe('Ladder · Chog Game Arena');
   });
 
   it('opens a room at /rooms/:code', async () => {
@@ -89,6 +101,7 @@ describe('app routes', () => {
 
   it('redirects unknown URLs to the home page', async () => {
     await harness.navigateByUrl('/does-not-exist');
+    http.expectOne('/api/games').flush(CATALOGUE);
 
     expect(url()).toBe('/');
     expect(heading()).toBe('Chog Game Arena');
@@ -102,19 +115,19 @@ describe('app routes', () => {
       expect(heading()).toBe('Chog Life');
     });
 
-    it.each(['chog-race', 'chog-fix', 'not-a-game'])('redirects %s to the catalogue', async (gameId) => {
+    it.each(['chog-race', 'chog-fix', 'not-a-game'])('redirects %s to the home catalogue', async (gameId) => {
       await navigate(`/games/${gameId}`, (req) => req.flush(CATALOGUE));
       http.expectOne('/api/games').flush(CATALOGUE); // the catalogue page loads after the redirect
 
-      expect(url()).toBe('/games');
-      expect(heading()).toBe('Games');
+      expect(url()).toBe('/');
+      expect(heading()).toBe('Chog Game Arena');
     });
 
-    it('redirects to the catalogue when the catalogue cannot be loaded', async () => {
+    it('redirects to the home catalogue when the catalogue cannot be loaded', async () => {
       await navigate('/games/chog-life', (req) => req.flush('down', { status: 503, statusText: 'Service Unavailable' }));
       http.expectOne('/api/games').flush(CATALOGUE);
 
-      expect(url()).toBe('/games');
+      expect(url()).toBe('/');
     });
   });
 });

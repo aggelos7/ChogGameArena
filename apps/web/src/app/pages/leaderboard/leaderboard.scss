@@ -53,6 +53,12 @@
     border-radius: 0.75rem;
 
     &.you {
+      // A light box: dark text, also where the page's own text is white over a picture.
+      --text: var(--ink);
+      --text-muted: var(--ink-muted);
+      --link: var(--ink-link);
+      color: var(--text);
+      text-shadow: none;
       border-color: var(--brand);
       background: var(--surface-muted);
     }

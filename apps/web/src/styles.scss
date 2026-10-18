@@ -1,6 +1,10 @@
 :root {
   --text: #1a1a1a;
   --text-muted: #555;
+  /* Dark text for light boxes, also on pages whose own text is white over a picture. */
+  --ink: #1a1a1a;
+  --ink-muted: #555;
+  --ink-link: #1d4ed8;
   --surface: #fff;
   --surface-muted: #f4f4f6;
   --border: #d0d0d0;
@@ -86,6 +90,51 @@ button:disabled {
    outweighs the shell component's own scoped rule. */
 main.shell-main:has(.game-wide) {
   max-width: 2400px;
+}
+
+/* Every other page sits over the home page's arena, fading to white towards the bottom, with white text
+   outside its light boxes, which keep dark text (`.ink`-style rules in each component). The home page and the game boards
+   have pictures of their own. It stays put while the page scrolls. */
+app-root:not(:has(app-home, app-race-board, app-life-board)) {
+  main.shell-main {
+    --text: #fff;
+    --text-muted: rgb(255 255 255 / 0.85);
+    --link: #fff;
+
+    color: var(--text);
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  }
+
+  main.shell-main a:not([class]) {
+    color: var(--link, inherit);
+  }
+
+  main.shell-main :is(input, select, textarea) {
+    text-shadow: none;
+  }
+}
+
+app-root:not(:has(app-home, app-race-board, app-life-board))::before {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  background:
+    linear-gradient(rgb(255 255 255 / 0%), rgb(255 255 255 / 81%)),
+    url('/home/chog-game-arena.webp') center / cover no-repeat,
+    #180c52;
+  pointer-events: none;
+}
+
+/* A Chog Race match is played over the race track picture. It stays put while the page scrolls, where the browser
+   allows. */
+app-root:has(app-race-board) {
+  background: url('/chog-race/background.webp') center / cover fixed no-repeat, #eaf2fd;
+}
+
+/* And a Chog Life match over the Chog Life picture. */
+app-root:has(app-life-board) {
+  background: url('/chog-life/background.webp') center / cover fixed no-repeat, #eaf2fd;
 }
 
 @media (prefers-reduced-motion: reduce) {

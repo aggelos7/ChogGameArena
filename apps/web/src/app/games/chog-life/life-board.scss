@@ -12,6 +12,20 @@
   container-type: inline-size;
 }
 
+// Clear panels that blur the picture behind the match, so the text stays readable, as on the Chog Race board.
+.side,
+.controls {
+  padding: 0.75rem 1rem;
+  border: 1px solid #b9a6f2; // the lavender of the picture's balloons and signs
+  border-radius: 0.75rem;
+  background: transparent;
+  backdrop-filter: blur(3px);
+}
+
+.controls {
+  margin: 0.75rem 0;
+}
+
 .players {
   display: grid;
   gap: 0.5rem;

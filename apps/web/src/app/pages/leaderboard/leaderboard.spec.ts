@@ -5,7 +5,7 @@ import { Leaderboard, LeaderboardEntry } from '../../leaderboards/leaderboard-ap
 import { CATALOGUE } from '../../testing';
 import { LeaderboardPage } from './leaderboard';
 
-describe('Leaderboard page', () => {
+describe('Ladder page', () => {
   const avatar = { id: 'classic', name: 'Classic', color: '#5b2bd6' };
   const entry = (place: number, displayName: string, xp: number, wins: number, isYou = false): LeaderboardEntry => ({
     place,

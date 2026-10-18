@@ -62,9 +62,11 @@ describe('Chog Life results', () => {
     expect(texts(view, '[data-place]')).toEqual(['1st', '2nd']);
     expect(texts(view, '[data-standing] .name')).toEqual(['Alice', 'Bob']);
     expect(texts(view, '[data-portfolio]')).toEqual(['250 MON', '120 MON']);
+    expect(texts(view, '[data-change]')).toEqual(['+150 MON', '+20 MON']);
+    expect(view.querySelector('[data-change]')?.classList).toContain('gain');
     expect(texts(view, '[data-summary]')).toEqual([
-      'Started with 100 MON (+150 MON) · Reached the finish 1st',
-      'Started with 100 MON (+20 MON) · Reached the finish 2nd',
+      'Started with 100 MON · Reached the finish 1st',
+      'Started with 100 MON · Reached the finish 2nd',
     ]);
     expect(texts(view, '[data-stat="degen-score"]')).toEqual(['80/100', '0/100']);
     expect(texts(view, '[data-stat="biggest-win"]')).toEqual(['+100 MON', '+35 MON']);
@@ -77,8 +79,10 @@ describe('Chog Life results', () => {
   it('shows a loss, no biggest win and a player who did not reach the finish', () => {
     const view = render([member('Alice', 1, 1, lifeResult(150)), member('Bob', 2, 2, lifeResult(-30), { isYou: true })]);
 
-    expect(texts(view, '[data-summary]')[1]).toBe('Started with 100 MON (−130 MON) · Didn’t reach the finish');
+    expect(texts(view, '[data-summary]')[1]).toBe('Started with 100 MON · Didn’t reach the finish');
     expect(view.querySelectorAll('[data-portfolio]')[1].classList).toContain('negative');
+    expect(texts(view, '[data-change]')[1]).toBe('−130 MON');
+    expect(view.querySelectorAll('[data-change]')[1].classList).toContain('loss');
     expect(texts(view, '[data-stat="biggest-win"]')).toEqual(['None', 'None']);
   });
 
