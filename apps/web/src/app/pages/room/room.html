@@ -206,7 +206,7 @@
 
       @if (current.status === 'Active' && you(); as me) {
         @if (!me.hasLeft) {
-          <section class="match" [class.game-wide]="!!lifeBoard()" aria-labelledby="match-heading">
+          <section class="match" [class.game-wide]="playing()" aria-labelledby="match-heading">
             @if (lifeBoard(); as board) {
               <app-life-board
                 [board]="board"
@@ -229,14 +229,35 @@
                   <p class="action-error" boardMessages role="alert" data-error="action">{{ message(failure) }}</p>
                 }
               </app-life-board>
+            } @else if (raceBoard(); as board) {
+              <app-race-board
+                [board]="board"
+                [members]="current.members"
+                [endsAt]="current.matchEndsAt"
+                [rolling]="busy()"
+                (roll)="roll()"
+                (endTurn)="endTurn()"
+                (playCard)="playCard($event)"
+                (pass)="pass()"
+                (useAbility)="useRaceAbility($event)"
+              >
+                <div class="game-header" boardHeader>
+                  <h1>{{ gameName() ?? current.gameType }} room</h1>
+                  <h2 id="match-heading" class="visually-hidden">Game</h2>
+                  <ng-container *ngTemplateOutlet="playingAs; context: { $implicit: me }" />
+                </div>
+                @if (turnTimer(); as timer) {
+                  <app-turn-timer boardTimer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
+                }
+                @if (actionError(); as failure) {
+                  <p class="action-error" boardMessages role="alert" data-error="action">{{ message(failure) }}</p>
+                }
+              </app-race-board>
             } @else {
               <h2 id="match-heading">Game</h2>
               <ng-container *ngTemplateOutlet="playingAs; context: { $implicit: me }" />
               @if (turnTimer(); as timer) {
                 <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
-              }
-              @if (raceBoard(); as board) {
-                <app-race-board [board]="board" [members]="current.members" [endsAt]="current.matchEndsAt" [rolling]="busy()" (roll)="roll()" (endTurn)="endTurn()" (playCard)="playCard($event)" (pass)="pass()" (useAbility)="useRaceAbility($event)" />
               }
             }
             <div class="leave" data-leave>
@@ -249,7 +270,7 @@
               }
             </div>
 
-            @if (!lifeBoard() && actionError(); as failure) {
+            @if (!playing() && actionError(); as failure) {
               <p class="action-error" role="alert" data-error="action">{{ message(failure) }}</p>
             }
           </section>
@@ -266,7 +287,7 @@
         @if (hasRaceResults()) {
           <app-race-results [members]="current.members" />
         }
-        <section class="match" aria-labelledby="final-heading" data-final-board>
+        <section class="match game-wide" aria-labelledby="final-heading" data-final-board>
           <h2 id="final-heading">Final board</h2>
           <app-race-board [board]="board" [members]="current.members" />
         </section>

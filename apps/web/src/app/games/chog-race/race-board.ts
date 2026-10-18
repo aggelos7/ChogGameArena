@@ -1,5 +1,20 @@
-import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, input, output, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterEveryRender,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { RoomMember } from '../../rooms/rooms-api';
+import { HOP_MS, SIDE_BY_SIDE, reducedMotion } from '../chog-life/life-board';
 import { timeLeft } from '../chog-life/life-board-model';
 import { seatColor } from '../seats';
 import {
@@ -17,8 +32,10 @@ import {
   RaceTile,
   raceCardDescription,
   raceColumns,
+  raceFitColumns,
   raceLayout,
   raceTileLabel,
+  raceWalk,
 } from './race-board-model';
 
 /** A card you can play now, and for Whale, Rug and Liquidated the opponent it's played on (DEC-057, DEC-058). */
@@ -36,6 +53,9 @@ export interface RaceAbilityPlay {
 /** Where a pawn's own move ended and what the tile did, for a roll or a card's move alike. */
 type Landing = Pick<RaceMove, 'landed' | 'to' | 'effect' | 'draw' | 'reshuffled'> & { card?: RaceCard };
 
+/** The least height the track is given beside the players, however little is left on screen. */
+const LEAST_HEIGHT = 360;
+
 /** A pawn as drawn: its seat, colour and the player it belongs to. */
 interface DrawnPawn {
   seat: number;
@@ -45,6 +65,8 @@ interface DrawnPawn {
   name: string;
   isYou: boolean;
   isTurn: boolean;
+  /** The pawn is hopping along a move being shown. */
+  isHopping?: boolean;
 }
 
 /**
@@ -61,7 +83,10 @@ interface DrawnPawn {
  * while it has a use left and fits the moment (STORY-055, DEC-059): Speed Boost before the roll, Shield and Card Vision
  * before or after it, and Card Steal once per opponent holding a card while your hand has room. Everyone sees armed
  * Speed Boosts, raised Shields and the latest ability used; only you see the card Card Vision shows you, and a stolen
- * card only its two players. While the race runs it counts down to the 20-minute cap (STORY-056, DEC-060).
+ * card only its two players. While the race runs it counts down to the 20-minute cap (STORY-056, DEC-060). On wide
+ * screens it's laid out like the Chog Life board (DEC-048): the players and controls in a column on the left, and the
+ * track on the right, filling the height left on screen. Each new move is shown as on the Chog Life board: the pawn hops
+ * a tile at a time to where it landed and on where a Boost or Setback sent it, then any pawns a card pushed back hop too.
  */
 @Component({
   selector: 'app-race-board',
@@ -98,7 +123,15 @@ export class RaceBoardView {
   /** The board's width, once measured; until then, and without ResizeObserver, the phone layout. */
   private readonly width = signal(0);
 
-  protected readonly columns = computed(() => raceColumns(this.width()));
+  /** Beside the players: the track's width and the height left for it on screen, in pixels; null otherwise. */
+  protected readonly space = signal<{ width: number; height: number } | null>(null);
+  private readonly track = viewChild<ElementRef<HTMLElement>>('track');
+
+  protected readonly columns = computed(() => {
+    const space = this.space();
+    return space ? raceFitColumns(this.board().tiles.length, space.width, space.height) : raceColumns(this.width());
+  });
+  protected readonly rows = computed(() => Math.ceil(this.board().tiles.length / this.columns()));
   protected readonly spots = computed(() => raceLayout(this.board().tiles, this.columns()));
 
   /** Players with a pawn on the board, by seat. */
@@ -109,8 +142,20 @@ export class RaceBoardView {
       .sort((a, b) => a.seat - b.seat);
   });
 
-  /** The pawns standing on each tile, in seat order. */
-  protected readonly pawnsByTile = computed(() => {
+  /** Where pawns are shown while a move hops along, by seat; null when no move is being shown. */
+  private readonly hops = signal<ReadonlyMap<number, number> | null>(null);
+  /** The latest roll and card play already seen; undefined before the first board, whose move is never replayed. */
+  private seenRoll: string | null | undefined = undefined;
+  private seenPlay: string | null | undefined = undefined;
+  private hopTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** The pawns standing on each tile, in seat order, where the server put them. */
+  protected readonly pawnsByTile = computed(() => this.byTile(new Map()));
+
+  /** The pawns as drawn on each tile: where the server put them, or where they are while a move hops along. */
+  protected readonly shownByTile = computed(() => this.byTile(this.hops() ?? new Map()));
+
+  private byTile(hops: ReadonlyMap<number, number>): Map<number, DrawnPawn[]> {
     const bySeat = new Map(this.players().map((member) => [member.seat, member]));
     const byTile = new Map<number, DrawnPawn[]>();
     for (const pawn of [...this.board().pawns].sort((a, b) => a.seat - b.seat)) {
@@ -122,11 +167,13 @@ export class RaceBoardView {
         name: member?.displayName ?? `Seat ${pawn.seat}`,
         isYou: !!member?.isYou,
         isTurn: !!member?.isTurn,
+        isHopping: hops.has(pawn.seat),
       };
-      byTile.set(pawn.tile, [...(byTile.get(pawn.tile) ?? []), drawn]);
+      const tile = hops.get(pawn.seat) ?? pawn.tile;
+      byTile.set(tile, [...(byTile.get(tile) ?? []), drawn]);
     }
     return byTile;
-  });
+  }
 
   /** How many cards each seat holds. */
   protected readonly cardCounts = computed(() => new Map(this.board().pawns.map((pawn) => [pawn.seat, pawn.cards ?? 0])));
@@ -308,10 +355,87 @@ export class RaceBoardView {
         resize.observe(host);
       }
     });
+    effect(() => {
+      const move = this.board().lastMove;
+      untracked(() => this.follow(move));
+    });
+    // Beside the players, the track takes the height left below its top; measured after each render, as the page moves.
+    afterEveryRender(() => this.measure());
+    const onResize = (): void => this.measure();
+    globalThis.addEventListener?.('resize', onResize);
     inject(DestroyRef).onDestroy(() => {
       clearInterval(tick);
+      clearTimeout(this.hopTimer);
       resize?.disconnect();
+      globalThis.removeEventListener?.('resize', onResize);
     });
+  }
+
+  /**
+   * Shows what's new in the latest move: the roll's hops, then the card played's, then the pawns it pushed back, together.
+   * The first board's move and reduced motion show no hops; a pawn hopping stays where it was until its turn comes.
+   */
+  private follow(move: RaceMove | undefined): void {
+    const roll = move ? JSON.stringify([move.seat, move.roll, move.from, move.landed, move.to]) : null;
+    const play = move?.play ? JSON.stringify([move.seat, move.play]) : null;
+    const first = this.seenRoll === undefined;
+    const fresh = { roll: roll !== null && roll !== this.seenRoll, play: play !== null && play !== this.seenPlay };
+    this.seenRoll = roll;
+    this.seenPlay = play;
+    if (!move || first || (!fresh.roll && !fresh.play) || reducedMotion()) {
+      return;
+    }
+    // Each stage is the walks hopping together; a card's own move hops first, then the pawns it pushed back.
+    const stages: Map<number, number[]>[] = [];
+    if (fresh.roll) {
+      stages.push(new Map([[move.seat, raceWalk(move.from, move.landed, move.to)]]));
+    }
+    const card = move.play;
+    if (fresh.play && card) {
+      if ((card.steps !== undefined || card.roll !== undefined) && card.from !== undefined && card.landed !== undefined && card.to !== undefined) {
+        stages.push(new Map([[move.seat, raceWalk(card.from, card.landed, card.to)]]));
+      }
+      if (card.pushed?.length) {
+        stages.push(new Map(card.pushed.map((push) => [push.seat, raceWalk(push.from, push.landed, push.to)])));
+      }
+    }
+    if (stages.length === 0) {
+      return;
+    }
+    const frames: Map<number, number>[] = [];
+    const at = new Map<number, number>();
+    for (const stage of stages) {
+      stage.forEach((walk, seat) => at.has(seat) || at.set(seat, walk[0]));
+    }
+    for (const stage of stages) {
+      const length = Math.max(...[...stage.values()].map((walk) => walk.length));
+      for (let step = 0; step < length; step++) {
+        stage.forEach((walk, seat) => at.set(seat, walk[Math.min(step, walk.length - 1)]));
+        frames.push(new Map(at));
+      }
+    }
+    clearTimeout(this.hopTimer);
+    let frame = 0;
+    const next = (): void => {
+      this.hops.set(frame < frames.length ? frames[frame++] : null);
+      if (this.hops()) {
+        this.hopTimer = setTimeout(next, HOP_MS);
+      }
+    };
+    next();
+  }
+
+  private measure(): void {
+    const rect = this.track()?.nativeElement.getBoundingClientRect();
+    let space: { width: number; height: number } | null = null;
+    if (rect && rect.width > 0 && this.width() >= SIDE_BY_SIDE) {
+      const top = rect.top + (globalThis.scrollY ?? 0);
+      space = { width: Math.round(rect.width), height: Math.round(Math.max(LEAST_HEIGHT, (globalThis.innerHeight ?? 0) - top - 16)) };
+    }
+    const current = this.space();
+    if (space?.width !== current?.width || space?.height !== current?.height) {
+      this.space.set(space);
+    }
   }
 
   /** Why your ability can't be used now, or what it's doing while armed (DEC-059). */
@@ -477,6 +601,10 @@ export class RaceBoardView {
 
   protected pawnsOn(tile: RaceTile): DrawnPawn[] {
     return this.pawnsByTile().get(tile.index) ?? [];
+  }
+
+  protected shownOn(tile: RaceTile): DrawnPawn[] {
+    return this.shownByTile().get(tile.index) ?? [];
   }
 
   protected color(seat: number): string {
