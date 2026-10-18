@@ -3,7 +3,8 @@ import { RoomAbility, RoomMember } from '../../rooms/rooms-api';
 import { RACE_BOARD, RACE_TILES } from '../../testing';
 import { seatColor } from '../seats';
 import { RaceBoardView } from './race-board';
-import { RaceBoard, raceColumns, raceLayout, raceTileLabel, toRaceBoard } from './race-board-model';
+import { HOP_MS, SIDE_BY_SIDE } from '../chog-life/life-board';
+import { RaceBoard, raceColumns, raceFitColumns, raceLayout, raceTileLabel, raceWalk, toRaceBoard } from './race-board-model';
 
 function member(displayName: string, seat: number, overrides: Partial<RoomMember> = {}): RoomMember {
   return {
@@ -117,7 +118,15 @@ describe('Chog Race board model', () => {
   });
 
   it('fits four tiles a row on a phone and up to ten on wider screens', () => {
-    expect([0, 343, 500, 700, 1200].map(raceColumns)).toEqual([4, 4, 5, 8, 10]);
+    expect([0, 343, 500, 700, 1200].map(raceColumns)).toEqual([4, 4, 5, 6, 10]);
+  });
+
+  it('beside the players, picks the columns that give the largest tiles in the space left', () => {
+    // 28 tiles in 1000 × 652, with 40-pixel gaps: 7 columns of 4 rows give tiles about 109 by 133 pixels, the largest.
+    expect(raceFitColumns(28, 1000, 652)).toBe(7);
+    // Short and wide, the track spreads out; tall and narrow, it never goes below 4 a row.
+    expect(raceFitColumns(28, 2000, 360)).toBe(10);
+    expect(raceFitColumns(28, 400, 2000)).toBe(4);
   });
 
   it('winds the track back and forth so consecutive tiles always touch', () => {
@@ -134,11 +143,21 @@ describe('Chog Race board model', () => {
       [2, 1],
       [3, 1],
     ]);
-    expect(spots[spots.length - 1]).toEqual({ tile: RACE_TILES[27], row: 7, column: 4 });
+    expect(spots[spots.length - 1]).toEqual({ tile: RACE_TILES[27], row: 7, column: 4, next: null });
+    // The arrows run along each row and down at its end, to the Finish.
+    expect(spots.slice(0, 9).map((spot) => spot.next)).toEqual(['right', 'right', 'right', 'down', 'left', 'left', 'left', 'down', 'right']);
     for (let i = 1; i < spots.length; i++) {
       const [a, b] = [spots[i - 1], spots[i]];
       expect(Math.abs(a.row - b.row) + Math.abs(a.column - b.column)).toBe(1);
     }
+  });
+
+  it('walks a pawn a tile at a time to where it landed and on where the tile sent it', () => {
+    expect(raceWalk(2, 5, 5)).toEqual([2, 3, 4, 5]);
+    // A Boost from 4 to 6, a Setback from 9 back to 7, and a push back.
+    expect(raceWalk(1, 4, 6)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(raceWalk(7, 9, 7)).toEqual([7, 8, 9, 8, 7]);
+    expect(raceWalk(5, 2, 2)).toEqual([5, 4, 3, 2]);
   });
 
   it('labels each tile with what it does', () => {
@@ -214,6 +233,14 @@ describe('Chog Race board', () => {
       ['2', '1'],
       ['3', '1'],
     ]);
+    // An arrow from each tile points to the next, along the row and down at its end; none leaves the Finish.
+    expect([0, 3, 4, 7, 27].map((i) => ['to-right', 'to-left', 'to-down'].find((arrow) => tile(i).classList.contains(arrow)))).toEqual([
+      'to-right',
+      'to-down',
+      'to-left',
+      'to-down',
+      undefined,
+    ]);
   });
 
   it('draws all six pawns on one tile, numbered and coloured by seat', () => {
@@ -226,6 +253,17 @@ describe('Chog Race board', () => {
     expect(pawns.filter((p) => p.classList.contains('turn')).map((p) => p.dataset['pawn'])).toEqual(['3']);
     expect(pawns.filter((p) => p.classList.contains('you')).map((p) => p.dataset['pawn'])).toEqual(['5']);
     expect(tile(0).getAttribute('aria-label')).toBe('Tile 0, Start, Alice, Bob, Carol, Dave, Erin (you), Frank');
+  });
+
+  it('draws each pawn as a car in its seat colour, the driver on the roof, facing the way its row runs', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 5 }] }, [member('Alice', 1), member('Bob', 2)]);
+
+    const car = (seat: number) => page.querySelector(`[data-pawn="${seat}"]`)?.closest('.car');
+    expect(car(1)?.querySelector<SVGElement>('svg.car-body')?.style.color).toBe(hexToRgb(seatColor(1)));
+    expect(car(1)?.firstElementChild?.getAttribute('data-pawn')).toBe('1');
+    // Four tiles a row: tile 0 is on the first row, which runs right, and tile 5 on the second, which runs left.
+    expect(tile(0).classList).not.toContain('backward');
+    expect(tile(5).classList).toContain('backward');
   });
 
   it('draws a player’s profile photo as their pawn, ringed in their seat colour (STORY-062)', () => {
@@ -276,6 +314,48 @@ describe('Chog Race board', () => {
 
     render(RACE_BOARD, [member('Alice', 1), member('Bob', 2, { isYou: true, isTurn: true })]);
     expect(page.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s your turn.');
+  });
+
+  it('beside the players, fills the height left on screen with the track', () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly callback: (entries: { contentRect: { width: number } }[]) => void) {}
+        observe(): void {
+          this.callback([{ contentRect: { width: SIDE_BY_SIDE } }]);
+        }
+        disconnect(): void {
+          // Nothing to stop.
+        }
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 100, width: 1000 } as DOMRect);
+    fixture.destroy();
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement;
+    render(RACE_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2)]);
+    fixture.detectChanges();
+
+    // jsdom's window is 768 pixels high: 652 are left below a track starting at 100, less a 16-pixel margin.
+    const track = page.querySelector<HTMLElement>('[data-columns]');
+    expect(track?.classList).toContain('fill');
+    expect(track?.style.height).toBe('652px');
+    expect(track?.dataset['columns']).toBe('7');
+    expect(track?.style.getPropertyValue('--rows')).toBe('4');
+    // The players and the turn go in the column beside the track, the actions under them.
+    expect(page.querySelector('.side [data-list="pawns"]')).not.toBeNull();
+    expect(page.querySelector('.stage [data-columns]')).not.toBeNull();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the phone layout, sized by its tiles, on narrower screens', () => {
+    render(RACE_BOARD, [member('Alice', 1), member('Bob', 2)]);
+    fixture.detectChanges();
+
+    const track = page.querySelector<HTMLElement>('[data-columns]');
+    expect(track?.classList).not.toContain('fill');
+    expect(track?.style.height).toBe('');
   });
 });
 
@@ -881,3 +961,95 @@ function hexToRgb(hex: string): string {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
   return `rgb(${r}, ${g}, ${b})`;
 }
+
+describe('Chog Race board hops', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+  const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+
+  function render(board: RaceBoard): void {
+    fixture.componentRef.setInput('board', board);
+    fixture.componentRef.setInput('members', members);
+    fixture.detectChanges();
+  }
+
+  /** The tile each seat's pawn is drawn on. */
+  const at = (seat: number) => Number(page.querySelector(`[data-pawn="${seat}"]`)?.closest<HTMLElement>('[data-tile]')?.dataset['tile']);
+
+  /** Where `seat` is drawn at each hop, from now until `count` hops later. */
+  function hopsOf(seat: number, count: number): number[] {
+    const seen = [at(seat)];
+    for (let i = 0; i < count; i++) {
+      vi.advanceTimersByTime(HOP_MS);
+      fixture.detectChanges();
+      seen.push(at(seat));
+    }
+    return seen;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('hops a rolled pawn a tile at a time, on through a Boost, while screen readers hear where it ended', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 1 }, { seat: 2, tile: 0 }] });
+
+    const moved: RaceBoard = { ...RACE_BOARD, pawns: [{ seat: 1, tile: 6 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 3, from: 1, landed: 4, to: 6, effect: 'Boost' } };
+    render(moved);
+    expect(page.querySelector('[data-tile="6"]')?.getAttribute('aria-label')).toContain('Alice (you)');
+    expect(page.querySelector('[data-pawn="1"]')?.closest('.car')?.classList).toContain('hopping');
+    expect(hopsOf(1, 6)).toEqual([1, 2, 3, 4, 5, 6, 6]);
+    expect(page.querySelector('[data-pawn="1"]')?.closest('.car')?.classList).not.toContain('hopping');
+    expect(at(2)).toBe(0);
+
+    // The same move again, as when the page refetches after a command, doesn't hop again.
+    render({ ...moved, phase: 'Play' });
+    expect(at(1)).toBe(6);
+  });
+
+  it('hops a card’s move after the roll, then the pawns a card pushed back', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 5 }] });
+    const roll = { seat: 1, roll: 2, from: 0, landed: 2, to: 2 };
+    const rolled: RaceBoard = { ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 5 }], lastMove: roll };
+    render(rolled);
+    hopsOf(1, 3);
+
+    // Only the new play hops: Pump moves Alice 2 on from where she rolled to.
+    render({ ...rolled, pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 5 }], lastMove: { ...roll, play: { card: 'Pump', steps: 2, from: 2, landed: 4, to: 4 } } });
+    expect(hopsOf(1, 3)).toEqual([2, 3, 4, 4]);
+
+    render({
+      ...rolled,
+      pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 3 }],
+      lastMove: { seat: 1, roll: 1, from: 3, landed: 4, to: 4, play: { card: 'Reverse', pushed: [{ seat: 2, from: 5, landed: 3, to: 3 }] } },
+    });
+    // Bob waits on his tile while Alice's roll hops, then is pushed back a tile at a time.
+    const alice = [at(1)];
+    const bob = [at(2)];
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(HOP_MS);
+      fixture.detectChanges();
+      alice.push(at(1));
+      bob.push(at(2));
+    }
+    expect(alice).toEqual([3, 4, 4, 4, 4]);
+    expect(bob).toEqual([5, 5, 5, 4, 3]);
+  });
+
+  it('shows a move without hops when the page loads, and with reduced motion', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 3 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 3, from: 0, landed: 3, to: 3 } });
+    expect(at(1)).toBe(3);
+
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 3 }, { seat: 2, tile: 2 }], lastMove: { seat: 2, roll: 2, from: 0, landed: 2, to: 2 } });
+    expect(at(2)).toBe(2);
+  });
+});

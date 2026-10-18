@@ -101,11 +101,8 @@ export class RoomPage implements OnInit {
     return !!(this.lifeBoard() || this.raceBoard()) && (room?.status === 'Completed' || !this.you()?.hasLeft);
   });
 
-  /**
-   * You're playing a live Chog Life match: its title and details go beside the board (DEC-048). The Chog Race board
-   * stays under the room's title.
-   */
-  protected readonly playing = computed(() => !!this.lifeBoard() && this.boardShown() && this.room()?.status === 'Active');
+  /** You're playing a live match: its title and details go beside the board, for Chog Life and Chog Race alike (DEC-048). */
+  protected readonly playing = computed(() => !!(this.lifeBoard() || this.raceBoard()) && this.boardShown() && this.room()?.status === 'Active');
 
   /** A completed Chog Life match whose results the server stored (STORY-043, DEC-046), shown above the final board. */
   protected readonly hasLifeResults = computed(() => {

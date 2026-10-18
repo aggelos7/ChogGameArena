@@ -206,11 +206,15 @@ export function raceCardDescription(card: RaceCard, values?: RaceCardValues): st
   }
 }
 
-/** Where a tile sits on the drawn track: its grid row and column, from 1. */
+/**
+ * Where a tile sits on the drawn track: its grid row and column, from 1, and which way the arrow to the next tile points;
+ * null on the Finish.
+ */
 export interface RaceSpot {
   tile: RaceTile;
   row: number;
   column: number;
+  next: 'right' | 'left' | 'down' | null;
 }
 
 /** The fewest and most tiles a row of the drawn track holds; 4 fits a 375px phone (DEC-054). */
@@ -219,6 +223,10 @@ export const MAX_COLUMNS = 10;
 
 /** The least width a tile is drawn at, in pixels, so pawns and labels stay legible and tappable. */
 export const TILE_WIDTH = 84;
+
+/** The gap between tiles, in pixels, where the arrow to the next tile is drawn; wider beside the players (race-board.scss). */
+export const TRACK_GAP = 20;
+export const FIT_GAP = 40;
 
 const TILE_TYPES: readonly string[] = ['Start', 'Normal', 'Card', 'Boost', 'Setback', 'Finish'];
 
@@ -348,19 +356,56 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
 
 /** How many tiles a row holds on a board `width` pixels wide. */
 export function raceColumns(width: number): number {
-  return Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, Math.floor(width / TILE_WIDTH)));
+  return Math.min(MAX_COLUMNS, Math.max(MIN_COLUMNS, Math.floor((width + TRACK_GAP) / (TILE_WIDTH + TRACK_GAP))));
+}
+
+/**
+ * How many tiles a row holds when `count` tiles fill a box `width` by `height` pixels, beside the players: the number
+ * whose tiles come out largest, so the track is as near square tiles as the box allows.
+ */
+export function raceFitColumns(count: number, width: number, height: number): number {
+  let best = MIN_COLUMNS;
+  let bestSide = 0;
+  for (let columns = MIN_COLUMNS; columns <= MAX_COLUMNS; columns++) {
+    const rows = Math.ceil(count / columns);
+    const side = Math.min((width - (columns - 1) * FIT_GAP) / columns, (height - (rows - 1) * FIT_GAP) / rows);
+    if (side > bestSide) {
+      best = columns;
+      bestSide = side;
+    }
+  }
+  return best;
 }
 
 /**
  * The track laid out as a serpentine in rows of `columns` tiles: the first row left to right, the next right to left, and
- * so on, so consecutive tiles always touch and the whole race fits on a phone screen.
+ * so on, so consecutive tiles always touch and the whole race fits on a phone screen. Each tile's arrow points along the
+ * row, or down at its end.
  */
 export function raceLayout(tiles: RaceTile[], columns: number): RaceSpot[] {
   return tiles.map((tile, i) => {
     const row = Math.floor(i / columns);
     const step = i % columns;
-    return { tile, row: row + 1, column: (row % 2 === 0 ? step : columns - 1 - step) + 1 };
+    const forward = row % 2 === 0 ? 'right' : 'left';
+    const next = i === tiles.length - 1 ? null : step === columns - 1 ? 'down' : forward;
+    return { tile, row: row + 1, column: (row % 2 === 0 ? step : columns - 1 - step) + 1, next };
   });
+}
+
+/**
+ * The tiles a pawn passes, one at a time, going `from` a tile to where it `landed` and on `to` where a Boost or Setback
+ * there sent it: the tiles it's shown on as it hops, `from` first.
+ */
+export function raceWalk(from: number, landed: number, to: number): number[] {
+  const tiles = [from];
+  for (const stop of [landed, to]) {
+    let at = tiles[tiles.length - 1];
+    while (at !== stop) {
+      at += Math.sign(stop - at);
+      tiles.push(at);
+    }
+  }
+  return tiles;
 }
 
 /** What a tile says on the board. */
