@@ -876,6 +876,18 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. No change to Chog Life's Degen Score, no lifetime totals or rewards, no migration.
 
 
+#### STORY-067 — Chog Race board layout, arrows, cars and hops
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E08
+- **Implementation:** Refine the Chog Race board's look and feel, as the product owner asked (DEC-067). From 1200px wide the board is laid out like Chog Life's (DEC-048): the title, players, clock, turn and cards in a 340px column on the left, the track on the right filling the height left on screen, with the columns that give the largest tiles. An arrow image in each gap leads from tile to tile along the winding track (none from the Finish). Pawns are cartoon cars in the seat colour, facing the way their row runs, with the player's photo or seat number on the roof. Each new move is shown a tile at a time, as on the Chog Life board: the roll, on through a Boost or Setback, a card's move, then pawns pushed back by Rug or Reverse; never for the first board or with reduced motion.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the wide layout puts the players and controls beside a track that fills the height left on screen; every tile but the Finish has an arrow to the next; pawns are drawn as cars with the driver on the roof; a new move hops a tile at a time while screen readers hear where the server put each pawn; phones keep the stacked layout with three pawns' worth of room in the narrowest tile.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: the board only draws what the server sent, and hops never change a pawn's position.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Web only: no API, rules, config or migration change, and no change to the Chog Life board beyond exporting its reduced-motion check.
+
 ## E09 — Post-MVP shared progression
 
 

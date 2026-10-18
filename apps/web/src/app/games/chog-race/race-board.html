@@ -1,159 +1,191 @@
 <div class="race-board" data-board="race">
-  <ul class="players" aria-label="Players and pawns" data-list="pawns">
-    @for (member of players(); track member.seat) {
-      <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
-        <span class="pawn" [class.photo]="member.avatarImageUrl" [style.background]="color(member.seat)" aria-hidden="true">
-          @if (member.avatarImageUrl; as src) {
-            <img [src]="src" alt="" />
-          } @else {
-            {{ member.seat }}
+  <div class="side">
+    <ng-content select="[boardHeader]" />
+    <ul class="players" aria-label="Players and pawns" data-list="pawns">
+      @for (member of players(); track member.seat) {
+        <li [class.turn]="member.isTurn" [attr.data-seat]="member.seat">
+          <span class="pawn" [class.photo]="member.avatarImageUrl" [style.background]="color(member.seat)" aria-hidden="true">
+            @if (member.avatarImageUrl; as src) {
+              <img [src]="src" alt="" />
+            } @else {
+              {{ member.seat }}
+            }
+          </span>
+          <span class="name">{{ member.displayName }}</span>
+          <span class="cards" data-cards>{{ cardsOf(member.seat) }}</span>
+          @if (member.isYou) {
+            <span class="tag">You</span>
           }
-        </span>
-        <span class="name">{{ member.displayName }}</span>
-        <span class="cards" data-cards>{{ cardsOf(member.seat) }}</span>
-        @if (member.isYou) {
-          <span class="tag">You</span>
-        }
-        @if (member.isTurn) {
-          <span class="tag turn" data-turn>Turn</span>
-        }
-        @if (skipping().has(member.seat)) {
-          <span class="tag" data-skipping>Skips a turn</span>
-        }
-        @if (armed().get(member.seat)?.shielded) {
-          <span class="tag" data-shielded>Shielded</span>
-        }
-        @if (armed().get(member.seat)?.boost; as boost) {
-          <span class="tag" data-boosted>Boost +{{ boost }}</span>
-        }
-      </li>
-    }
-  </ul>
-  @if (clock(); as left) {
-    <p class="clock" data-clock>Time left <strong role="timer">{{ left }}</strong></p>
-  }
-  <p class="turn-line" role="status" data-turn-line>
-    @if (waitingReply(); as waiting) {
-      {{ waiting.text }}
-    } @else if (turnOf(); as current) {
-      @if (current.isYou) {
-        It’s your turn.
-      } @else {
-        It’s {{ current.displayName }}’s turn.
-      }
-    }
-  </p>
-  @if (lastMove(); as move) {
-    <p class="last-move" data-last-move>{{ move }}</p>
-  }
-  @if (lastPlay(); as play) {
-    <p class="last-move" data-last-play>{{ play }}</p>
-  }
-  @if (lastAbility(); as used) {
-    <p class="last-move" data-last-ability>{{ used }}</p>
-  }
-  @if (nextCard(); as next) {
-    <p class="last-move" data-next-card>Next card in the deck: {{ next }}. Only you can see this.</p>
-  }
-  @if (hand(); as cards) {
-    <section class="hand" aria-labelledby="race-hand-title" data-hand>
-      <h3 id="race-hand-title">
-        Your cards <span class="count">{{ cards.length }}/{{ board().maxHand ?? cards.length }}</span>
-      </h3>
-      @if (cards.length > 0) {
-        <ul>
-          @for (card of cards; track $index) {
-            <li class="card" data-card>
-              <span class="card-name">{{ card.name }}</span>
-              <span class="card-text">{{ card.description }}</span>
-            </li>
+          @if (member.isTurn) {
+            <span class="tag turn" data-turn>Turn</span>
           }
-        </ul>
-      } @else {
-        <p class="empty">None yet. Land on a Card tile to draw one.</p>
+          @if (skipping().has(member.seat)) {
+            <span class="tag" data-skipping>Skips a turn</span>
+          }
+          @if (armed().get(member.seat)?.shielded) {
+            <span class="tag" data-shielded>Shielded</span>
+          }
+          @if (armed().get(member.seat)?.boost; as boost) {
+            <span class="tag" data-boosted>Boost +{{ boost }}</span>
+          }
+        </li>
       }
-    </section>
-  }
-  @if (yourAbility(); as ability) {
-    <section class="hand ability" aria-labelledby="race-ability-title" data-your-ability>
-      <h3 id="race-ability-title">
-        Your ability: {{ ability.name }} <span class="count" data-uses-left>{{ ability.usesLeft }}/{{ ability.maxUses }} left</span>
-      </h3>
-      <p class="card-text">{{ ability.description }}</p>
-      @if (abilityPlays().length > 0) {
-        <div class="plays" role="group" aria-label="Use your ability" data-abilities>
-          @for (use of abilityPlays(); track use.label) {
+    </ul>
+    @if (clock(); as left) {
+      <p class="clock" data-clock>Time left <strong role="timer">{{ left }}</strong></p>
+    }
+    <p class="turn-line" role="status" data-turn-line>
+      @if (waitingReply(); as waiting) {
+        {{ waiting.text }}
+      } @else if (turnOf(); as current) {
+        @if (current.isYou) {
+          It’s your turn.
+        } @else {
+          It’s {{ current.displayName }}’s turn.
+        }
+      }
+    </p>
+    @if (lastMove(); as move) {
+      <p class="last-move" data-last-move>{{ move }}</p>
+    }
+    @if (lastPlay(); as play) {
+      <p class="last-move" data-last-play>{{ play }}</p>
+    }
+    @if (lastAbility(); as used) {
+      <p class="last-move" data-last-ability>{{ used }}</p>
+    }
+    @if (nextCard(); as next) {
+      <p class="last-move" data-next-card>Next card in the deck: {{ next }}. Only you can see this.</p>
+    }
+    @if (board().deck !== undefined) {
+      <p class="piles" data-piles>Deck {{ board().deck }} · Discard {{ board().discard ?? 0 }}</p>
+    }
+  </div>
+
+  <div class="controls">
+    @if (hand(); as cards) {
+      <section class="hand" aria-labelledby="race-hand-title" data-hand>
+        <h3 id="race-hand-title">
+          Your cards <span class="count">{{ cards.length }}/{{ board().maxHand ?? cards.length }}</span>
+        </h3>
+        @if (cards.length > 0) {
+          <ul>
+            @for (card of cards; track $index) {
+              <li class="card" data-card>
+                <span class="card-name">{{ card.name }}</span>
+                <span class="card-text">{{ card.description }}</span>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="empty">None yet. Land on a Card tile to draw one.</p>
+        }
+      </section>
+    }
+    @if (yourAbility(); as ability) {
+      <section class="hand ability" aria-labelledby="race-ability-title" data-your-ability>
+        <h3 id="race-ability-title">
+          Your ability: {{ ability.name }} <span class="count" data-uses-left>{{ ability.usesLeft }}/{{ ability.maxUses }} left</span>
+        </h3>
+        <p class="card-text">{{ ability.description }}</p>
+        @if (abilityPlays().length > 0) {
+          <div class="plays" role="group" aria-label="Use your ability" data-abilities>
+            @for (use of abilityPlays(); track use.label) {
+              <button
+                type="button"
+                class="action"
+                [disabled]="rolling()"
+                (click)="useAbility.emit({ abilityId: use.abilityId, target: use.target })"
+                [attr.data-ability]="use.abilityId"
+              >
+                {{ use.label }}
+              </button>
+            }
+          </div>
+        } @else if (ability.status) {
+          <p class="empty" data-ability-status>{{ ability.status }}</p>
+        }
+      </section>
+    }
+    @if (waitingReply()?.isYou) {
+      <div class="plays" role="group" aria-label="Answer the card played on you" data-reply>
+        @if (waitingReply()?.canBlock) {
+          <button type="button" class="action" [disabled]="rolling()" (click)="playCard.emit({ card: 'Hodl' })" data-block>Block with HODL</button>
+        }
+        <button type="button" class="action" [disabled]="rolling()" (click)="pass.emit()" data-pass>Take it</button>
+      </div>
+    } @else if (yourPhase() === 'Move') {
+      <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
+    } @else if (yourPhase() === 'Play') {
+      @if (plays().length > 0) {
+        <div class="plays" role="group" aria-label="Play a card, which ends your turn" data-plays>
+          @for (play of plays(); track play.label) {
             <button
               type="button"
               class="action"
               [disabled]="rolling()"
-              (click)="useAbility.emit({ abilityId: use.abilityId, target: use.target })"
-              [attr.data-ability]="use.abilityId"
+              (click)="playCard.emit({ card: play.card, target: play.target })"
+              [attr.data-play]="play.card"
             >
-              {{ use.label }}
+              {{ play.label }}
             </button>
           }
         </div>
-      } @else if (ability.status) {
-        <p class="empty" data-ability-status>{{ ability.status }}</p>
       }
-    </section>
-  }
-  @if (board().deck !== undefined) {
-    <p class="piles" data-piles>Deck {{ board().deck }} · Discard {{ board().discard ?? 0 }}</p>
-  }
-  @if (waitingReply()?.isYou) {
-    <div class="plays" role="group" aria-label="Answer the card played on you" data-reply>
-      @if (waitingReply()?.canBlock) {
-        <button type="button" class="action" [disabled]="rolling()" (click)="playCard.emit({ card: 'Hodl' })" data-block>Block with HODL</button>
-      }
-      <button type="button" class="action" [disabled]="rolling()" (click)="pass.emit()" data-pass>Take it</button>
-    </div>
-  } @else if (yourPhase() === 'Move') {
-    <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
-  } @else if (yourPhase() === 'Play') {
-    @if (plays().length > 0) {
-      <div class="plays" role="group" aria-label="Play a card, which ends your turn" data-plays>
-        @for (play of plays(); track play.label) {
-          <button
-            type="button"
-            class="action"
-            [disabled]="rolling()"
-            (click)="playCard.emit({ card: play.card, target: play.target })"
-            [attr.data-play]="play.card"
-          >
-            {{ play.label }}
-          </button>
-        }
-      </div>
+      <button type="button" class="action" [disabled]="rolling()" (click)="endTurn.emit()" data-end-turn>End turn</button>
     }
-    <button type="button" class="action" [disabled]="rolling()" (click)="endTurn.emit()" data-end-turn>End turn</button>
-  }
 
-  <ol class="track" aria-label="Race track, from start to finish" [style.--columns]="columns()" [attr.data-columns]="columns()">
-    @for (spot of spots(); track spot.tile.index) {
-      <li
-        [class]="'tile type-' + spot.tile.type.toLowerCase()"
-        [style.grid-row]="spot.row"
-        [style.grid-column]="spot.column"
-        [attr.aria-label]="describe(spot.tile)"
-        [attr.data-tile]="spot.tile.index"
-        [attr.data-type]="spot.tile.type"
-      >
-        <span class="number" aria-hidden="true">{{ spot.tile.index }}</span>
-        <span class="label" aria-hidden="true">{{ label(spot.tile) }}</span>
-        <span class="pawns" aria-hidden="true">
-          @for (pawn of pawnsOn(spot.tile); track pawn.seat) {
-            <span class="pawn" [class.turn]="pawn.isTurn" [class.you]="pawn.isYou" [class.photo]="pawn.imageUrl" [style.background]="pawn.color" [attr.data-pawn]="pawn.seat">
-              @if (pawn.imageUrl; as src) {
-                <img [src]="src" alt="" />
-              } @else {
-                {{ pawn.seat }}
-              }
-            </span>
-          }
-        </span>
-      </li>
-    }
-  </ol>
+    <ng-content select="[boardMessages]" />
+  </div>
+
+  <div class="stage">
+    <ng-content select="[boardTimer]" />
+    <ol
+      #track
+      class="track"
+      [class.fill]="space() !== null"
+      aria-label="Race track, from start to finish"
+      [style.--columns]="columns()"
+      [style.--rows]="rows()"
+      [style.height.px]="space()?.height"
+      [attr.data-columns]="columns()"
+    >
+      @for (spot of spots(); track spot.tile.index) {
+        <li
+          [class]="'tile type-' + spot.tile.type.toLowerCase() + (spot.next ? ' to-' + spot.next : '')"
+          [class.backward]="spot.row % 2 === 0"
+          [style.grid-row]="spot.row"
+          [style.grid-column]="spot.column"
+          [attr.aria-label]="describe(spot.tile)"
+          [attr.data-tile]="spot.tile.index"
+          [attr.data-type]="spot.tile.type"
+        >
+          <span class="number" aria-hidden="true">{{ spot.tile.index }}</span>
+          <span class="label" aria-hidden="true">{{ label(spot.tile) }}</span>
+          <span class="pawns" aria-hidden="true">
+            @for (pawn of shownOn(spot.tile); track pawn.seat) {
+              <span class="car" [class.hopping]="pawn.isHopping">
+                <span class="pawn" [class.turn]="pawn.isTurn" [class.you]="pawn.isYou" [class.photo]="pawn.imageUrl" [style.background]="pawn.color" [attr.data-pawn]="pawn.seat">
+                  @if (pawn.imageUrl; as src) {
+                    <img [src]="src" alt="" />
+                  } @else {
+                    {{ pawn.seat }}
+                  }
+                </span>
+                <svg class="car-body" viewBox="0 0 32 19" [style.color]="pawn.color">
+                  <path
+                    class="shell"
+                    d="M2 13q0-3 3-3.5L9 9l3-4q1-1 3-1h6q2 0 3 1.5L26.5 9l2.5.5q2 .5 2 3V14q0 1-1 1H3q-1 0-1-1z"
+                  />
+                  <path class="glass" d="M13.2 5.6 11 9h6V5.6zm5 0V9H25l-2-3.4z" />
+                  <circle class="wheel" cx="8" cy="15" r="3" />
+                  <circle class="wheel" cx="25" cy="15" r="3" />
+                </svg>
+              </span>
+            }
+          </span>
+        </li>
+      }
+    </ol>
+  </div>
 </div>

@@ -7,6 +7,8 @@
   --setback-surface: #fbeaea;
 
   display: block;
+  // Wide enough, the players and controls sit beside the track, as on the Chog Life board (DEC-048).
+  container-type: inline-size;
 }
 
 .players {
@@ -150,26 +152,64 @@
 }
 
 // Rows of --columns tiles; each tile is placed by the component so the track winds back and forth.
+// The gap holds the arrow from each tile to the next; TRACK_GAP and FIT_GAP in the model match it.
 .track {
+  --gap: 1.25rem;
+
   display: grid;
   grid-template-columns: repeat(var(--columns, 4), minmax(0, 1fr));
-  gap: 0.375rem;
+  gap: var(--gap);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
   min-width: 0;
   min-height: 4.5rem;
-  padding: 0.25rem 0.375rem;
+  padding: 0.25rem;
   border: 1px solid var(--border);
   border-top-width: 0.3125rem;
   border-radius: 0.5rem;
   background: var(--surface);
+}
+
+// The arrow to the next tile, across the gap, so the winding track reads in order; the image points right. The Finish
+// has no next tile, and no arrow.
+.to-right::after,
+.to-left::after,
+.to-down::after {
+  position: absolute;
+  width: var(--gap);
+  height: var(--gap);
+  background: url('/chog-race/arrow.webp') center / contain no-repeat;
+  content: '';
+}
+
+.to-right::after,
+.to-left::after {
+  top: 50%;
+  translate: 0 -50%;
+}
+
+.to-right::after {
+  left: calc(100% + 1px);
+}
+
+.to-left::after {
+  right: calc(100% + 1px);
+  scale: -1 1;
+}
+
+.to-down::after {
+  top: calc(100% + 1px);
+  left: 50%;
+  translate: -50% 0;
+  rotate: 90deg;
 }
 
 .tile.type-start,
@@ -223,7 +263,7 @@
   font-weight: 600;
 }
 
-// Up to six pawns wrap in rows of three inside the narrowest tile.
+// Up to six cars wrap in rows of two inside the narrowest tile.
 .pawns {
   display: flex;
   flex-wrap: wrap;
@@ -236,8 +276,8 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.125rem;
+  height: 1.125rem;
   border-radius: 50%;
   color: #fff;
   font-size: 0.6875rem;
@@ -262,6 +302,57 @@
   }
 }
 
+// On the track a pawn is a cartoon car in its seat colour, facing the way its row runs, with the driver's photo or seat
+// number on the roof.
+.car {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  width: 1.75rem;
+
+  .pawn {
+    z-index: 1;
+    // Into the roof: a share of the car's width, so it sits the same at every size.
+    margin-bottom: -22%;
+  }
+}
+
+.car-body {
+  width: 100%;
+  height: auto;
+}
+
+.backward .car-body {
+  scale: -1 1;
+}
+
+.shell {
+  fill: currentColor;
+  stroke: #1d1d1f;
+  stroke-width: 1;
+}
+
+.glass {
+  fill: #d6ecff;
+}
+
+.wheel {
+  fill: #1d1d1f;
+  stroke: #9a9a9a;
+  stroke-width: 1.5;
+}
+
+// Each hop of a move being shown lands with a small bounce.
+.car.hopping {
+  animation: hop 180ms ease-out;
+}
+
+@keyframes hop {
+  50% {
+    translate: 0 -0.375rem;
+  }
+}
+
 .pawn.you {
   outline: 2px solid var(--text);
   outline-offset: 1px;
@@ -269,4 +360,71 @@
 
 .pawn.turn {
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus);
+}
+
+// Wide screens: players and controls in a column beside the track, which fills the height left on screen.
+@container (min-width: 1200px) {
+  .race-board {
+    display: grid;
+    grid-template-areas:
+      'side stage'
+      'controls stage';
+    grid-template-rows: auto 1fr;
+    grid-template-columns: 340px minmax(0, 1fr);
+    column-gap: 1.5rem;
+    align-items: start;
+  }
+
+  .side {
+    grid-area: side;
+  }
+
+  .controls {
+    grid-area: controls;
+  }
+
+  .stage {
+    grid-area: stage;
+  }
+
+  .players {
+    display: grid;
+  }
+
+  .players li {
+    flex-wrap: wrap;
+    padding: 0.375rem 0.625rem 0.375rem 0.375rem;
+    border-radius: 0.75rem;
+  }
+
+  .track.fill {
+    --gap: 2.5rem;
+
+    // Rows share the height, but never squeeze a tile's cars out of it.
+    grid-template-rows: repeat(var(--rows, 1), minmax(min-content, 1fr));
+  }
+
+  .track.fill .tile {
+    gap: 0.25rem;
+    padding: 0.5rem 0.625rem;
+  }
+
+  .track.fill .number {
+    font-size: 0.875rem;
+  }
+
+  .track.fill .label {
+    font-size: 0.9375rem;
+    line-height: 1.25rem;
+  }
+
+  .track.fill .car {
+    width: 2.5rem;
+  }
+
+  .track.fill .pawn {
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 0.75rem;
+  }
 }

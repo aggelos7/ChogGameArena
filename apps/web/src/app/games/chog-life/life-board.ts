@@ -89,7 +89,7 @@ function savedView(): BoardView {
   }
 }
 
-function reducedMotion(): boolean {
+export function reducedMotion(): boolean {
   return typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 

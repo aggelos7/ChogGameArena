@@ -874,7 +874,7 @@ describe('Room page', () => {
       expect(element().querySelector('.match')?.textContent).toContain('You’re playing as Mint for this game.');
     });
 
-    it('shows the Chog Race board with all six pawns under the room title once the game has started (STORY-050)', () => {
+    it('shows the Chog Race board with all six pawns, its title beside it, once the game has started (STORY-050)', () => {
       const names = ['Alice', 'Bob', 'Carol', 'Dave', 'Erin', 'Frank'];
       load({
         ...room,
@@ -893,7 +893,9 @@ describe('Room page', () => {
       expect(element().querySelector('h1')?.textContent).toBe('Chog Race room');
       expect(element().querySelector('.match app-turn-timer')).not.toBeNull();
       expect(element().querySelector('[data-list="members"]')).toBeNull();
-      expect(element().querySelector('.game-wide')).toBeNull();
+      expect(element().querySelector('.match')?.classList).toContain('game-wide');
+      expect(element().querySelector('[data-board="race"] .side .game-header h1')).not.toBeNull();
+      expect(element().querySelector('[data-board="race"] .stage app-turn-timer')).not.toBeNull();
       expect(element().querySelector('[data-started]')?.classList).toContain('visually-hidden');
     });
 
