@@ -1,4 +1,6 @@
-<h1>Games</h1>
+<!-- The background logo shows the name; the heading stays for screen readers. -->
+<h1 class="visually-hidden">Chog Game Arena</h1>
+<p class="tagline">Multiplayer board games for the Chog community.</p>
 
 @switch (state().kind) {
   @case ('loading') {
@@ -14,7 +16,7 @@
     } @else if (current.kind === 'loaded') {
       <ul class="game-grid">
         @for (game of current.games; track game.id) {
-          <li class="game-card" [attr.data-game-id]="game.id">
+          <li class="game-card" [attr.data-game-id]="game.id" [style.--picture]="picture(game)">
             <div class="game-card-header">
               <h2 [id]="'game-name-' + game.id">{{ game.name }}</h2>
               <span class="status" [class]="'status status-' + game.status" [id]="'game-status-' + game.id">

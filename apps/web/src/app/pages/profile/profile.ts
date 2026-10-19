@@ -162,6 +162,7 @@ export class ProfilePage implements OnInit {
     request.subscribe({
       next: (profile) => {
         this.profile.set(profile);
+        this.session.updateAvatar(profile.avatar);
         this.photoState.set('idle');
       },
       error: (error: unknown) => {
@@ -179,6 +180,7 @@ export class ProfilePage implements OnInit {
 
   private show(profile: Profile): void {
     this.profile.set(profile);
+    this.session.updateAvatar(profile.avatar);
     this.form.setValue({ displayName: profile.displayName, avatarId: profile.avatar.id });
     this.form.markAsPristine();
   }

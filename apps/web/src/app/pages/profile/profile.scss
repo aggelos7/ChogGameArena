@@ -204,12 +204,12 @@ form {
 .hint {
   margin: 0;
   font-size: 0.875rem;
-  color: #555;
+  color: var(--text-muted);
 }
 
 .field-error {
   margin: 0;
-  color: #8a1c1c;
+  color: var(--danger);
 }
 
 .avatar-options {

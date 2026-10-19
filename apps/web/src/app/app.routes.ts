@@ -8,11 +8,8 @@ export const appRoutes: Route[] = [
     title: 'Chog Game Arena',
     loadComponent: () => import('./pages/home/home').then((m) => m.Home),
   },
-  {
-    path: 'games',
-    title: 'Games · Chog Game Arena',
-    loadComponent: () => import('./pages/games/games').then((m) => m.Games),
-  },
+  // The catalogue lives on the home page; keep old /games links working.
+  { path: 'games', pathMatch: 'full', redirectTo: '' },
   {
     path: 'games/:gameId',
     title: 'Lobby · Chog Game Arena',
@@ -34,9 +31,11 @@ export const appRoutes: Route[] = [
     title: 'My Chogs · Chog Game Arena',
     loadComponent: () => import('./pages/my-chogs/my-chogs').then((m) => m.MyChogsPage),
   },
+  // The leaderboard is called the ladder; keep old links working.
+  { path: 'leaderboard', pathMatch: 'full', redirectTo: 'ladder' },
   {
-    path: 'leaderboard',
-    title: 'Leaderboard · Chog Game Arena',
+    path: 'ladder',
+    title: 'Ladder · Chog Game Arena',
     loadComponent: () => import('./pages/leaderboard/leaderboard').then((m) => m.LeaderboardPage),
   },
   {

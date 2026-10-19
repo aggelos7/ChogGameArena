@@ -295,6 +295,8 @@ describe('Profile page', () => {
       expect(element().querySelector('.photo-pick')?.textContent).toContain('Replace photo');
       expect(element().querySelector('[data-avatar-under-photo]')).not.toBeNull();
       expect(nameInput().value).toBe('Unsaved Name');
+      // The header's avatar follows.
+      expect(session.avatar()?.imageUrl).toBe(imageUrl);
     });
 
     it('removes the photo and shows the built-in avatar again', () => {
@@ -309,6 +311,7 @@ describe('Profile page', () => {
       expect(summaryPhoto()).toBeNull();
       expect(element().querySelector('.summary app-avatar-badge')?.textContent?.trim()).toBe('C');
       expect(removeButton()).toBeNull();
+      expect(session.avatar()?.imageUrl).toBeFalsy();
     });
 
     it('refuses other file types and oversized files without sending them', () => {

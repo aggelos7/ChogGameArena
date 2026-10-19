@@ -15,10 +15,14 @@
           }
         </span>
         @if (standing.result; as result) {
-          <span class="portfolio" [class.negative]="result.portfolio < 0" data-portfolio>{{ result.portfolio }} MON</span>
+          @let change = result.portfolio - result.startingPortfolio;
+          <span class="total">
+            <span class="total-label">Total</span>
+            <span class="portfolio" [class.negative]="result.portfolio < 0" data-portfolio>{{ result.portfolio }} MON</span>
+            <span class="change" [class.gain]="change > 0" [class.loss]="change < 0" data-change>{{ signedMon(change) }}</span>
+          </span>
           <p class="summary" data-summary>
-            Started with {{ result.startingPortfolio }} MON
-            ({{ signedMon(result.portfolio - result.startingPortfolio) }}) ·
+            Started with {{ result.startingPortfolio }} MON ·
             @if (result.place; as place) {
               Reached the finish {{ ordinal(place) }}
             } @else {

@@ -244,14 +244,14 @@ describe('Chog Life illustrated board layout', () => {
     const layout = lifeLayout(tiles);
     const spot = at(tiles);
 
-    expect(tiles.map((_, i) => spot(i).x)).toEqual([54, 138, 222, 306, 306, 222, 138, 54, 54, 138]);
-    expect(tiles.map((_, i) => spot(i).y)).toEqual([44, 44, 44, 44, 124, 124, 124, 124, 204, 204]);
-    expect(layout?.height).toBe(248);
+    expect(tiles.map((_, i) => spot(i).x)).toEqual([58, 154, 250, 346, 346, 250, 154, 58, 58, 154]);
+    expect(tiles.map((_, i) => spot(i).y)).toEqual([52, 52, 52, 52, 148, 148, 148, 148, 244, 244]);
+    expect(layout?.height).toBe(296);
     const road = (from: number) => layout?.roads.find((r) => r.from === from)?.path;
-    expect(road(0)).toBe('M54 44 L138 44');
+    expect(road(0)).toBe('M58 52 L154 52');
     // U-turns bulge out past the side they turn at.
-    expect(road(3)).toBe('M306 44 C354 44 354 124 306 124');
-    expect(road(7)).toBe('M54 124 C6 124 6 204 54 204');
+    expect(road(3)).toBe('M346 52 C394 52 394 148 346 148');
+    expect(road(7)).toBe('M58 148 C10 148 10 244 58 244');
   });
 
   it('splits each fork into its two lanes side by side, which join the main track again', () => {
@@ -259,20 +259,20 @@ describe('Chog Life illustrated board layout', () => {
     const spot = at(FORK_BOARD.tiles);
 
     expect([spot(2), spot(3), spot(4)]).toEqual([
-      { x: 222, y: 44 },
-      { x: 110, y: 132 },
-      { x: 110, y: 204 },
+      { x: 250, y: 52 },
+      { x: 130, y: 156 },
+      { x: 130, y: 248 },
     ]);
-    expect([spot(5), spot(6), spot(7)].map((s) => s.x)).toEqual([250, 250, 250]);
-    expect([spot(5), spot(6), spot(7)].map((s) => s.y)).toEqual([132, 204, 276]);
+    expect([spot(5), spot(6), spot(7)].map((s) => s.x)).toEqual([274, 274, 274]);
+    expect([spot(5), spot(6), spot(7)].map((s) => s.y)).toEqual([156, 248, 340]);
     // After the fork the track starts a new row, still going the same way.
     expect([spot(8), spot(9)]).toEqual([
-      { x: 54, y: 356 },
-      { x: 138, y: 356 },
+      { x: 58, y: 436 },
+      { x: 154, y: 436 },
     ]);
     expect(layout?.laneNames).toEqual([
-      { route: 'Safe', x: 110, y: 88 },
-      { route: 'Degen', x: 250, y: 88 },
+      { route: 'Safe', x: 130, y: 104 },
+      { route: 'Degen', x: 274, y: 104 },
     ]);
     expect(layout?.roads.map((r) => `${r.from}-${r.to} ${r.lane}`)).toEqual([
       '0-1 Main',
@@ -286,22 +286,54 @@ describe('Chog Life illustrated board layout', () => {
       '7-8 Degen',
       '8-9 Main',
     ]);
-    expect(layout?.roads.find((r) => r.from === 2 && r.to === 5)?.path).toBe('M222 44 C222 88 250 88 250 132');
-    expect(layout?.roads.find((r) => r.from === 3)?.path).toBe('M110 132 L110 204');
+    expect(layout?.roads.find((r) => r.from === 2 && r.to === 5)?.path).toBe('M250 52 C250 104 274 104 274 156');
+    expect(layout?.roads.find((r) => r.from === 3)?.path).toBe('M130 156 L130 248');
   });
 
-  it('turns the board on its side for wide screens, with each fork’s lane names between its lanes', () => {
+  it('turns the board on its side for wide screens, folding each lane in two, with the lane names between the lanes', () => {
     const tall = lifeLayout(FORK_BOARD.tiles);
     const wide = lifeLayout(FORK_BOARD.tiles, 'horizontal');
 
-    expect([wide?.width, wide?.height]).toEqual([tall?.height, tall?.width]);
-    expect(wide?.spots.map((s) => [s.x, s.y])).toEqual(tall?.spots.map((s) => [s.y, s.x]));
-    expect(wide?.roads.find((r) => r.from === 2 && r.to === 5)?.path).toBe('M44 222 C88 222 88 250 132 250');
-    // Safe runs above Degen; their names sit by each lane's first tile, between the two lanes.
-    expect(wide?.laneNames).toEqual([
-      { route: 'Safe', x: 132, y: 151 },
-      { route: 'Degen', x: 132, y: 216 },
+    // The main track runs as on the tall board, turned; each lane's tiles alternate between two rows, top then bottom.
+    expect(wide?.width).toBe(388);
+    expect(wide?.height).toBe(tall?.width);
+    expect(wide?.spots.map((s) => [s.tile.index, s.x, s.y])).toEqual([
+      [0, 52, 58],
+      [1, 52, 154],
+      [2, 52, 250],
+      [3, 148, 50],
+      [4, 148, 142],
+      [5, 148, 262],
+      [6, 148, 354],
+      [7, 240, 262],
+      [8, 336, 58],
+      [9, 336, 154],
     ]);
+    const road = (from: number, to: number) => wide?.roads.find((r) => r.from === from && r.to === to)?.path;
+    expect(road(2, 5)).toBe('M52 250 C100 250 100 262 148 262');
+    // Down from the top half of a lane to the bottom one, then an S-bend on to the next column's top.
+    expect(road(5, 6)).toBe('M148 262 L148 354');
+    expect(road(6, 7)).toBe('M148 354 C194 354 194 262 240 262');
+    // Safe runs above Degen; their names sit by each lane's first tiles, between the two lanes.
+    expect(wide?.laneNames.map((name) => [name.route, name.x, Math.round(name.y)])).toEqual([
+      ['Safe', 148, 191],
+      ['Degen', 148, 220],
+    ]);
+  });
+
+  it('keeps the tiles of the folded lanes apart at every column count', () => {
+    for (let columns = 4; columns <= 9; columns++) {
+      const layout = lifeLayout(FULL_TILES, 'horizontal', columns);
+      const spots = layout?.spots ?? [];
+      expect(spots).toHaveLength(FULL_TILES.length);
+      for (const a of spots) {
+        expect(a.y - SPOT_HEIGHT / 2).toBeGreaterThanOrEqual(0);
+        expect(a.y + SPOT_HEIGHT / 2).toBeLessThanOrEqual(layout?.height ?? 0);
+        for (const b of spots.filter((other) => other !== a)) {
+          expect(Math.abs(a.x - b.x) >= SPOT_WIDTH || Math.abs(a.y - b.y) >= SPOT_HEIGHT).toBe(true);
+        }
+      }
+    }
   });
 
   it('fits the whole 36-tile board without tiles overlapping or leaving the board', () => {
@@ -324,18 +356,18 @@ describe('Chog Life illustrated board layout', () => {
     const across = (columns: number) => lifeLayout(FULL_TILES, 'horizontal', columns);
     // Eight tiles to a column on the whole board, still without overlaps, and the lanes spread further apart.
     const eight = across(8);
-    expect(eight?.height).toBe(696);
+    expect(eight?.height).toBe(788);
     const spots = eight?.spots ?? [];
     for (const a of spots) {
       for (const b of spots.filter((other) => other !== a)) {
         expect(Math.abs(a.x - b.x) >= SPOT_WIDTH || Math.abs(a.y - b.y) >= SPOT_HEIGHT).toBe(true);
       }
     }
-    expect(new Set(spots.filter((s) => s.tile.lane !== 'Main').map((s) => s.y))).toEqual(new Set([201, 495]));
+    expect(new Set(spots.filter((s) => s.tile.lane !== 'Main').map((s) => s.y))).toEqual(new Set([180, 272, 516, 608]));
 
     // A wide, low space keeps four to a column; a full-height space beside the players takes more.
     expect(fittedLayout(FULL_TILES, 1044, 380)).toEqual(across(4));
-    expect(fittedLayout(FULL_TILES, 1044, 804)).toEqual(across(8));
+    expect(fittedLayout(FULL_TILES, 1044, 804)).toEqual(across(7));
     // A wider space fills its height too, rather than keeping four to a column for bigger tiles.
     const filled = fittedLayout(FULL_TILES, 1304, 730);
     const scale = Math.min(1304 / (filled?.width ?? 1), 730 / (filled?.height ?? 1));
@@ -353,13 +385,16 @@ describe('Chog Life illustrated board layout', () => {
   it('spreads up to six pawns along the top and bottom edges of their tile', () => {
     const offsets = (count: number) => Array.from({ length: count }, (_, i) => pawnOffset(i, count));
 
-    expect(offsets(1)).toEqual([{ x: 0, y: -27 }]);
+    expect(offsets(1)).toEqual([{ x: 0, y: -SPOT_HEIGHT / 2 }]);
     expect(offsets(2)).toEqual([
-      { x: -12, y: -27 },
-      { x: 12, y: -27 },
+      { x: -12, y: -SPOT_HEIGHT / 2 },
+      { x: 12, y: -SPOT_HEIGHT / 2 },
     ]);
-    expect(offsets(4).map((o) => `${o.x},${o.y}`)).toEqual(['-20,-27', '0,-27', '20,-27', '0,27']);
-    expect(offsets(6).map((o) => `${o.x},${o.y}`)).toEqual(['-20,-27', '0,-27', '20,-27', '-20,27', '0,27', '20,27']);
+    // The edges are half a tile's height above and below its centre.
+    expect(SPOT_HEIGHT / 2).toBeCloseTo(35.1);
+    const at = (o: { x: number; y: number }) => `${o.x},${Math.sign(o.y)}`;
+    expect(offsets(4).map(at)).toEqual(['-20,-1', '0,-1', '20,-1', '0,1']);
+    expect(offsets(6).map(at)).toEqual(['-20,-1', '0,-1', '20,-1', '-20,1', '0,1', '20,1']);
   });
 });
 
@@ -926,11 +961,11 @@ describe('Chog Life board', () => {
       fixture.detectChanges();
       const viewBox = () => page.querySelector('[data-drawing]')?.getAttribute('viewBox');
 
-      expect(viewBox()).toBe('0 0 400 360');
+      expect(viewBox()).toBe('0 0 388 404');
       width = WIDE_BOARD - 1;
       observers.forEach((callback) => callback([{ contentRect: { width } }]));
       fixture.detectChanges();
-      expect(viewBox()).toBe('0 0 360 400');
+      expect(viewBox()).toBe('0 0 404 488');
     });
 
     it('beside the players, fills the height left on screen with the board', () => {

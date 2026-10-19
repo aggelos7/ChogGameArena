@@ -4,19 +4,19 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { GameSummary } from '../../games/game-catalog';
 import { CATALOGUE } from '../../testing';
-import { Games } from './games';
+import { Home } from './home';
 
-describe('Games page', () => {
-  let fixture: ComponentFixture<Games>;
+describe('Home page', () => {
+  let fixture: ComponentFixture<Home>;
   let http: HttpTestingController;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [Games],
+      imports: [Home],
       providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
     });
     http = TestBed.inject(HttpTestingController);
-    fixture = TestBed.createComponent(Games);
+    fixture = TestBed.createComponent(Home);
     fixture.detectChanges();
   });
 
@@ -48,6 +48,14 @@ describe('Games page', () => {
     expect(card('chog-life').querySelector('.status')?.textContent?.trim()).toBe('Available');
     expect(card('chog-race').querySelector('.status')?.textContent?.trim()).toBe('Coming soon');
     expect(card('chog-fix').querySelector('.status')?.textContent?.trim()).toBe('Under maintenance');
+  });
+
+  it('shows each game’s picture behind its card, and none for a game without one', () => {
+    respond(CATALOGUE);
+
+    expect(card('chog-life').style.getPropertyValue('--picture')).toBe("url('/chog-life/background.webp')");
+    expect(card('chog-race').style.getPropertyValue('--picture')).toBe("url('/chog-race/background.webp')");
+    expect(card('chog-fix').style.getPropertyValue('--picture')).toBe('');
   });
 
   it('lets only available games be launched', () => {

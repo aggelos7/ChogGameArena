@@ -3,7 +3,18 @@
   <div class="header-top">
     <a class="brand" routerLink="/">Chog Game Arena</a>
     @if (session.player(); as player) {
-      <p class="player">Playing as <strong>{{ player.displayName }}</strong></p>
+      <a
+        class="player"
+        routerLink="/profile"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        [attr.aria-label]="'Your profile: ' + player.displayName"
+      >
+        @if (session.avatar(); as avatar) {
+          <app-avatar-badge [avatar]="avatar" [name]="player.displayName" [size]="1.75" />
+        }
+        <strong>{{ player.displayName }}</strong>
+      </a>
     } @else if (session.status() === 'error') {
       <p class="player player-error" role="status">
         Guest sign-in unavailable
@@ -22,10 +33,8 @@
           >Home</a
         >
       </li>
-      <li><a routerLink="/games" routerLinkActive="active" ariaCurrentWhenActive="page">Games</a></li>
       <li><a routerLink="/chogs" routerLinkActive="active" ariaCurrentWhenActive="page">My Chogs</a></li>
-      <li><a routerLink="/leaderboard" routerLinkActive="active" ariaCurrentWhenActive="page">Leaderboard</a></li>
-      <li><a routerLink="/profile" routerLinkActive="active" ariaCurrentWhenActive="page">Profile</a></li>
+      <li><a routerLink="/ladder" routerLinkActive="active" ariaCurrentWhenActive="page">Ladder</a></li>
     </ul>
   </nav>
   @if (navigation.navigating()) {

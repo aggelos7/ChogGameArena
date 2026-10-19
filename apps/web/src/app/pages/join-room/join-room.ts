@@ -19,7 +19,7 @@ import { LoadingState } from '../../shared/ui/state-views';
           <a [routerLink]="['/rooms', failure.roomCode]">Open room {{ failure.roomCode }}</a>
         }
       </div>
-      <a class="back" routerLink="/games">Back to games</a>
+      <a class="back" routerLink="/">Back to games</a>
     } @else {
       <app-loading-state message="Joining room…" />
     }

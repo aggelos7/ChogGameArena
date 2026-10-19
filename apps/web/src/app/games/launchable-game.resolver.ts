@@ -5,12 +5,12 @@ import { GameCatalog, GameSummary } from './game-catalog';
 
 /**
  * Resolves the game for `/games/:gameId` only when the server reports it as Available.
- * Unknown, Coming Soon or Maintenance games, and catalogue errors, redirect to `/games`,
+ * Unknown, Coming Soon or Maintenance games, and catalogue errors, redirect to the home page catalogue,
  * so a disabled game cannot be launched by typing its URL.
  */
 export const launchableGameResolver: ResolveFn<GameSummary> = (route) => {
   const router = inject(Router);
-  const backToCatalogue = new RedirectCommand(router.parseUrl('/games'));
+  const backToCatalogue = new RedirectCommand(router.parseUrl('/'));
   const gameId = route.paramMap.get('gameId');
 
   return inject(GameCatalog)
