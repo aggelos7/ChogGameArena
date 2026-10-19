@@ -1,3 +1,4 @@
+using ChogGames.Api.Legal;
 using ChogGames.Api.Rooms;
 using ChogGames.Api.Wallet;
 using ChogGames.Infrastructure.Configuration;
@@ -36,6 +37,7 @@ internal static class StartupValidation
             .AddInfrastructure(configuration)
             .AddWalletChain(configuration)
             .AddRooms(configuration)
+            .AddLegal(configuration)
             .BuildServiceProvider();
 
         provider.GetRequiredService<IStartupValidator>().Validate();

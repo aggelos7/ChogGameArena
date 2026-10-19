@@ -216,6 +216,11 @@ public sealed class LeaderboardTests(MigratedPostgresDatabase database) : IClass
             using var png = surface.Snapshot().Encode(SKEncodedImageFormat.Png, 100);
             var photo = new ByteArrayContent(png.ToArray());
             photo.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            using (var accepted = await alice.PostAsJsonAsync("/api/profile/terms", new { version = ChogGames.Core.Players.TermsOfUse.CurrentVersion }))
+            {
+                Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            }
+
             using (var uploaded = await alice.PutAsync("/api/profile/avatar-image", photo))
             {
                 Assert.Equal(HttpStatusCode.OK, uploaded.StatusCode);
@@ -230,6 +235,15 @@ public sealed class LeaderboardTests(MigratedPostgresDatabase database) : IClass
             using var seen = await bob.GetAsync(url);
             Assert.Equal(HttpStatusCode.OK, seen.StatusCode);
             Assert.Equal("image/webp", seen.Content.Headers.ContentType!.MediaType);
+
+            // Hidden by reports (DEC-070): only its owner still sees it on the board.
+            await using (var db = database.CreateDbContext())
+            {
+                await db.Database.ExecuteSqlRawAsync("UPDATE \"AvatarImages\" SET \"HiddenAt\" = \"CreatedAt\"");
+            }
+
+            Assert.Null((await BoardAsync(bob)).Entries[0].Avatar.ImageUrl);
+            Assert.Equal(url, (await BoardAsync(alice)).Entries[0].Avatar.ImageUrl);
         }
     }
 

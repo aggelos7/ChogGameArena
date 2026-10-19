@@ -37,6 +37,7 @@ import {
   tileLabel,
   timeLeft,
 } from './life-board-model';
+import { ReportPhoto } from '../../moderation/report-photo';
 
 /** A pawn as drawn: its seat, colour and the player it belongs to. */
 interface DrawnPawn {
@@ -118,7 +119,7 @@ export function reducedMotion(): boolean {
  */
 @Component({
   selector: 'app-life-board',
-  imports: [LifeDrawing, NgTemplateOutlet],
+  imports: [LifeDrawing, NgTemplateOutlet, ReportPhoto],
   templateUrl: './life-board.html',
   styleUrl: './life-board.scss',
 })

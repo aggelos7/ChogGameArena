@@ -88,6 +88,17 @@ describe('Ladder page', () => {
     expect(alice.querySelector('app-avatar-badge')?.textContent?.trim()).toBe('');
     expect(bob.querySelector('app-avatar-badge img')).toBeNull();
     expect(bob.querySelector('app-avatar-badge')?.textContent?.trim()).toBe('B');
+    // Another player's photo can be reported (DEC-070); a place without one can't.
+    expect(alice.querySelector('app-report-photo [data-report]')?.getAttribute('aria-label')).toBe('Report Alice’s photo');
+    expect(bob.querySelector('app-report-photo')).toBeNull();
+  });
+
+  it('offers no report of your own photo', () => {
+    const photo = { ...avatar, imageUrl: '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10' };
+    load({ ...board, entries: [{ ...entry(1, 'Alice', 40, 2), avatar: photo, isYou: true }] });
+
+    expect(places()[0].querySelector('app-avatar-badge img')).not.toBeNull();
+    expect(places()[0].querySelector('app-report-photo')).toBeNull();
   });
 
   it('offers a board per catalog game besides all games, and all-time or this season', () => {

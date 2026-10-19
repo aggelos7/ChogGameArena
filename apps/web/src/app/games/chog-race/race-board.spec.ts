@@ -283,6 +283,11 @@ describe('Chog Race board', () => {
     const legend = Array.from(page.querySelectorAll<HTMLElement>('[data-list="pawns"] [data-seat] .pawn'));
     expect(legend.map((p) => p.querySelector('img')?.getAttribute('src') ?? p.textContent?.trim())).toEqual([photo, '2']);
     expect(tile(0).getAttribute('aria-label')).toBe('Tile 0, Start, Alice, Bob (you)');
+    // Another player's photo can be reported (DEC-070); a pawn without one, or your own, can't.
+    const reports = Array.from(page.querySelectorAll<HTMLElement>('[data-list="pawns"] [data-seat]')).map(
+      (li) => li.querySelector('app-report-photo [data-report]')?.getAttribute('aria-label') ?? null,
+    );
+    expect(reports).toEqual(['Report Alice’s photo', null]);
     // The pawns are the players' pictures in a match; no avatar badge beside them.
     expect(page.querySelector('app-avatar-badge')).toBeNull();
   });

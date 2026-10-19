@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ChogGames.Core.Players;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using SkiaSharp;
@@ -56,11 +57,14 @@ public sealed class AvatarImageTests(MigratedPostgresDatabase database) : IClass
         return factory;
     }
 
+    /// <summary>A guest who accepted the terms, as uploading needs (DEC-070); <see cref="TermsTests"/> covers refusals.</summary>
     private async Task<HttpClient> GuestAsync(string displayName, ApiFactory? factory = null)
     {
         var client = (factory ?? _factory).CreateHttpsClient();
         using var response = await client.PostAsJsonAsync("/api/guest-sessions", new { displayName });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var accepted = await client.PostAsJsonAsync("/api/profile/terms", new { version = TermsOfUse.CurrentVersion });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         return client;
     }
 

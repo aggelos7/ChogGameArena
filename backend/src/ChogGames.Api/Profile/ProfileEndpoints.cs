@@ -3,6 +3,7 @@ using ChogGames.Core.Achievements;
 using ChogGames.Core.Collectors;
 using ChogGames.Core.Players;
 using ChogGames.Infrastructure.Achievements;
+using ChogGames.Infrastructure.Moderation;
 using ChogGames.Infrastructure.Persistence;
 using ChogGames.Infrastructure.Progression;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -37,14 +38,36 @@ public static class ProfileEndpoints
 
     /// <param name="Xp">All the XP the player has earned (STORY-059, DEC-064).</param>
     /// <param name="Collector">The player's collector tier and progress (STORY-060, DEC-065).</param>
+    /// <param name="TermsAccepted">Whether the player accepted the current terms, which uploading a photo needs (DEC-070).</param>
+    /// <param name="AvatarUnderReview">Whether reports hid the player's photo from others until an operator reviews it (DEC-070).</param>
+    /// <param name="Operator">Whether the player reviews photo reports (DEC-070).</param>
     public sealed record ProfileResponse(
-        Guid PlayerId, string DisplayName, string Kind, AvatarResponse Avatar, int GamesPlayed, int Wins, int Xp, CollectorResponse Collector);
+        Guid PlayerId,
+        string DisplayName,
+        string Kind,
+        AvatarResponse Avatar,
+        int GamesPlayed,
+        int Wins,
+        int Xp,
+        CollectorResponse Collector,
+        bool TermsAccepted,
+        bool AvatarUnderReview,
+        bool Operator);
 
     /// <summary>
     /// One achievement of the catalog (STORY-058, DEC-063): how far the player is towards its target, and when it was
     /// unlocked (null while locked). An unlocked achievement shows its target as its progress.
     /// </summary>
     public sealed record AchievementResponse(string Id, string Name, string Description, int Progress, int Target, DateTimeOffset? UnlockedAt);
+
+    /// <param name="Version">The terms version the player was shown and accepts.</param>
+    public sealed record AcceptTermsRequest(string? Version);
+
+    /// <summary>Stable error codes; clients rely on these, never on the message text.</summary>
+    public static class ErrorCodes
+    {
+        public const string TermsOutdated = "terms_outdated";
+    }
 
     /// <summary>Only these fields are editable; anything else in the body (ids, counters) is ignored.</summary>
     public sealed record UpdateProfileRequest(string? DisplayName, string? AvatarId);
@@ -56,23 +79,56 @@ public static class ProfileEndpoints
         profile.MapGet("", GetProfileAsync).WithName("GetProfile");
         profile.MapPatch("", UpdateProfileAsync).WithName("UpdateProfile");
         profile.MapGet("/achievements", GetAchievementsAsync).WithName("GetAchievements");
+        profile.MapPost("/terms", AcceptTermsAsync).WithName("AcceptTerms");
         profile.MapGet("/avatars", () => TypedResults.Ok(DefaultAvatar.All.Select(a => ToResponse(a)).ToArray())).WithName("GetAvatars");
 
         return endpoints;
     }
 
     private static async Task<Results<Ok<ProfileResponse>, NotFound>> GetProfileAsync(
-        ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
+        ClaimsPrincipal user, ChogGamesDbContext db, ModerationOperators operators, CancellationToken cancellationToken)
     {
         var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
-        return player is null ? TypedResults.NotFound() : TypedResults.Ok(await ToResponseAsync(player, db, cancellationToken));
+        return player is null ? TypedResults.NotFound() : TypedResults.Ok(await ToResponseAsync(player, db, operators, cancellationToken));
     }
 
     /// <summary>The profile of <paramref name="playerId"/> as stored now, read untracked; null for an unknown player.</summary>
-    internal static async Task<ProfileResponse?> FindProfileAsync(Guid playerId, ChogGamesDbContext db, CancellationToken cancellationToken) =>
+    internal static async Task<ProfileResponse?> FindProfileAsync(
+        Guid playerId, ChogGamesDbContext db, ModerationOperators operators, CancellationToken cancellationToken) =>
         await db.Players.AsNoTracking().SingleOrDefaultAsync(p => p.Id == playerId, cancellationToken) is { } player
-            ? await ToResponseAsync(player, db, cancellationToken)
+            ? await ToResponseAsync(player, db, operators, cancellationToken)
             : null;
+
+    /// <summary>
+    /// The caller accepts the current terms of use (STORY-069, DEC-070), naming the version they were shown, so a player
+    /// never accepts terms they didn't see. Accepting again changes nothing.
+    /// </summary>
+    private static async Task<Results<Ok<ProfileResponse>, ProblemHttpResult, NotFound>> AcceptTermsAsync(
+        AcceptTermsRequest? request,
+        ClaimsPrincipal user,
+        ChogGamesDbContext db,
+        ModerationOperators operators,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken)
+    {
+        if (request?.Version != TermsOfUse.CurrentVersion)
+        {
+            return TypedResults.Problem(
+                $"The terms have changed; read and accept version {TermsOfUse.CurrentVersion}.",
+                statusCode: StatusCodes.Status409Conflict,
+                extensions: new Dictionary<string, object?> { ["code"] = ErrorCodes.TermsOutdated });
+        }
+
+        var player = await FindCurrentPlayerAsync(user, db, cancellationToken);
+        if (player is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        player.AcceptTerms(timeProvider.GetUtcNow());
+        await db.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(await ToResponseAsync(player, db, operators, cancellationToken));
+    }
 
     /// <summary>Every achievement of the catalog, in its order, for the caller only.</summary>
     private static async Task<Results<Ok<AchievementResponse[]>, NotFound>> GetAchievementsAsync(
@@ -97,7 +153,7 @@ public static class ProfileEndpoints
     }
 
     private static async Task<Results<Ok<ProfileResponse>, ValidationProblem, NotFound>> UpdateProfileAsync(
-        UpdateProfileRequest? request, ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
+        UpdateProfileRequest? request, ClaimsPrincipal user, ChogGamesDbContext db, ModerationOperators operators, CancellationToken cancellationToken)
     {
         var errors = new Dictionary<string, string[]>();
         PlayerDisplayName? displayName = null;
@@ -141,7 +197,7 @@ public static class ProfileEndpoints
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        return TypedResults.Ok(await ToResponseAsync(player, db, cancellationToken));
+        return TypedResults.Ok(await ToResponseAsync(player, db, operators, cancellationToken));
     }
 
     private static Task<Player?> FindCurrentPlayerAsync(ClaimsPrincipal user, ChogGamesDbContext db, CancellationToken cancellationToken)
@@ -150,9 +206,12 @@ public static class ProfileEndpoints
         return db.Players.SingleOrDefaultAsync(p => p.Id == playerId, cancellationToken);
     }
 
-    private static async Task<ProfileResponse> ToResponseAsync(Player player, ChogGamesDbContext db, CancellationToken cancellationToken)
+    private static async Task<ProfileResponse> ToResponseAsync(
+        Player player, ChogGamesDbContext db, ModerationOperators operators, CancellationToken cancellationToken)
     {
         var xp = await db.TotalXpAsync(player.Id, cancellationToken);
+        var underReview = player.AvatarImageId is { } imageId
+            && await db.AvatarImages.AsNoTracking().AnyAsync(i => i.Id == imageId && i.HiddenAt != null, cancellationToken);
         return new ProfileResponse(
             player.Id,
             player.DisplayName,
@@ -165,7 +224,10 @@ public static class ProfileEndpoints
                 player.ChogsHeld,
                 CollectorBadgeOf(player.ChogsHeld),
                 CollectorTier.NextAfter(player.ChogsHeld) is { } next ? ToMilestone(next) : null,
-                [.. CollectorTier.All.Select(ToMilestone)]));
+                [.. CollectorTier.All.Select(ToMilestone)]),
+            player.HasAcceptedCurrentTerms,
+            underReview,
+            operators.Includes(player));
     }
 
     private static CollectorMilestoneResponse ToMilestone(CollectorTier tier) => new(tier.Id, tier.Name, tier.MinChogs);

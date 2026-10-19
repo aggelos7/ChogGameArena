@@ -84,6 +84,16 @@ describe('App shell', () => {
       expect(element.querySelector('main router-outlet')).not.toBeNull();
     });
 
+    it('links the terms of use and privacy notice from the footer of every page', async () => {
+      const { element } = await render();
+
+      const links = Array.from(element.querySelectorAll('footer nav[aria-label="Legal"] a'));
+      expect(links.map((a) => [a.getAttribute('href'), a.textContent?.trim()])).toEqual([
+        ['/terms', 'Terms of use'],
+        ['/privacy', 'Privacy'],
+      ]);
+    });
+
     it('shows the player’s avatar and name, leading to their profile, once the session is ready', async () => {
       session.player.set({ playerId: 'x', displayName: 'Chog 4821', kind: 'Guest', walletAddress: null });
       session.status.set('ready');

@@ -1,7 +1,7 @@
 # Release checklist (staging)
 
 Every release passes this checklist on **staging** before it reaches production (STORY-049, DEC-053). The first
-pass, before the public launch, covers every section. A later release runs sections 1–3 and 9–10, plus every manual
+pass, before the public launch, covers every section. A later release runs sections 1–3 and 12–13, plus every manual
 section its changes touch, and the full list at least once a quarter. Record the result in the release record at the
 end. A release with a failed or skipped item doesn't go to production unless the release record says why.
 
@@ -21,6 +21,7 @@ Staging `.env` differs from production's only in these values:
 | `CHOG_RACE_STATUS` | `Available` | `CHOG_RACE_STATUS=Available`: the smoke test plays Chog Race beside Chog Life (DEC-061) |
 | `COMPOSE_PROFILES` | `letsencrypt` | Backups off, or `letsencrypt,backup` with a separate bucket and key |
 | `IMAGE_TAG` | the release being tested | So the previous release stays on the VM for the rollback drill |
+| `MODERATION_OPERATOR_WALLETS` | the testers' operator wallet | So section 11 can review reports; production lists its real operators |
 
 `MONAD_RPC_URL` stays on Monad mainnet, as in production, so NFT ownership is real. Testers need a browser wallet
 holding at least one Chog, and a second wallet with none.
@@ -35,7 +36,7 @@ stack only, and **never against production**: it would add made-up players and r
 - [ ] The release has a tag (`IMAGE_TAG=<release>`, for example the git tag) and the previous release's tag (N-1) is
       known. Its images are still on the staging VM (`docker image ls chog-game-arena/api`).
 - [ ] Schema changes since N-1: `git diff --stat <N-1>..<release> -- backend/src/ChogGames.Infrastructure/Persistence/Migrations`.
-      If any, the release notes say whether N-1 still runs on the new schema (see [Rollback](#11-rollback)).
+      If any, the release notes say whether N-1 still runs on the new schema (see [Rollback](#12-rollback)).
 
 ## 3. Deploy to staging and run the smoke tests
 
@@ -139,7 +140,23 @@ what is Chog Race's own.
 - [ ] At the end the Results panel shows every player's place, tile and card stats, and each profile's
       `Games played` counts it with the Chog Life games.
 
-## 11. Rollback
+## 11. Terms and photo reports
+
+Uploaded photos need terms, reports and a review before the public launch (DEC-069, DEC-070).
+
+- [ ] Every page's footer links Terms of use and Privacy; both show the contact address from
+      `LEGAL_CONTACT_EMAIL` (production's must be set before the launch), and the product owner has approved their
+      text.
+- [ ] A new guest can't upload a photo until they tick the terms on their profile; afterwards the upload works.
+- [ ] On a board's player list or the Ladder, another player's photo has a Report button with five reasons and no
+      text box; your own photo has none. Reporting twice says you already reported it.
+- [ ] After three different players report a photo, the others see the built-in avatar instead, and its owner sees
+      "Under review" on their profile with the photo still shown to them.
+- [ ] Signed in with the operator wallet, the profile links to Reported photos, which lists it with its counts.
+      Dismiss shows it to everyone again; Remove (on another reported photo) gives its owner the built-in avatar.
+- [ ] A player who isn't an operator opening `/moderation` sees "There's nothing here."
+
+## 12. Rollback
 
 The drill proves the release can be undone on staging before production depends on it.
 
@@ -158,13 +175,13 @@ IMAGE_TAG=<release> $C up -d --wait      # forward again
       ([Restoring](deployment.md#restoring)). Take that backup in production right before the deploy:
       `$C run --rm backup now`.
 
-## 12. Release record
+## 13. Release record
 
 Copy this table into the release's PR or notes:
 
 | Release | Staging deployed | `release:verify` | Manual sections passed | Rollback drill | Tester | Date |
 |---|---|---|---|---|---|---|
-| `<release>` | ✅/❌ | ✅/❌ | 4 5 6 7 8 9 | ✅/❌ (to `<N-1>`) | | |
+| `<release>` | ✅/❌ | ✅/❌ | 4 5 6 7 8 9 10 11 | ✅/❌ (to `<N-1>`) | | |
 
 Then deploy the same tag to production ([docs/deployment.md](deployment.md#restarts-and-upgrades)) and check
 `https://<PUBLIC_HOSTNAME>/api/health/ready`.

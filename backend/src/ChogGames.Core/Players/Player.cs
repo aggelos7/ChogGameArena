@@ -49,6 +49,15 @@ public sealed class Player
     /// </summary>
     public int ChogsHeld { get; private set; }
 
+    /// <summary>The <see cref="TermsOfUse"/> version the player last accepted (STORY-069, DEC-070); null if never.</summary>
+    public string? TermsVersion { get; private set; }
+
+    /// <summary>When the player accepted <see cref="TermsVersion"/>; null if never.</summary>
+    public DateTimeOffset? TermsAcceptedAt { get; private set; }
+
+    /// <summary>Whether the player accepted the current terms, which uploading a photo needs.</summary>
+    public bool HasAcceptedCurrentTerms => TermsVersion == TermsOfUse.CurrentVersion;
+
     private Player()
     {
     }
@@ -95,6 +104,18 @@ public sealed class Player
 
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         ChogsHeld = count;
+    }
+
+    /// <summary>Records that the player accepted the current terms; accepting them again keeps the first time.</summary>
+    public void AcceptTerms(DateTimeOffset now)
+    {
+        if (HasAcceptedCurrentTerms)
+        {
+            return;
+        }
+
+        TermsVersion = TermsOfUse.CurrentVersion;
+        TermsAcceptedAt = now;
     }
 
     public void Rename(PlayerDisplayName displayName) => DisplayName = displayName.Value;

@@ -14,8 +14,11 @@ internal sealed class AvatarImageConfiguration : IEntityTypeConfiguration<Avatar
 
     public void Configure(EntityTypeBuilder<AvatarImage> builder)
     {
-        builder.ToTable("AvatarImages", t => t.HasCheckConstraint(
-            "CK_AvatarImages_Data", $"octet_length(\"Data\") BETWEEN 1 AND {MaxStoredBytes}"));
+        builder.ToTable("AvatarImages", t =>
+        {
+            t.HasCheckConstraint("CK_AvatarImages_Data", $"octet_length(\"Data\") BETWEEN 1 AND {MaxStoredBytes}");
+            t.HasCheckConstraint("CK_AvatarImages_HiddenAfterCreated", "\"HiddenAt\" IS NULL OR \"HiddenAt\" >= \"CreatedAt\"");
+        });
         builder.HasKey(i => i.Id);
         builder.Property(i => i.Id).ValueGeneratedNever();
         builder.Property(i => i.Data).IsRequired();
