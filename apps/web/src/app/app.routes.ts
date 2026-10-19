@@ -43,6 +43,22 @@ export const appRoutes: Route[] = [
     title: 'Profile · Chog Game Arena',
     loadComponent: () => import('./pages/profile/profile').then((m) => m.ProfilePage),
   },
+  {
+    path: 'terms',
+    title: 'Terms of use · Chog Game Arena',
+    loadComponent: () => import('./pages/legal/terms').then((m) => m.TermsPage),
+  },
+  {
+    path: 'privacy',
+    title: 'Privacy · Chog Game Arena',
+    loadComponent: () => import('./pages/legal/privacy').then((m) => m.PrivacyPage),
+  },
+  // Operators only; the API answers everyone else as if it didn't exist.
+  {
+    path: 'moderation',
+    title: 'Reported photos · Chog Game Arena',
+    loadComponent: () => import('./pages/moderation/moderation').then((m) => m.ModerationPage),
+  },
   // Unknown URLs fall back to the home page instead of rendering an empty shell.
   { path: '**', redirectTo: '' },
 ];

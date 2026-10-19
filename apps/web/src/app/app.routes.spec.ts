@@ -59,6 +59,19 @@ describe('app routes', () => {
     expect(TestBed.inject(Title).getTitle()).toBe('My Chogs · Chog Game Arena');
   });
 
+  it.each([
+    ['/terms', 'Terms of use'],
+    ['/privacy', 'Privacy'],
+    ['/moderation', 'Reported photos'],
+  ])('renders %s', async (path, title) => {
+    await harness.navigateByUrl(path);
+    http.match(() => true); // the pages' own requests are covered by their specs
+
+    expect(url()).toBe(path);
+    expect(heading()).toBe(title);
+    expect(TestBed.inject(Title).getTitle()).toBe(`${title} · Chog Game Arena`);
+  });
+
   it.each(['/ladder', '/leaderboard'])('renders the ladder at %s', async (path) => {
     await harness.navigateByUrl(path);
     http.match(() => true); // the ladder's own requests are covered by its spec

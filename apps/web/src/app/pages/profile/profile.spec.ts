@@ -4,6 +4,7 @@ import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { PlayerSession } from '../../identity/player-session';
+import { TERMS_VERSION } from '../../legal/legal-api';
 import { Achievement, Avatar, Profile } from '../../profile/profile-api';
 import { WalletPanel } from '../../wallet/wallet-panel';
 import { ProfilePage } from './profile';
@@ -32,6 +33,9 @@ describe('Profile page', () => {
     wins: 2,
     xp: 70,
     collector: { chogsHeld: 0, badge: null, next: tiers[0], tiers },
+    termsAccepted: true,
+    avatarUnderReview: false,
+    operator: false,
   };
 
   const achievements: Achievement[] = [
@@ -349,6 +353,77 @@ describe('Profile page', () => {
       expect(photoError()).toBe('Too many photo changes. Try again in a few minutes.');
       expect(removeButton()?.disabled).toBe(false);
     });
+
+    describe('terms (DEC-070)', () => {
+      const unaccepted: Profile = { ...profile, termsAccepted: false };
+      const tick = () => element().querySelector<HTMLInputElement>('[data-accept-terms]');
+      const clickTick = () => (element().querySelector('[data-accept-terms]') as HTMLInputElement).click();
+      const photoInput = () => element().querySelector('[data-photo-input]') as HTMLInputElement;
+
+      it('asks for the terms before the first upload, linking to them', () => {
+        load(unaccepted);
+
+        expect(photoInput().disabled).toBe(true);
+        expect(tick()?.checked).toBe(false);
+        expect(element().querySelector('.terms-accept a')?.getAttribute('href')).toBe('/terms');
+      });
+
+      it('accepts the version this app shows, then lets the player upload', () => {
+        load(unaccepted);
+
+        clickTick();
+        fixture.detectChanges();
+        const req = http.expectOne({ method: 'POST', url: '/api/profile/terms' });
+        expect(req.request.body).toEqual({ version: TERMS_VERSION });
+        req.flush({ ...unaccepted, termsAccepted: true });
+        fixture.detectChanges();
+
+        expect(tick()).toBeNull();
+        expect(photoInput().disabled).toBe(false);
+      });
+
+      it('asks for a reload when the terms changed meanwhile', () => {
+        load(unaccepted);
+
+        clickTick();
+        http.expectOne('/api/profile/terms').flush({ code: 'terms_outdated' }, { status: 409, statusText: 'Conflict' });
+        fixture.detectChanges();
+
+        expect(photoError()).toBe('The terms have changed. Reload the page to read the new ones.');
+        expect(photoInput().disabled).toBe(true);
+        expect(tick()?.disabled).toBe(false);
+      });
+
+      it('asks nothing of a player who accepted them', () => {
+        load();
+
+        expect(tick()).toBeNull();
+        expect(photoInput().disabled).toBe(false);
+      });
+    });
+
+    it('tells the owner when reports put their photo under review', () => {
+      load({ ...withPhoto, avatarUnderReview: true });
+
+      expect(element().querySelector('[data-under-review]')?.textContent).toContain('only you see it');
+      expect(summaryPhoto()?.getAttribute('src')).toBe(imageUrl);
+    });
+
+    it('shows no review note otherwise', () => {
+      load(withPhoto);
+
+      expect(element().querySelector('[data-under-review]')).toBeNull();
+    });
+  });
+
+  it('links operators, and only them, to the reported photos', () => {
+    load();
+    expect(element().querySelector('[data-moderation-link]')).toBeNull();
+
+    fixture.componentInstance['profile'].set({ ...profile, operator: true });
+    fixture.detectChanges();
+
+    expect(element().querySelector('[data-moderation-link]')?.getAttribute('href')).toBe('/moderation');
   });
 
   it('shows an error with retry when the profile cannot be loaded', () => {

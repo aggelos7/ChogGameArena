@@ -37,6 +37,7 @@ import {
   raceTileLabel,
   raceWalk,
 } from './race-board-model';
+import { ReportPhoto } from '../../moderation/report-photo';
 
 /** A card you can play now, and for Whale, Rug and Liquidated the opponent it's played on (DEC-057, DEC-058). */
 export interface RaceCardPlay {
@@ -90,6 +91,7 @@ interface DrawnPawn {
  */
 @Component({
   selector: 'app-race-board',
+  imports: [ReportPhoto],
   templateUrl: './race-board.html',
   styleUrl: './race-board.scss',
 })

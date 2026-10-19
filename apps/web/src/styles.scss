@@ -110,7 +110,7 @@ app-root:not(:has(app-home, app-race-board, app-life-board)) main.shell-main {
 
   position: relative;
   color: var(--text);
-  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 1.35);
 
   // Every link in the page, at the lowest priority, so links with colours of their own (buttons) keep them.
   :where(&) a {
@@ -137,7 +137,7 @@ app-root:not(:has(app-home, app-race-board, app-life-board)) main.shell-main {
     z-index: -1;
     height: var(--logo-height);
     background:
-      linear-gradient(rgb(24 12 82 / 0.55), rgb(24 12 82 / 0.55)),
+      linear-gradient(rgb(24 12 82 / 73%), rgb(24 12 82 / 73%)),
       url('/home/chog-game-arena.webp') center top / var(--logo-width) auto no-repeat;
     mask-image:
       linear-gradient(to bottom, #000 80%, transparent),

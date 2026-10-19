@@ -68,6 +68,9 @@
     @if (entry.isYou) {
       <span class="tag">You</span>
     }
+    @if (entry.avatar.imageUrl && !entry.isYou) {
+      <app-report-photo [photoUrl]="entry.avatar.imageUrl" [name]="entry.displayName" />
+    }
   </span>
   <span class="score"><strong data-xp>{{ entry.xp }} XP</strong><span class="wins" data-wins>{{ entry.wins }} {{ entry.wins === 1 ? 'win' : 'wins' }}</span></span>
 </ng-template>

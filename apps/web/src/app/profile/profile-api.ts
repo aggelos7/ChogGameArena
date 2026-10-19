@@ -49,6 +49,12 @@ export interface Profile {
   /** All the XP earned from completed matches (STORY-059, DEC-064). */
   xp: number;
   collector: CollectorProgress;
+  /** Whether the player accepted the current terms of use, which uploading a photo needs (STORY-069, DEC-070). */
+  termsAccepted: boolean;
+  /** Whether reports hid the player's photo from others until an operator reviews it. */
+  avatarUnderReview: boolean;
+  /** Whether the player reviews reported photos. */
+  operator: boolean;
 }
 
 /**
@@ -101,6 +107,11 @@ export class ProfileApi {
 
   update(changes: ProfileUpdate): Observable<Profile> {
     return this.http.patch<Profile>('/api/profile', changes);
+  }
+
+  /** Accepts the terms of use in the version the player was shown; the server refuses an outdated one. */
+  acceptTerms(version: string): Observable<Profile> {
+    return this.http.post<Profile>('/api/profile/terms', { version });
   }
 
   /** Sends the file itself as the body; the server re-encodes it and replaces any earlier photo. */

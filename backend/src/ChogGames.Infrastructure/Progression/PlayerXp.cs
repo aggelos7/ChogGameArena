@@ -8,7 +8,10 @@ using NpgsqlTypes;
 namespace ChogGames.Infrastructure.Progression;
 
 /// <summary>One place on a leaderboard (STORY-059, DEC-064); the player id is for the server only, never returned.</summary>
-/// <param name="AvatarImageId">The player's uploaded photo, if any (STORY-062, DEC-018).</param>
+/// <param name="AvatarImageId">
+/// The player's uploaded photo, if any (STORY-062, DEC-018); null when reports hid it, except for the viewer's own
+/// (STORY-069, DEC-070).
+/// </param>
 /// <param name="ChogsHeld">For the cosmetic collector badge only (DEC-065); never returned.</param>
 public sealed record LeaderboardEntry(
     int Place, Guid PlayerId, string DisplayName, string AvatarId, Guid? AvatarImageId, int ChogsHeld, int Xp, int Wins);
@@ -72,9 +75,12 @@ public static class PlayerXp
                 SELECT *, (ROW_NUMBER() OVER (ORDER BY "Xp" DESC, "Wins" DESC, reached, "PlayerId"))::int AS "Place"
                 FROM totals
             )
-            SELECT k."Place", k."PlayerId", p."DisplayName", p."AvatarId", p."AvatarImageId", p."ChogsHeld", k."Xp", k."Wins"
+            SELECT k."Place", k."PlayerId", p."DisplayName", p."AvatarId",
+                CASE WHEN i."HiddenAt" IS NULL OR p."Id" = @viewer THEN p."AvatarImageId" END AS "AvatarImageId",
+                p."ChogsHeld", k."Xp", k."Wins"
             FROM ranked k
             JOIN "Players" p ON p."Id" = k."PlayerId"
+            LEFT JOIN "AvatarImages" i ON i."Id" = p."AvatarImageId"
             WHERE k."Place" <= @top OR k."PlayerId" = @viewer
             ORDER BY k."Place"
             """,

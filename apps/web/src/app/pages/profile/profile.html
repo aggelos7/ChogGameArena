@@ -82,10 +82,27 @@
           Your photo shows instead of your avatar colour, to every player. We store it as a small square, without
           location or camera data.
         </p>
+        @if (current.avatarUnderReview) {
+          <p class="under-review" data-under-review>
+            Under review: players reported this photo, so only you see it until an operator checks it.
+          </p>
+        }
+        @if (!current.termsAccepted) {
+          <label class="terms-accept">
+            <input type="checkbox" data-accept-terms [checked]="false" [disabled]="termsState() !== 'idle'" (change)="acceptTerms()" />
+            <span>I accept the <a routerLink="/terms">terms of use</a>, including the photo rules.</span>
+          </label>
+        }
         <div class="photo-actions">
-          <label class="photo-pick">
+          <label class="photo-pick" [class.disabled]="!current.termsAccepted">
             <span>{{ current.avatar.imageUrl ? 'Replace photo' : 'Upload photo' }}</span>
-            <input type="file" data-photo-input [accept]="photoTypes" [disabled]="photoState() !== 'idle'" (change)="choosePhoto($event)" />
+            <input
+              type="file"
+              data-photo-input
+              [accept]="photoTypes"
+              [disabled]="photoState() !== 'idle' || !current.termsAccepted"
+              (change)="choosePhoto($event)"
+            />
           </label>
           @if (current.avatar.imageUrl) {
             <button type="button" class="secondary" data-remove-photo [disabled]="photoState() !== 'idle'" (click)="removePhoto()">
@@ -157,6 +174,13 @@
       </form>
 
       <app-wallet-panel />
+
+      @if (current.operator) {
+        <section class="operator" aria-labelledby="operator-heading">
+          <h2 id="operator-heading">Operator</h2>
+          <p><a routerLink="/moderation" data-moderation-link>Review reported photos</a></p>
+        </section>
+      }
     }
   }
 }

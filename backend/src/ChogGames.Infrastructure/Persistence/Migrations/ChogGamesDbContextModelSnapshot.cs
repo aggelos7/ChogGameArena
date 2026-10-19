@@ -136,6 +136,9 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("bytea");
 
+                    b.Property<DateTimeOffset?>("HiddenAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("PlayerId")
                         .HasColumnType("uuid");
 
@@ -147,6 +150,39 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.ToTable("AvatarImages", null, t =>
                         {
                             t.HasCheckConstraint("CK_AvatarImages_Data", "octet_length(\"Data\") BETWEEN 1 AND 1048576");
+
+                            t.HasCheckConstraint("CK_AvatarImages_HiddenAfterCreated", "\"HiddenAt\" IS NULL OR \"HiddenAt\" >= \"CreatedAt\"");
+                        });
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Players.AvatarImageReport", b =>
+                {
+                    b.Property<Guid>("ImageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReporterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DismissedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("ImageId", "ReporterId");
+
+                    b.HasIndex("ReporterId");
+
+                    b.ToTable("AvatarImageReports", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AvatarImageReports_DismissedAfterCreated", "\"DismissedAt\" IS NULL OR \"DismissedAt\" >= \"CreatedAt\"");
+
+                            t.HasCheckConstraint("CK_AvatarImageReports_Reason", "\"Reason\" IN ('Sexual', 'Hate', 'Violence', 'Scam', 'Other')");
                         });
                 });
 
@@ -202,6 +238,13 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(16)")
                         .HasDefaultValue("Standard");
 
+                    b.Property<DateTimeOffset?>("TermsAcceptedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TermsVersion")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<string>("WalletAddress")
                         .HasMaxLength(42)
                         .HasColumnType("character varying(42)");
@@ -226,6 +269,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_Players_GamesPlayed_NonNegative", "\"GamesPlayed\" >= 0");
 
                             t.HasCheckConstraint("CK_Players_SelectedCharacter", "(\"SelectedCharacterKind\" = 'Standard' AND \"SelectedCharacterId\" ~ '^[a-z0-9-]{1,32}$') OR (\"SelectedCharacterKind\" = 'Nft' AND \"Kind\" = 'Wallet' AND \"SelectedCharacterId\" ~ '^(0|[1-9][0-9]{0,77})$')");
+
+                            t.HasCheckConstraint("CK_Players_TermsAccepted", "(\"TermsVersion\" IS NULL) = (\"TermsAcceptedAt\" IS NULL)");
 
                             t.HasCheckConstraint("CK_Players_WalletAddress_Format", "\"WalletAddress\" ~ '^0x[0-9a-f]{40}$'");
 
@@ -712,6 +757,21 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.HasOne("ChogGames.Core.Players.Player", null)
                         .WithOne()
                         .HasForeignKey("ChogGames.Core.Players.AvatarImage", "PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ChogGames.Core.Players.AvatarImageReport", b =>
+                {
+                    b.HasOne("ChogGames.Core.Players.AvatarImage", null)
+                        .WithMany()
+                        .HasForeignKey("ImageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ChogGames.Core.Players.Player", null)
+                        .WithMany()
+                        .HasForeignKey("ReporterId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

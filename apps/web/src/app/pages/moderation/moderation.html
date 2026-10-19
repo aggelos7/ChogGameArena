@@ -1,0 +1,60 @@
+<h1>Reported photos</h1>
+
+@switch (loadState()) {
+  @case ('loading') {
+    <app-loading-state message="Loading reports…" />
+  }
+  @case ('not-found') {
+    <p class="empty" data-not-operator>There's nothing here.</p>
+  }
+  @case ('error') {
+    <app-error-state message="The reports could not be loaded." (retry)="load()" />
+  }
+  @case ('ready') {
+    <p class="hint">
+      Remove a photo that breaks the terms; its owner gets their built-in avatar back. Dismiss the reports when it
+      doesn't, and it shows again to everyone.
+    </p>
+    @if (actionError(); as message) {
+      <p role="alert" class="field-error" data-action-error>{{ message }}</p>
+    }
+    @if (photos().length === 0) {
+      <p class="empty" data-no-reports>No reports to review.</p>
+    } @else {
+      <ul class="reports" aria-label="Reported photos">
+        @for (photo of photos(); track photo.imageId) {
+          <li [attr.data-report]="photo.imageId">
+            <img [src]="photo.imageUrl" [alt]="photo.ownerName + '’s photo'" width="96" height="96" />
+            <div class="details">
+              <p class="owner">
+                <strong>{{ photo.ownerName }}</strong>
+                @if (photo.hidden) {
+                  <span class="tag" data-hidden>Hidden</span>
+                }
+              </p>
+              <p data-reporters>{{ photo.reporters }} {{ photo.reporters === 1 ? 'report' : 'reports' }}</p>
+              <ul class="reasons">
+                @for (reason of reasons; track reason.value) {
+                  @if (photo.reasons[reason.value]; as count) {
+                    <li [attr.data-reason]="reason.value">{{ reason.label }}: {{ count }}</li>
+                  }
+                }
+              </ul>
+              <p class="hint">
+                First {{ photo.firstReportedAt | date: 'medium' }} · last {{ photo.lastReportedAt | date: 'medium' }}
+              </p>
+              <div class="actions">
+                <button type="button" class="danger" data-remove [disabled]="busy() !== null" (click)="remove(photo)">
+                  Remove photo
+                </button>
+                <button type="button" class="secondary" data-dismiss [disabled]="busy() !== null" (click)="dismiss(photo)">
+                  Dismiss reports
+                </button>
+              </div>
+            </div>
+          </li>
+        }
+      </ul>
+    }
+  }
+}

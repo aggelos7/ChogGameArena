@@ -265,20 +265,40 @@ $C exec -T api bash -c "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /metrics 
 Counters start from zero when the API restarts. A Prometheus server could scrape `api:8080/metrics` from the
 Compose network later, without any API change.
 
+## Reported photos and the legal pages
+
+Players report photos from the game boards and the Ladder (STORY-069, DEC-070); a photo reported by 3 different
+players is hidden from everyone but its owner until an operator looks at it. Set these in the `.env` before the
+launch, then restart the API (`$D up -d api`):
+
+- `LEGAL_CONTACT_EMAIL`: the address the terms and privacy pages give for questions and deletion requests. Without
+  it, they say "the operator of this site".
+- `MODERATION_OPERATOR_WALLETS`: the operators' wallet addresses, comma-separated. An operator signs in with that
+  wallet, and their Profile page links to **Reported photos** (`/moderation`), which lists each reported photo with
+  its owner, how many players reported it and why (never who). **Remove photo** deletes it (as below);
+  **Dismiss reports** shows it again, and its reporters can't report it again. An invalid address stops the API at
+  startup.
+
+The terms and privacy text lives in the web app (`apps/web/src/app/pages/legal`). When it changes, bump
+`TermsOfUse.CurrentVersion` (server) and `TERMS_VERSION` (web) together, so players accept the new terms before
+their next upload.
+
 ## Removing a profile photo
 
-Players can remove their own photo from their profile at any time. An operator removes one that breaks the rules,
-or deletes it when someone asks (DEC-018). Photos are re-encoded server-side and kept only in the `AvatarImages`
+Players can remove their own photo from their profile at any time. An operator removes a reported one on the
+Reported photos page (above). Without that page, for example to delete a photo someone asked about by email, use
+SQL (DEC-018). Photos are re-encoded server-side and kept only in the `AvatarImages`
 table, one row per player. Deleting the row deletes the photo, and the player's built-in avatar shows again: the
 database clears `Players.AvatarImageId` itself.
 
-Every photo is served at `/api/avatar-images/<id>`. Take the id from the reported image's address (in the browser:
+Every photo is served at `/api/avatar-images/<id>`. Take the id from the image's address (in the browser:
 open the image in a new tab, or inspect it), then:
 
 ```bash
 D="docker compose -f infrastructure/production/docker-compose.yml"
 $D exec postgres psql -U choggames -d choggames \
   -c "DELETE FROM \"AvatarImages\" WHERE \"Id\" = '<id>'"   # DELETE 1; DELETE 0 means it was already gone
+# Its reports go with it.
 ```
 
 Browsers may keep showing a photo they already loaded for up to `AvatarImages:CacheDuration` (1 hour). Deleted

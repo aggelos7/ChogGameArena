@@ -195,3 +195,34 @@ nav a:not(.active):hover {
   display: block;
   margin-bottom: 1rem;
 }
+
+/* Terms and privacy, on every page (DEC-070), in the header's night blue. */
+.shell-footer {
+  --focus: #fff;
+
+  color: #fff;
+  background: #0b0e43d9;
+  border-top: 1px solid rgb(255 255 255 / 0.15);
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.25rem 1.5rem;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0.5rem 1rem;
+  }
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--tap-target);
+    color: inherit;
+    font-size: 0.9rem;
+  }
+
+  a.active {
+    text-decoration-thickness: 2px;
+  }
+}

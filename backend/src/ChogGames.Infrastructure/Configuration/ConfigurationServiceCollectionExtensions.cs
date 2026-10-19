@@ -9,6 +9,7 @@ using ChogGames.Core.Progression;
 using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Identity;
 using ChogGames.Infrastructure.Matches;
+using ChogGames.Infrastructure.Moderation;
 using ChogGames.Infrastructure.Monitoring;
 using ChogGames.Infrastructure.Nfts;
 using ChogGames.Infrastructure.Nfts.Cache;
@@ -88,6 +89,18 @@ public static class ConfigurationServiceCollectionExtensions
             return new AvatarImageEncoder(avatarImages.MaxSourceDimension, avatarImages.Size, avatarImages.Quality);
         });
         services.AddScoped<AvatarImageService>();
+
+        // Photo reports and their review by operators (STORY-069, DEC-070).
+        services.AddOptions<ModerationOptions>()
+            .Bind(configuration.GetSection(ModerationOptions.SectionName))
+            .Validate(o => o.ParseOperatorWallets() is not null, "Moderation:OperatorWallets must list wallet addresses (0x and 40 hex digits).")
+            .Validate(o => o.HideAfterReporters is >= 1 and <= 100, "Moderation:HideAfterReporters must be between 1 and 100.")
+            .Validate(o => o.ReportsPerWindowPerPlayer is >= 1 and <= 100, "Moderation:ReportsPerWindowPerPlayer must be between 1 and 100.")
+            .Validate(o => o.Window >= TimeSpan.FromSeconds(1) && o.Window <= TimeSpan.FromDays(1),
+                "Moderation:Window must be between 1 second and 1 day.")
+            .ValidateOnStart();
+        services.AddSingleton<ModerationOperators>();
+        services.AddScoped<PhotoReportService>();
 
         services.AddSingleton<IValidateOptions<WalletAuthOptions>, WalletAuthOptionsValidator>();
         services.AddOptions<WalletAuthOptions>()

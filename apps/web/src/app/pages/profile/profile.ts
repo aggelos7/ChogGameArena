@@ -7,6 +7,7 @@ import { Observable, forkJoin } from 'rxjs';
 import { PlayerSession } from '../../identity/player-session';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { CollectorChip } from '../../profile/collector-chip';
+import { TERMS_VERSION } from '../../legal/legal-api';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { WalletPanel } from '../../wallet/wallet-panel';
 import {
@@ -28,6 +29,7 @@ const PHOTO_ERRORS: Record<string, string> = {
   avatar_unsupported_type: 'Choose a JPEG, PNG or WebP photo.',
   avatar_not_an_image: "That file isn't a photo we can read. Choose a JPEG, PNG or WebP photo.",
   avatar_too_many_pixels: 'That photo has too many pixels. Choose a smaller one.',
+  terms_not_accepted: 'Accept the terms of use before uploading a photo.',
 };
 
 function displayNameValidator(control: AbstractControl<string>): ValidationErrors | null {
@@ -57,6 +59,7 @@ export class ProfilePage implements OnInit {
   protected readonly photoTypes = PHOTO_TYPES.join(',');
   protected readonly photoState = signal<'idle' | 'uploading' | 'removing'>('idle');
   protected readonly photoError = signal<string | null>(null);
+  protected readonly termsState = signal<'idle' | 'accepting'>('idle');
 
   protected readonly form = inject(FormBuilder).nonNullable.group({
     displayName: ['', displayNameValidator],
@@ -150,6 +153,25 @@ export class ProfilePage implements OnInit {
   protected removePhoto(): void {
     this.photoState.set('removing');
     this.changePhoto(this.api.removePhoto());
+  }
+
+  /** Accepts the terms in the version this app shows (DEC-070), which uploading a photo needs. */
+  protected acceptTerms(): void {
+    this.termsState.set('accepting');
+    this.photoError.set(null);
+    this.api.acceptTerms(TERMS_VERSION).subscribe({
+      next: (profile) => {
+        this.profile.set(profile);
+        this.termsState.set('idle');
+      },
+      error: (error: unknown) => {
+        const outdated = error instanceof HttpErrorResponse && error.error?.code === 'terms_outdated';
+        this.photoError.set(
+          outdated ? 'The terms have changed. Reload the page to read the new ones.' : 'The terms could not be accepted. Try again.',
+        );
+        this.termsState.set('idle');
+      },
+    });
   }
 
   protected avatarById(id: string): Avatar | undefined {

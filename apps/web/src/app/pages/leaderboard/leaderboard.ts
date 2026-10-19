@@ -6,6 +6,7 @@ import { ALL_GAMES, Leaderboard, LeaderboardApi, LeaderboardPeriod } from '../..
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { CollectorChip } from '../../profile/collector-chip';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
+import { ReportPhoto } from '../../moderation/report-photo';
 
 interface BoardChoice<T> {
   value: T;
@@ -18,7 +19,7 @@ interface BoardChoice<T> {
  */
 @Component({
   selector: 'app-leaderboard',
-  imports: [DatePipe, NgTemplateOutlet, AvatarBadge, CollectorChip, LoadingState, ErrorState],
+  imports: [DatePipe, NgTemplateOutlet, AvatarBadge, CollectorChip, LoadingState, ErrorState, ReportPhoto],
   templateUrl: './leaderboard.html',
   styleUrl: './leaderboard.scss',
 })
