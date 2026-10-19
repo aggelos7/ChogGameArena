@@ -79,6 +79,13 @@
 }
 
 .wrong-network {
+  // A light box: dark text, also where the page's own text is white over a picture.
+  --text: var(--ink);
+  --text-muted: var(--ink-muted);
+  --link: var(--ink-link);
+  --danger: var(--ink-danger);
+  color: var(--text);
+  text-shadow: none;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

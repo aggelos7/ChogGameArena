@@ -433,18 +433,30 @@ export interface LifeLayout {
   laneNames: { route: LifeRoute; x: number; y: number }[];
 }
 
+/** A tile's face as drawn, in its own units, and how much it is scaled up onto the board. */
+export const SPOT_FACE_WIDTH = 64;
+export const SPOT_FACE_HEIGHT = 54;
+export const SPOT_SCALE = 1.3;
 /** A tile's size on the illustrated board, in board units. */
-export const SPOT_WIDTH = 64;
-export const SPOT_HEIGHT = 54;
+export const SPOT_WIDTH = SPOT_FACE_WIDTH * SPOT_SCALE;
+export const SPOT_HEIGHT = SPOT_FACE_HEIGHT * SPOT_SCALE;
 const COLUMNS = 4;
-const columnX = (column: number): number => 54 + column * 84;
-/** How far each lane runs from the middle of the board: 70, or further on a board with more tiles to a row. */
-const laneSpread = (columns: number): number => Math.max(70, ((columns - 1) * 84) / 4);
+const COLUMN_STEP = 96;
+const columnX = (column: number): number => 58 + column * COLUMN_STEP;
+/**
+ * How far each lane runs from the middle of the board: 70, or further on a board with more tiles to a row. A folded lane
+ * needs at least 106, so its two halves and the lane names between the lanes fit.
+ */
+const laneSpread = (columns: number, folded: boolean): number => Math.max(folded ? 106 : 70, ((columns - 1) * COLUMN_STEP) / 4);
+/** How far each half of a folded lane sits from the lane's middle: a tile's height and a little room apart. */
+const FOLD = 46;
 /** Room above the first row and below the last for pawns standing on a tile's edge. */
-const MARGIN = 44;
-const ROW_GAP = 80;
-const LANE_GAP = 72;
-const LANE_NAME_GAP = 44;
+const MARGIN = 52;
+// Each step is a tile's size plus a little room for the road between: the horizontal board turns rows and lanes into
+// columns, so these also hold a tile's width.
+const ROW_GAP = 96;
+const LANE_GAP = 92;
+const LANE_NAME_GAP = 52;
 const U_TURN = 48;
 
 /** Which way the illustrated board runs: down the screen on phones, across it on wide screens (DEC-048). */
@@ -454,12 +466,15 @@ export type LifeOrientation = 'vertical' | 'horizontal';
  * The illustrated board laid out from the server's tile graph (STORY-064, DEC-048): the main track in rows of `columns` tiles,
  * left to right and then right to left, and each fork's Safe and Degen lanes as two columns side by side until they join
  * the main track again, so lanes of any length fit. Horizontal, the same board is turned on its side: the track winds
- * through columns from left to right (four by default), and each fork's lanes run as two rows with their names between them. Null
- * when a tile can't be placed because no route reaches it.
+ * through columns from left to right (four by default), and each fork's lanes run as rows with their names between them.
+ * There each lane is folded in two, so it takes half the width: its tiles alternate between two rows, top then bottom, a
+ * column at a time. Null when a tile can't be placed because no route reaches it.
  */
 export function lifeLayout(tiles: LifeTile[], orientation: LifeOrientation = 'vertical', columns = COLUMNS): LifeLayout | null {
-  const width = columnX(columns - 1) + 54;
-  const laneX: Record<LifeRoute, number> = { Safe: width / 2 - laneSpread(columns), Degen: width / 2 + laneSpread(columns) };
+  const width = columnX(columns - 1) + 58;
+  const folded = orientation === 'horizontal';
+  const spread = laneSpread(columns, folded);
+  const laneX: Record<LifeRoute, number> = { Safe: width / 2 - spread, Degen: width / 2 + spread };
   const spots = new Map<number, LifeSpot>();
   const laneNames: LifeLayout['laneNames'] = [];
   // Roads into and out of a fork's lanes cross more of a wider board, so they get a little more room to bend.
@@ -468,6 +483,8 @@ export function lifeLayout(tiles: LifeTile[], orientation: LifeOrientation = 've
   let column = 0;
   let direction = 1;
   let previous: LifeRow['kind'] | null = null;
+  // Which of a fork's rows of lane tiles this is: a folded lane takes a new step only every other one.
+  let forkRow = 0;
   for (const row of lifeRows(tiles)) {
     if (row.kind === 'main') {
       const next = column + direction;
@@ -483,15 +500,23 @@ export function lifeLayout(tiles: LifeTile[], orientation: LifeOrientation = 've
       }
       spots.set(row.tile.index, { tile: row.tile, x: columnX(column), y });
     } else if (row.kind === 'lanes') {
-      y += LANE_NAME_GAP + bend;
+      // Folded, the names go between the lanes, so they need no room of their own before them.
+      y += (folded ? 0 : LANE_NAME_GAP) + bend;
       laneNames.push({ route: 'Safe', x: laneX.Safe, y }, { route: 'Degen', x: laneX.Degen, y });
+      forkRow = 0;
     } else {
-      y += previous === 'lanes' ? LANE_NAME_GAP : LANE_GAP;
+      if (!folded) {
+        y += previous === 'lanes' ? LANE_NAME_GAP : LANE_GAP;
+      } else if (forkRow % 2 === 0) {
+        y += forkRow === 0 ? ROW_GAP : LANE_GAP;
+      }
+      const half = folded ? (forkRow % 2 === 0 ? -FOLD : FOLD) : 0;
       for (const [route, tile] of [['Safe', row.safe], ['Degen', row.degen]] as const) {
         if (tile) {
-          spots.set(tile.index, { tile, x: laneX[route], y });
+          spots.set(tile.index, { tile, x: laneX[route] + half, y });
         }
       }
+      forkRow++;
     }
     previous = row.kind;
   }
@@ -546,11 +571,14 @@ function turned(board: LifeLayout): LifeLayout {
     laneNames: board.laneNames.map((name) => {
       // A name goes by the first tile of its lane, which sits right under it on the vertical board.
       const first = board.spots.find((spot) => spot.tile.lane === name.route && spot.y > name.y);
+      // With the next tile, both rows of a folded lane.
+      const second = board.spots.find((spot) => spot.tile.index === first?.tile.next && spot.tile.lane === name.route);
+      const rows = [first ?? name, second ?? first ?? name].map((spot) => spot.x);
       return {
         route: name.route,
         x: first?.y ?? name.y,
         // Safe runs above Degen: its name goes under the Safe lane, Degen's over the Degen lane.
-        y: name.route === 'Safe' ? name.x + SPOT_HEIGHT / 2 + 14 : name.x - SPOT_HEIGHT / 2 - 7,
+        y: name.route === 'Safe' ? Math.max(...rows) + SPOT_HEIGHT / 2 + 14 : Math.min(...rows) - SPOT_HEIGHT / 2 - 7,
       };
     }),
   };

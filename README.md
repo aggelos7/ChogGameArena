@@ -49,7 +49,7 @@ npx nx lint web         # ESLint (angular-eslint)
 npx nx g @schematics/angular:component <path> --project=web   # Angular schematics via Nx
 ```
 
-Routes: `/` (home), `/games` (game catalogue), `/games/:gameId` (lobby placeholder, only for `Available` games; anything else redirects to `/games`); unknown URLs redirect to `/`.
+Routes: `/` (home, with the game catalogue), `/games/:gameId` (lobby, only for `Available` games; anything else redirects to `/`); `/ladder` (the leaderboards; `/leaderboard` redirects there); `/games` and unknown URLs redirect to `/`.
 
 Mobile-first shell: layouts are designed for 375px phones first (no horizontal scroll, controls at least 44px tall); the main navigation becomes a row of full-width tabs on phones and a single header row from 40rem. Everything works with the keyboard alone: a "Skip to main content" link, visible focus outlines, `aria-current="page"` on the active link, and focus moved to the page content after each in-app navigation. Pages use the shared loading, error (with retry) and empty states in `apps/web/src/app/shared/ui/state-views.ts`; a page that fails to download shows a "Reload page" error and keeps the current page.
 
@@ -143,7 +143,7 @@ npm run db:migrate                   # apply EF Core migrations (uses Database__
 npx nx run backend:test              # same commands via Nx (uncached wrapper)
 ```
 
-Game catalogue (`GET /api/games`): games and their status come from the non-secret `Games:Items` configuration in `appsettings.json` and are validated at startup (unique kebab-case `Id`, required `Name`, `Status` one of `Available`, `ComingSoon`, `Maintenance`). Both games default to `ComingSoon`; `appsettings.Development.json` makes Chog Life and Chog Race `Available` locally (Chog Race since STORY-050, DEC-054). Only `Available` games can be launched; the web app re-checks the server before opening a game.
+Game catalogue (`GET /api/games`): games and their status come from the non-secret `Games:Items` configuration in `appsettings.json` and are validated at startup (unique kebab-case `Id`, required `Name`, `Status` one of `Available`, `ComingSoon`, `Maintenance`). Every game defaults to `ComingSoon`; `appsettings.Development.json` makes Chog Life and Chog Race `Available` locally (Chog Race since STORY-050, DEC-054). Chog Royale (`chog-royale`) is listed as `ComingSoon` everywhere: it has no rules yet, so leave it `ComingSoon`. Only `Available` games can be launched; the web app re-checks the server before opening a game.
 
 ```json
 [{ "id": "chog-life", "name": "Chog Life", "description": "...", "status": "ComingSoon" }]

@@ -1,5 +1,5 @@
 import { Component, input } from '@angular/core';
-import { LifeEventKind, LifeLayout, LifeTile, LifeTileType, SPOT_HEIGHT, SPOT_WIDTH, spotLabel } from './life-board-model';
+import { LifeEventKind, LifeLayout, LifeTile, LifeTileType, SPOT_FACE_HEIGHT, SPOT_FACE_WIDTH, SPOT_SCALE, spotLabel } from './life-board-model';
 
 /** A pawn as the illustrated board draws it: its seat and colour, and where it stands in board units. */
 export interface DrawingPawn {
@@ -59,8 +59,9 @@ export class LifeDrawing {
   /** The tiles of the lanes being chosen between at a fork. */
   readonly choice = input<ReadonlySet<number>>(new Set());
 
-  protected readonly spotWidth = SPOT_WIDTH;
-  protected readonly spotHeight = SPOT_HEIGHT;
+  protected readonly spotWidth = SPOT_FACE_WIDTH;
+  protected readonly spotHeight = SPOT_FACE_HEIGHT;
+  protected readonly spotScale = SPOT_SCALE;
   protected readonly label = spotLabel;
 
   protected icon(tile: LifeTile): Icon {

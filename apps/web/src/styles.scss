@@ -1,6 +1,11 @@
 :root {
   --text: #1a1a1a;
   --text-muted: #555;
+  /* Dark text for light boxes, also on pages whose own text is white over a picture. */
+  --ink: #1a1a1a;
+  --ink-muted: #555;
+  --ink-link: #1d4ed8;
+  --ink-danger: #8a1c1c;
   --surface: #fff;
   --surface-muted: #f4f4f6;
   --border: #d0d0d0;
@@ -86,6 +91,89 @@ button:disabled {
    outweighs the shell component's own scoped rule. */
 main.shell-main:has(.game-wide) {
   max-width: 2400px;
+}
+
+/* Every other page sits over the home page's arena, drawn the same way as on the home page (`home.scss`): from the top
+   of the page under the header, the logo as wide as the content column (at most 960px) over a blurred, dimmed copy
+   across the whole width, fading into the logo's night blue below; it scrolls with the page. Here the page's content lies
+   on top of the logo, so the logo is veiled in night blue too, and the text outside the page's light boxes is white (the
+   boxes keep dark text: `--ink` rules in each component). The game boards have pictures of their own. */
+app-root:not(:has(app-home, app-race-board, app-life-board)) main.shell-main {
+  --logo-width: min(100vw, 960px);
+  --logo-height: calc(var(--logo-width) * 2 / 3);
+  --edge-fade: clamp(0px, (100vw - var(--logo-width)) / 2, 8rem);
+  --night: #180c52;
+  --text: #fff;
+  --text-muted: rgb(255 255 255 / 0.85);
+  --link: #fff;
+  --danger: #ffb4ab;
+
+  position: relative;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+
+  // Every link in the page, at the lowest priority, so links with colours of their own (buttons) keep them.
+  :where(&) a {
+    color: var(--link, inherit);
+  }
+
+  :is(input, select, textarea) {
+    text-shadow: none;
+  }
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 100vw;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  // The veiled logo, its left, right and bottom edges melting into the arena around it.
+  &::before {
+    z-index: -1;
+    height: var(--logo-height);
+    background:
+      linear-gradient(rgb(24 12 82 / 0.55), rgb(24 12 82 / 0.55)),
+      url('/home/chog-game-arena.webp') center top / var(--logo-width) auto no-repeat;
+    mask-image:
+      linear-gradient(to bottom, #000 80%, transparent),
+      linear-gradient(
+        to right,
+        transparent calc(50% - var(--logo-width) / 2),
+        #000 calc(50% - var(--logo-width) / 2 + var(--edge-fade)),
+        #000 calc(50% + var(--logo-width) / 2 - var(--edge-fade)),
+        transparent calc(50% + var(--logo-width) / 2)
+      );
+    mask-composite: intersect;
+  }
+
+  // The arena around it, blurred and dimmed, reaching past the sides so the blur doesn't fade them; the shell clips it.
+  &::after {
+    z-index: -2;
+    top: -3rem;
+    bottom: 0;
+    width: calc(100vw + 6rem);
+    background:
+      linear-gradient(to bottom, transparent calc(var(--logo-height) * 0.6), var(--night) var(--logo-height)),
+      url('/home/chog-game-arena.webp') center top / 100% auto no-repeat,
+      var(--night);
+    filter: blur(12px) brightness(0.65);
+  }
+}
+
+/* A Chog Race match is played over the race track picture. It stays put while the page scrolls, where the browser
+   allows. */
+app-root:has(app-race-board) {
+  background: url('/chog-race/background.webp') center / cover fixed no-repeat, #eaf2fd;
+}
+
+/* And a Chog Life match over the Chog Life picture. */
+app-root:has(app-life-board) {
+  background: url('/chog-life/background.webp') center / cover fixed no-repeat, #eaf2fd;
 }
 
 @media (prefers-reduced-motion: reduce) {

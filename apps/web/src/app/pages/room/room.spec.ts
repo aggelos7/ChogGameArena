@@ -1040,7 +1040,7 @@ describe('Room page', () => {
       load({ ...room, status: 'Active', members: [member('Alice', { isHost: true }), member('Bob', { isYou: true, hasLeft: true })] });
 
       expect(element().querySelector('[data-left]')?.textContent).toContain('You left this game.');
-      expect(element().querySelector('[data-left] a')?.getAttribute('href')).toBe('/games');
+      expect(element().querySelector('[data-left] a')?.getAttribute('href')).toBe('/');
       expect(element().querySelector('[data-started]')).toBeNull();
       expect(maybeButton('Leave game')).toBeUndefined();
     });
@@ -1058,7 +1058,7 @@ describe('Room page', () => {
 
       expect(members()).toEqual(['Alice Host You 1st', 'Bob 3rd', 'Carol 2nd']);
       expect(element().querySelector('[data-result]')?.textContent).toContain('The game is over: you won!');
-      expect(element().querySelector('[data-result] a')?.getAttribute('href')).toBe('/games');
+      expect(element().querySelector('[data-result] a')?.getAttribute('href')).toBe('/');
       expect(element().querySelector('[data-started]')).toBeNull();
       expect(maybeButton('Leave game')).toBeUndefined();
     });
@@ -1113,7 +1113,7 @@ describe('Room page', () => {
       load({ ...room, status: 'Abandoned', members: [member('Alice', { isHost: true, hasLeft: true }), member('Bob', { isYou: true })] });
 
       expect(element().querySelector('[data-closed]')?.textContent).toContain('This game ended early: too many players left.');
-      expect(element().querySelector('[data-closed] a')?.getAttribute('href')).toBe('/games');
+      expect(element().querySelector('[data-closed] a')?.getAttribute('href')).toBe('/');
       expect(maybeButton('Leave game')).toBeUndefined();
       expect(maybeButton('Leave room')).toBeUndefined();
     });
@@ -1122,7 +1122,7 @@ describe('Room page', () => {
       load({ ...room, status: 'Cancelled' });
 
       expect(element().querySelector('[data-closed]')?.textContent).toContain('This room is closed.');
-      expect(element().querySelector('[data-closed] a')?.getAttribute('href')).toBe('/games');
+      expect(element().querySelector('[data-closed] a')?.getAttribute('href')).toBe('/');
       expect(maybeButton('Leave room')).toBeUndefined();
       expect(maybeButton('I’m ready')).toBeUndefined();
     });

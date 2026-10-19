@@ -30,17 +30,13 @@
   column-gap: 0.5rem;
   row-gap: 0.25rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
+  border: 1px solid #a9a9b3; // a little darker than --border, so it shows over the picture behind the match
   border-radius: 0.75rem;
 }
 
 .standings li.winner {
   border-color: var(--winner);
   box-shadow: 0 0 0 1px var(--winner);
-}
-
-.standings li.you {
-  background: var(--surface-muted);
 }
 
 .place {
@@ -68,13 +64,48 @@
   background: var(--surface-muted);
 }
 
+// The final portfolio is what the ranking goes by, so it stands out: a large figure with what it gained or lost.
+.total {
+  display: grid;
+  justify-items: end;
+  line-height: 1.15;
+}
+
+.total-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .portfolio {
-  font-weight: 700;
+  font-size: 1.5rem;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
+.winner .portfolio {
+  color: var(--winner);
+}
+
 .portfolio.negative {
+  color: var(--loss);
+}
+
+.change {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.change.gain {
+  color: var(--winner);
+}
+
+.change.loss {
   color: var(--loss);
 }
 

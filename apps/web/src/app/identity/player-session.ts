@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
+import { Avatar } from '../profile/profile-api';
 
 /** Mirrors `CurrentPlayerResponse` from `GET /api/me`, `POST /api/guest-sessions` and `POST /api/wallet/verify`. */
 export interface CurrentPlayer {
@@ -23,10 +24,17 @@ export class PlayerSession {
 
   readonly player = signal<CurrentPlayer | null>(null);
   readonly status = signal<PlayerSessionStatus>('loading');
+  /** The player's avatar for the header, from their profile; null until it has loaded. */
+  readonly avatar = signal<Avatar | null>(null);
 
   /** Reflects a display name change made through the profile, so the header stays in sync. */
   updateDisplayName(displayName: string): void {
     this.player.update((player) => (player ? { ...player, displayName } : player));
+  }
+
+  /** Reflects an avatar or photo change made through the profile, or the profile once loaded. */
+  updateAvatar(avatar: Avatar | null): void {
+    this.avatar.set(avatar);
   }
 
   /** Adopts the identity the server returned after a session change (e.g. wallet sign-in). */

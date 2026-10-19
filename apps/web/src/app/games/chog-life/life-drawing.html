@@ -18,7 +18,7 @@
       [class]="'spot type-' + spot.tile.type.toLowerCase() + ' lane-' + spot.tile.lane.toLowerCase()"
       [class.last-stop]="lastStop() === spot.tile.index"
       [class.choice]="choice().has(spot.tile.index)"
-      [attr.transform]="'translate(' + spot.x + ' ' + spot.y + ')'"
+      [attr.transform]="'translate(' + spot.x + ' ' + spot.y + ') scale(' + spotScale + ')'"
       [attr.data-spot]="spot.tile.index"
       [attr.data-type]="spot.tile.type"
       [attr.data-lane]="spot.tile.lane"

@@ -11,6 +11,20 @@
   container-type: inline-size;
 }
 
+// Clear panels that blur the race track picture behind them, so the text stays readable.
+.side,
+.controls {
+  padding: 0.75rem 1rem;
+  border: 1px solid #b9a6f2; // the lavender of the picture's flags and karts
+  border-radius: 0.75rem;
+  background: transparent;
+  backdrop-filter: blur(3px);
+}
+
+.controls {
+  margin: 0.75rem 0;
+}
+
 .players {
   display: flex;
   flex-wrap: wrap;
@@ -416,6 +430,12 @@
   .track.fill .label {
     font-size: 0.9375rem;
     line-height: 1.25rem;
+  }
+
+  // Every tile keeps room for a row of cars, so all rows are the same height even when the board is short, as under
+  // the results; a car is about 2.45rem tall at this width.
+  .track.fill .pawns {
+    min-height: 2.5rem;
   }
 
   .track.fill .car {

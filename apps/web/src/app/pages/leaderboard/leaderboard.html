@@ -1,4 +1,4 @@
-<h1>Leaderboard</h1>
+<h1>Ladder</h1>
 
 <div class="choices">
   <div class="segmented" role="group" aria-label="Game">
@@ -24,10 +24,10 @@
 
 @switch (loadState()) {
   @case ('loading') {
-    <app-loading-state message="Loading leaderboard…" />
+    <app-loading-state message="Loading the ladder…" />
   }
   @case ('error') {
-    <app-error-state message="The leaderboard could not be loaded." (retry)="load()" />
+    <app-error-state message="The ladder could not be loaded." (retry)="load()" />
   }
   @case ('ready') {
     @if (board(); as current) {

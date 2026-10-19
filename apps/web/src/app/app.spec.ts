@@ -1,11 +1,12 @@
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Route, Router, provideRouter } from '@angular/router';
 import { App } from './app';
 import { appRoutes } from './app.routes';
 import { CurrentPlayer, PlayerSession, PlayerSessionStatus } from './identity/player-session';
+import { Avatar } from './profile/profile-api';
 import { PAGE_LOAD, withNavigationErrorState } from './shell/navigation-status';
 
 @Component({ template: '<h1>Stub page</h1>' })
@@ -14,7 +15,7 @@ class StubPage {}
 /** Lightweight pages so shell behaviour is tested without the real pages' HTTP calls. */
 const stubRoutes: Route[] = [
   { path: '', pathMatch: 'full', component: StubPage },
-  { path: 'games', component: StubPage },
+  { path: 'chogs', component: StubPage },
   { path: 'profile', component: StubPage },
   { path: 'broken', loadComponent: () => Promise.reject(new Error('chunk failed')) },
   { path: 'slow', loadComponent: () => slowPage.promise },
@@ -32,6 +33,10 @@ describe('App shell', () => {
   const session = {
     player: signal<CurrentPlayer | null>(null),
     status: signal<PlayerSessionStatus>('loading'),
+    avatar: signal<Avatar | null>(null),
+    updateAvatar(avatar: Avatar | null) {
+      this.avatar.set(avatar);
+    },
     ensureGuest: vi.fn(),
   };
   const pageLoad = vi.fn();
@@ -75,17 +80,38 @@ describe('App shell', () => {
 
       expect(element.querySelector('.brand')?.textContent).toContain('Chog Game Arena');
       const links = Array.from(element.querySelectorAll('nav[aria-label="Main"] a'));
-      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/games', '/chogs', '/leaderboard', '/profile']);
+      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/chogs', '/ladder']);
       expect(element.querySelector('main router-outlet')).not.toBeNull();
     });
 
-    it('shows the guest display name once the session is ready', async () => {
+    it('shows the player’s avatar and name, leading to their profile, once the session is ready', async () => {
       session.player.set({ playerId: 'x', displayName: 'Chog 4821', kind: 'Guest', walletAddress: null });
       session.status.set('ready');
 
-      const { element } = await render();
+      const { fixture, element } = await render();
+      const link = element.querySelector('a.player') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('/profile');
+      expect(link.getAttribute('aria-label')).toBe('Your profile: Chog 4821');
+      expect(link.textContent?.trim()).toBe('Chog 4821');
+      // The name shows alone until the profile with the avatar arrives.
+      expect(link.querySelector('app-avatar-badge')).toBeNull();
 
-      expect(element.querySelector('.player')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Playing as Chog 4821');
+      const http = TestBed.inject(HttpTestingController);
+      http.expectOne('/api/profile').flush({ avatar: { id: 'classic', name: 'Classic', color: '#5b2bd6', imageUrl: '/api/avatars/a1' } });
+      await fixture.whenStable();
+      expect(link.querySelector('app-avatar-badge img')?.getAttribute('src')).toBe('/api/avatars/a1');
+    });
+
+    it('keeps the name alone when the profile cannot be loaded', async () => {
+      session.player.set({ playerId: 'x', displayName: 'Chog 4821', kind: 'Guest', walletAddress: null });
+      session.status.set('ready');
+
+      const { fixture, element } = await render();
+      TestBed.inject(HttpTestingController).expectOne('/api/profile').flush('down', { status: 503, statusText: 'Service Unavailable' });
+      await fixture.whenStable();
+
+      expect(element.querySelector('a.player')?.textContent?.trim()).toBe('Chog 4821');
+      expect(element.querySelector('a.player app-avatar-badge')).toBeNull();
     });
 
     it('offers a retry when the guest session could not be established', async () => {
@@ -130,10 +156,10 @@ describe('App shell', () => {
 
     it('marks the current page link with aria-current', async () => {
       const { fixture, element } = await render();
-      await navigate(fixture, '/games');
+      await navigate(fixture, '/chogs');
 
       const current = Array.from(element.querySelectorAll('nav a[aria-current="page"]'));
-      expect(current.map((a) => a.textContent?.trim())).toEqual(['Games']);
+      expect(current.map((a) => a.textContent?.trim())).toEqual(['My Chogs']);
     });
 
     it('moves focus to the main content after an in-app navigation, but not on first load', async () => {
@@ -143,22 +169,22 @@ describe('App shell', () => {
       await navigate(fixture, '/');
       expect(document.activeElement).not.toBe(main);
 
-      const gamesLink = element.querySelector('nav a[href="/games"]') as HTMLAnchorElement;
-      gamesLink.focus();
-      await navigate(fixture, '/games');
+      const chogsLink = element.querySelector('nav a[href="/chogs"]') as HTMLAnchorElement;
+      chogsLink.focus();
+      await navigate(fixture, '/chogs');
 
       expect(document.activeElement).toBe(main);
     });
 
     it('shows a reloadable error when a page cannot be loaded, and keeps the current page', async () => {
       const { fixture, element } = await render();
-      await navigate(fixture, '/games');
+      await navigate(fixture, '/profile');
 
       expect(await navigate(fixture, '/broken')).toBe(false);
 
       const alert = element.querySelector('main [role="alert"]') as HTMLElement;
       expect(alert.textContent).toContain('This page could not be loaded');
-      expect(TestBed.inject(Router).url).toBe('/games');
+      expect(TestBed.inject(Router).url).toBe('/profile');
       expect(element.querySelector('main h1')?.textContent).toBe('Stub page');
 
       (alert.querySelector('button') as HTMLButtonElement).click();
