@@ -19,7 +19,7 @@ namespace ChogGames.Api.Rooms;
 /// game without rules. A member's ability choice is shown only to themselves until the start locks it (DEC-035); once
 /// locked, everyone sees its uses left and each member's seat, which ability targets name (DEC-036). Achievements a
 /// completed match unlocked are shown only to the player who earned them (DEC-063). Each member shows their cosmetic
-/// collector badge, never how many Chogs they hold (DEC-065).
+/// collector badge, never how many Chogs they hold (DEC-065). A photo that reports hid shows only to its owner (DEC-070).
 /// </summary>
 public sealed class RoomSnapshots(
     ChogGamesDbContext db,
@@ -42,6 +42,16 @@ public sealed class RoomSnapshots(
             .Where(p => memberIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, cancellationToken);
 
+        // Photos reports hid show only to their owners (DEC-070).
+        var imageIds = players.Values.Select(p => p.AvatarImageId).OfType<Guid>().ToArray();
+        var hiddenImages = imageIds.Length == 0
+            ? []
+            : (await db.AvatarImages.AsNoTracking()
+                .Where(i => imageIds.Contains(i.Id) && i.HiddenAt != null)
+                .Select(i => i.Id)
+                .ToListAsync(cancellationToken))
+                .ToHashSet();
+
         var unlocked = room.Status == RoomStatus.Completed
             ? (await db.PlayerAchievements.AsNoTracking()
                 .Where(a => a.RoomId == room.Id && viewerIds.Contains(a.PlayerId))
@@ -58,12 +68,13 @@ public sealed class RoomSnapshots(
         using var state = room.State is not null && _rulesByGame.ContainsKey(room.GameType) ? JsonDocument.Parse(room.State) : null;
         return viewerIds.Distinct().ToDictionary(
             viewerId => viewerId,
-            viewerId => Build(room, players, lobby, state, viewerId, unlocked?[viewerId] ?? []));
+            viewerId => Build(room, players, hiddenImages, lobby, state, viewerId, unlocked?[viewerId] ?? []));
     }
 
     private RoomResponse Build(
         GameRoom room,
         Dictionary<Guid, Player> players,
+        IReadOnlySet<Guid> hiddenImages,
         IReadOnlyDictionary<Guid, CharacterSnapshot> lobby,
         JsonDocument? state,
         Guid viewerId,
@@ -91,7 +102,9 @@ public sealed class RoomSnapshots(
                     m.Seat,
                     ResultOf(m),
                     ProfileEndpoints.CollectorBadgeOf(player.ChogsHeld),
-                    player.AvatarImageId is { } imageId ? AvatarImageEndpoints.UrlFor(imageId) : null);
+                    player.AvatarImageId is { } imageId && (m.PlayerId == viewerId || !hiddenImages.Contains(imageId))
+                        ? AvatarImageEndpoints.UrlFor(imageId)
+                        : null);
             })
             .ToArray();
 

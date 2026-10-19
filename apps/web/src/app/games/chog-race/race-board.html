@@ -28,6 +28,9 @@
           @if (armed().get(member.seat)?.boost; as boost) {
             <span class="tag" data-boosted>Boost +{{ boost }}</span>
           }
+          @if (member.avatarImageUrl && !member.isYou) {
+            <app-report-photo [photoUrl]="member.avatarImageUrl" [name]="member.displayName" />
+          }
         </li>
       }
     </ul>

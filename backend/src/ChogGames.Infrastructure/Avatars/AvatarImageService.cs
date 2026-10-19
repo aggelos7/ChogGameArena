@@ -50,9 +50,15 @@ public sealed class AvatarImageService(ChogGamesDbContext db, TimeProvider timeP
         return true;
     }
 
-    /// <summary>The stored WebP with this id, or null when there is none (any longer).</summary>
-    public Task<byte[]?> FindAsync(Guid imageId, CancellationToken cancellationToken) =>
-        db.AvatarImages.AsNoTracking().Where(i => i.Id == imageId).Select(i => i.Data).SingleOrDefaultAsync(cancellationToken);
+    /// <summary>The stored WebP with this id and who owns it, or null when there is none (any longer).</summary>
+    public Task<StoredAvatarImage?> FindAsync(Guid imageId, CancellationToken cancellationToken) =>
+        db.AvatarImages.AsNoTracking().Where(i => i.Id == imageId)
+            .Select(i => new StoredAvatarImage(i.Data, i.PlayerId, i.HiddenAt != null))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    /// <summary>Whether reports hid the player's current photo (STORY-069, DEC-070); false without one.</summary>
+    public Task<bool> IsHiddenAsync(Guid playerId, CancellationToken cancellationToken) =>
+        db.AvatarImages.AsNoTracking().AnyAsync(i => i.PlayerId == playerId && i.HiddenAt != null, cancellationToken);
 
     /// <summary>Locks the player's row; false when there is no such player. The only row these changes lock.</summary>
     private async Task<bool> LockPlayerAsync(Guid playerId, CancellationToken cancellationToken)
@@ -62,3 +68,6 @@ public sealed class AvatarImageService(ChogGamesDbContext db, TimeProvider timeP
         return locked.Count == 1;
     }
 }
+
+/// <summary>A stored photo as served: its WebP, its owner and whether reports hid it from other players.</summary>
+public sealed record StoredAvatarImage(byte[] Webp, Guid PlayerId, bool Hidden);

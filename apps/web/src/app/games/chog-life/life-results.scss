@@ -23,6 +23,7 @@
 }
 
 // Place and avatar on the left, name with the final portfolio on the right, then the summary and the statistics.
+// Clear panels that blur the picture behind the match, like the final board's (`life-board.scss`).
 .standings li {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
@@ -30,8 +31,10 @@
   column-gap: 0.5rem;
   row-gap: 0.25rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid #a9a9b3; // a little darker than --border, so it shows over the picture behind the match
+  border: 1px solid #b9a6f2; // the lavender of the picture's balloons and signs
   border-radius: 0.75rem;
+  background: transparent;
+  backdrop-filter: blur(3px);
 }
 
 .standings li.winner {

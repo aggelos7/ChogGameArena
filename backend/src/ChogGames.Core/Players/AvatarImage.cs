@@ -18,6 +18,12 @@ public sealed class AvatarImage
 
     public DateTimeOffset CreatedAt { get; private set; }
 
+    /// <summary>
+    /// When enough players reported the photo for it to be hidden from everyone but its owner and operators (STORY-069,
+    /// DEC-070); null while it shows. Set and cleared only by the server's report handling.
+    /// </summary>
+    public DateTimeOffset? HiddenAt { get; private set; }
+
     private AvatarImage()
     {
     }

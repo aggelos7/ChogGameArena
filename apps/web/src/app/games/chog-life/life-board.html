@@ -25,6 +25,9 @@
             @if (armedName(member.seat); as armed) {
               <span class="tag armed" data-armed>{{ armed }} armed</span>
             }
+            @if (member.avatarImageUrl && !member.isYou) {
+              <app-report-photo [photoUrl]="member.avatarImageUrl" [name]="member.displayName" />
+            }
           </span>
           @if (pawnBySeat().get(member.seat); as pawn) {
             <span class="portfolio" [class.negative]="pawn.portfolio < 0" data-portfolio>{{ pawn.portfolio }} MON</span>

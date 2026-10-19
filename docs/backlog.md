@@ -29,6 +29,7 @@
 - **Public beta:** E07 complete and security/restore checks passed.
 - **Second game:** E08 complete, shared services regression passed.
 - **Later enhancements:** E09, not a launch blocker.
+- **Third game:** E10 complete, shared services regression passed; starts after the public launch.
 
 ## Ordered epics, features, and stories
 
@@ -753,6 +754,19 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
 
 
+#### STORY-069 — Terms, privacy and photo reports
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E07
+- **Implementation:** What the public launch needs for uploaded photos (DEC-069, DEC-070). Terms of use and privacy pages in plain language, describing what the app stores (sessions, wallet address, photos, backups), linked from every page's footer, with the contact address from `Legal:ContactEmail`; the text is a draft for the product owner's legal review. Uploading a photo needs a one-time acceptance of the current terms version, stored with the player. A Report button on any other player's photo (profile, boards, Ladder) with a fixed reason (sexual content, hate or harassment, violence, scam or spam, other), one report per player per photo and a rate limit. A photo reported by 3 different players is hidden from everyone but its owner, who sees it marked under review. Operators are the wallets in `Moderation:OperatorWallets`; only they see a Reports page listing reported photos with counts and reasons, where they remove the photo or dismiss its reports.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the terms and privacy pages are reachable from every page, an upload asks once for acceptance, a report is stored with its reason, the third distinct reporter hides the photo for everyone but its owner, and an operator's remove or dismiss clears it from the list.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: uploads without acceptance, reports of your own or a missing photo, unknown reasons, repeat reports and reports over the limit are refused, and anyone who isn't an operator gets `404` from the Reports page and its API.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Photos only: no reports of names or players, no bans, no automatic image scanning, no email notifications.
+
+
 ## E08 — Chog Race
 
 
@@ -970,3 +984,209 @@
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** oversized, non-image, malformed or disguised files are refused without changing the avatar, and no player can change another player's avatar.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. No new storage service or container; NFT avatars are out of scope.
+
+
+## E10 — Chog Royale
+
+Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requirements.md) (ROYALE-001–066). These stories replace the `ROY-STORY-001–022` drafts in [`docs/games/chog-royale-backlog.md`](games/chog-royale-backlog.md), which keeps the mapping. Chog Royale starts after the public launch (E07 release checklist passed). Its product questions are asked story by story, before coding, and recorded as decisions.
+
+
+### Feature: Royale rounds and rules
+
+
+#### STORY-070 — Simultaneous rounds in the shared engine
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Add a round mode to the shared match engine next to turns, chosen by a game's rules: every player still playing may act in the same round until its deadline; a player's submission is private, can be revised, and can be locked; the round resolves once, at the deadline or as soon as every player has locked, with the rules' default for anyone who didn't submit. Submissions must not make other players' commands stale; the room shows only who has submitted. Timers, missed rounds and the time cap run on the server whether clients are connected or not (ROYALE-004–008, 026, 031, 052, 061). Chog Life and Chog Race keep their turns unchanged.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** two to six players submit in the same round without `not_your_turn` or stale-version refusals, a round resolves exactly once at its deadline or when all have locked, and other players see only that someone submitted.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: outsiders, late, replayed and locked-round submissions are refused, and a disconnected player never holds up the round.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded, including the existing Chog Life and Chog Race engine and concurrency tests.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Engine only: no Chog Royale rules, cards or web screen; a test game's rules exercise the round mode.
+
+
+#### STORY-071 — Royale configuration, match state and rounds
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Add the Chog Royale game module with versioned rules checked at API startup: 2–6 players, five rounds, round phases (event announcement, decisions, reveal) with their durations, 100 fictional MON each, integer balances that never go below zero, and the match's time cap (ROYALE-001–004, 010–012, 053–056, 059). A match records its rules version. Every action is HODL for now, so a match plays its five rounds to the end. Catalogue status comes from `CHOG_ROYALE_STATUS` (default `ComingSoon`). The lobby, Chog choice and ability choice are the suite's own.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a Chog Royale match starts with 100 MON per player in round 1 and reaches its end after exactly five rounds without client input.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: invalid rules stop the API at startup, and a room of one cannot start.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. No cards, events, rankings or game screen yet.
+
+
+#### STORY-072 — Hidden actions, HODL and timeouts
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Add the round's actions: play a card from your hand (with a target for targeted cards), or HODL, revisable until you lock or the deadline passes; a player without an action at the deadline HODLs (ROYALE-005–008, 016–018, 048, 057, 060–061). HODL plays no card, uses no ability and keeps the hand. Each player's view shows their own pending action; others see only who has submitted until the reveal.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** only the last valid submission counts, an idle player HODLs at the deadline, and no other player's view or live update reveals an action before the reveal.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a card not in the hand, a missing, own or departed target, and a late or duplicate action are refused.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Played cards have no effect yet.
+
+
+#### STORY-073 — Royale deck and hands
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** A versioned, weighted deck in the rules; each player is dealt three cards with match-unique card ids from server randomness, a played card is replaced after the round except after round five, and HODL keeps the hand (ROYALE-015–020, 062).
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** each player holds three private cards, a played card is replaced before the next round, and the same seeded randomness deals the same hands.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: no view or live update shows another player's hand.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-074 — Round resolution and ledger
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Resolve a locked round in the documented phase order (snapshot, Chaos, defenses, gains, Rugs, swaps, market effects, clamp), with seat priority rotated each round, against a snapshot taken before any effect (ROYALE-026–032). Each round adds a ledger entry per player (card, target, defense, market effect, change, resulting balance) to the match state and the reveal. Card effects are placeholders until STORY-075.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the same state, actions and randomness always give the same balances and ledger, and seat priority rotates each round.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a retried or repeated resolution never changes balances twice.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-075 — Pump, Rug Pull and Diamond Hands
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Pump gains 20 MON; Rug Pull steals up to 15 MON from a target, never more than they hold; Diamond Hands blocks the first hostile effect aimed at its player in resolution order and gains 5 MON (ROYALE-017, 025, 029). Values live in the rules version.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a Pump gains 20, a Rug on a player holding 8 takes 8, and a shielded player hit twice loses only to the second attack.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: no balance goes below zero.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-076 — Whale Swap, Airdrop and Chaos
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Whale Swap exchanges 20% of balance with a target, at most 20 MON each way, from the pre-round snapshot, with at most one successful swap per player per round; Airdrop gains 5–25 MON from server randomness, recorded in the ledger; Chaos adds one modifier from a bounded pool, at most one per round however many are played (ROYALE-024–025, 030, 062). The Whale Swap edge cases are settled as a decision before coding.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** overlapping swaps leave each player in at most one, every Airdrop is 5–25 and logged, and several Chaos cards add one modifier.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a swap with a shielded target is blocked and no balance goes below zero.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-077 — Market events
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Draw one shared, weighted market event per round from server randomness and show it before decisions: Meme Hype (Pump +50%), Market Crash (Pump halved), Whale Incoming (+5 to a successful Rug, within the victim's balance), Community Airdrop (+5 to everyone after cards) and Calm Market (ROYALE-021–025). Amounts round down to whole MON.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** every player sees the same event before deciding, and a Pump pays 30 under Meme Hype and 10 under Market Crash.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: no event is drawn or changed after decisions open.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-078 — Royale finish, rankings and stats
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** After round five, rank by MON, then fewer losses taken, then more successful cards, then a shared place (ROYALE-009). Results carry each player's MON, change and tie-break values; profiles, XP and the Ladder count the match as decided before coding.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** standings follow the tie-breaks in order, exact ties share a place, and the profile counts the game.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: actions after the end are refused.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-079 — Royale simulations and balancing
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Seeded tests that play many full two- and six-player matches with legal random actions, checking no balance goes negative and no round stalls, and reporting balance spreads, card win rates and match length (ROYALE-063, 065). Proposed tuning is a decision and a new rules version, never a silent change, like `docs/games/chog-life-balancing.md`.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** simulated matches always finish in five rounds with non-negative balances, and the same seeds give the same histories and rankings.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: simulations use the real command path and refuse nothing a player couldn't send.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-080 — Royale abilities
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** A Chog Royale ability catalog for the shared ability pool, once per match each, with timing windows (ROYALE-039–044): `diamond_hands_plus`, `alpha_leak` (next round's event shown only to its player), `double_pump`, and `last_second_exit` or its replacement, since actions are already revisable until the deadline. Guests and holders get the same choices; NFTs and traits give no advantage (ROYALE-037, 066).
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** each ability has its tested effect, `alpha_leak`'s preview reaches only its player, and guests and holders are offered the same abilities.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a used ability or one outside its window is refused.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+### Feature: Royale client and release
+
+
+#### STORY-081 — Royale game screen
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** The Chog Royale board in the room page, live through the room hub: market event, your three cards, opponents with balances and submitted marks, round counter and countdown; choosing a card, a target (only valid ones), HODL, lock and an ability (ROYALE-045–048, 051). Fits a 375px phone without sideways scrolling; keyboard usable; server errors shown without optimistic balance changes.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a player can play a full match from the screen on a phone and a desktop, and sees others only as submitted.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: refused commands show the server's error and nothing changes.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-082 — Reveal, round history and results
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Each round's reveal shows who played what at whom, blocks and swaps, the market effect and each player's MON change, within its time budget and shortened under reduced motion; the results show standings with ties and a readable round-by-round history (ROYALE-049, 051).
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** every player sees the same reveal and results as the server's ledger and standings.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: the reveal shows nothing the server hasn't revealed.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-083 — Royale reconnect and AFK
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** A reconnecting player gets the current round, phase, remaining server deadline, their own pending action and the public state, never others' hands or actions (ROYALE-050, 052). AFK players HODL each round under the missed-round rule decided in STORY-070.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a player who drops mid-decision returns to their pending action and the real remaining time, and one who returns after the deadline sees the round's result.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: outsiders get no match state.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+
+#### STORY-084 — Royale cross-game regression and release
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Like STORY-057: a Chog Royale match played beside Chog Life and Chog Race at once with each room isolated, cross-game commands refused, and guest and holder parity (ROYALE-064, 066); `release:verify` plays a two-player Chog Royale match; the release checklist gains a Chog Royale section; matches are timed against the five-minute target (ROYALE-003, 065). `CHOG_ROYALE_STATUS` is `Available` on staging and in `deploy:verify`. No new production service.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** all three games play at once on one stack, two- and six-player Chog Royale matches finish within five minutes, and `release:verify` passes with Chog Royale.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: another game's commands, match ids and rooms are refused, and turning Chog Royale off leaves the other games playable.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story.

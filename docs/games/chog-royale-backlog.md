@@ -5,6 +5,26 @@
 **Status:** Planned; all stories initially `Todo`  
 **Scope:** Additive third game only. Do not renumber, rewrite, or block ongoing Chog Life / Chog Race stories.
 
+> **Superseded for tracking (2026-10-19):** these drafts are now epic **E10** in [`docs/backlog.md`](../backlog.md), as `STORY-070`–`STORY-084` with GitHub issues. Status is kept there, not here. The engine's simultaneous rounds, which these drafts assumed already existed, became STORY-070. Mapping:
+>
+> | E10 story | Replaces |
+> |---|---|
+> | STORY-070 Simultaneous rounds in the shared engine | new (ROY-STORY-003/004 engine part) |
+> | STORY-071 Royale configuration, match state and rounds | ROY-STORY-001, 002, 003 |
+> | STORY-072 Hidden actions, HODL and timeouts | ROY-STORY-004, 005 |
+> | STORY-073 Royale deck and hands | ROY-STORY-009 |
+> | STORY-074 Round resolution and ledger | ROY-STORY-006, 007 |
+> | STORY-075 Pump, Rug Pull and Diamond Hands | ROY-STORY-010 |
+> | STORY-076 Whale Swap, Airdrop and Chaos | ROY-STORY-011 |
+> | STORY-077 Market events | ROY-STORY-012 |
+> | STORY-078 Royale finish, rankings and stats | ROY-STORY-008 |
+> | STORY-079 Royale simulations and balancing | ROY-STORY-013 |
+> | STORY-080 Royale abilities | ROY-STORY-014, 015 |
+> | STORY-081 Royale game screen | ROY-STORY-016, 017 |
+> | STORY-082 Reveal, round history and results | ROY-STORY-018 |
+> | STORY-083 Royale reconnect and AFK | ROY-STORY-019 |
+> | STORY-084 Royale cross-game regression and release | ROY-STORY-020, 021, 022 |
+
 ## Delivery conventions
 
 - Implement **one story per AI-agent session/PR**. Read `AGENTS.md`, suite architecture, this backlog and the Royale requirements first.

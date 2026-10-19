@@ -4,8 +4,7 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
 
 ## Pending
 
-- DEC-004: Guest-to-wallet profile linking and account merge behavior — Pending before linking. Sign-in binding decided in DEC-015; merging two existing histories is still open.
-- DEC-005: Game branding/assets and permissions — Pending before public launch.
+- None. DEC-004 and DEC-005 were settled by DEC-069.
 
 ## Confirmed
 
@@ -355,3 +354,14 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **Tiles:** each tile of the illustrated board (DEC-048) is drawn 1.3 times its former size, contents included (`SPOT_SCALE`), with the spacing widened just enough that tiles don't touch.
   - **Folded lanes:** on the horizontal board each fork's Safe and Degen lanes are folded in two: a lane's tiles alternate between two rows, top then bottom, a column at a time, with an S-bend from one column to the next. A lane of four takes two columns instead of four, so the board is about a third narrower and its tiles are drawn about a quarter larger on a 1920px screen. The lane names sit between the two lanes. Phones keep the vertical board with the lanes side by side, unfolded. Fewer tiles to a row alone was measured first and gained nothing, because the forks' lanes set the board's width; tightening only the space around forks was offered and not chosen.
   - **Web only:** no API, rules, config or migration change.
+- DEC-069 (2026-10-19 — confirmed by product owner): Public launch decisions.
+  - **Branding (settles DEC-005):** the product owner holds the rights, or written permission, to use the Chog name, the Chog NFT artwork, the arena logo and the game pictures publicly. Nothing is replaced before launch. Asking for a written permission first and switching to own art only were offered and not chosen.
+  - **Moderation:** the launch needs terms of use, a privacy page and a Report button on uploaded profile photos, with a simple list where an operator reviews reports; removing a photo stays as today (DEC-018). This is a new story that blocks the launch. Terms with email reports only, turning photos off at launch and launching as is were offered and not chosen.
+  - **Games at launch:** Chog Life and Chog Race are both `Available` in production (`CHOG_LIFE_STATUS` and `CHOG_RACE_STATUS`); Chog Royale stays `ComingSoon`. Launching Chog Life only was offered and not chosen.
+  - **Guest and wallet histories (settles DEC-004):** today's behaviour from DEC-015 is the decision for launch: a wallet already bound to a player signs in as that player, and the caller's guest and its history are left as they are, with no merge. Revisit if players ask. Merging histories on sign-in was offered and not chosen.
+- DEC-070 (2026-10-19, STORY-069 — confirmed by product owner): Terms, privacy and photo reports.
+  - **Text:** Claude drafts plain-language terms of use and a privacy page from what the app actually stores (sessions, wallet address, photos, backups for about four weeks); the product owner has it reviewed legally before launch. The pages are linked from every page's footer and show the contact address from `Legal:ContactEmail`, set per deployment, never written into the repository. The product owner supplying the text was offered and not chosen.
+  - **Acceptance:** playing needs no acceptance; uploading a photo needs a one-time acceptance of the current terms version, stored with the player. Footer links only, and accepting before the first match, were offered and not chosen.
+  - **Reports:** any player, guests included, can report another player's photo wherever it shows, with one fixed reason (sexual content, hate or harassment, violence, scam or spam, other) and no free text, once per photo, within a rate limit. An optional note and wallet-only reporting were offered and not chosen.
+  - **Hiding:** a photo reported by 3 different players is hidden from everyone but its owner (who sees it marked under review) until an operator removes it or dismisses its reports. Never hiding automatically was offered and not chosen.
+  - **Review:** operators are the wallet addresses in `Moderation:OperatorWallets`. Only they see a Reports page listing reported photos with counts and reasons, where they remove the photo or dismiss its reports; to anyone else the page and its API don't exist (`404`). Removing stays as in DEC-018. Runbook SQL only was offered and not chosen.
