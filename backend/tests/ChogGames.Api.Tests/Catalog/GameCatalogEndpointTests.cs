@@ -20,12 +20,12 @@ public class GameCatalogEndpointTests
     }
 
     [Fact]
-    public async Task Default_catalogue_lists_both_games_as_coming_soon()
+    public async Task Default_catalogue_lists_every_game_as_coming_soon()
     {
         var games = await GetGamesAsync();
 
-        Assert.Equal(["chog-life", "chog-race"], games.Select(g => g.Id));
-        Assert.Equal(["Chog Life", "Chog Race"], games.Select(g => g.Name));
+        Assert.Equal(["chog-life", "chog-race", "chog-royale"], games.Select(g => g.Id));
+        Assert.Equal(["Chog Life", "Chog Race", "Chog Royale"], games.Select(g => g.Name));
         Assert.All(games, game => Assert.Equal("ComingSoon", game.Status));
         Assert.All(games, game => Assert.False(string.IsNullOrWhiteSpace(game.Description)));
     }
@@ -37,13 +37,13 @@ public class GameCatalogEndpointTests
         {
             ["Games:Items:0:Status"] = "Available",
             ["Games:Items:1:Status"] = "Maintenance",
-            ["Games:Items:2:Id"] = "chog-future",
-            ["Games:Items:2:Name"] = "Chog Future",
-            ["Games:Items:2:Status"] = "ComingSoon",
+            ["Games:Items:3:Id"] = "chog-future",
+            ["Games:Items:3:Name"] = "Chog Future",
+            ["Games:Items:3:Status"] = "ComingSoon",
         });
 
         Assert.Equal(
-            [("chog-life", "Available"), ("chog-race", "Maintenance"), ("chog-future", "ComingSoon")],
+            [("chog-life", "Available"), ("chog-race", "Maintenance"), ("chog-royale", "ComingSoon"), ("chog-future", "ComingSoon")],
             games.Select(g => (g.Id, g.Status)));
     }
 

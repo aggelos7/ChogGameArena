@@ -3,10 +3,11 @@ import { RouterLink } from '@angular/router';
 import { GAME_STATUS_LABELS, GameCatalog, GameSummary } from '../../games/game-catalog';
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/state-views';
 
-/** Each game's picture, the one its match is played over, shown behind its card. */
+/** Each game's picture, the one its match is played over (or will be), shown behind its card. */
 const GAME_PICTURES: Record<string, string> = {
   'chog-life': '/chog-life/background.webp',
   'chog-race': '/chog-race/background.webp',
+  'chog-royale': '/chog-royale/background.webp',
 };
 
 type CatalogueState =
