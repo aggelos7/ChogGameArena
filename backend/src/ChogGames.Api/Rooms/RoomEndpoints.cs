@@ -63,6 +63,10 @@ public static class RoomEndpoints
     /// The player's uploaded profile photo, which the boards draw as their pawn (STORY-062, DEC-018); read live, not locked
     /// at the start. Null without one. Their match character stays <paramref name="Character"/>.
     /// </param>
+    /// <param name="Avatar">
+    /// The player's profile avatar, as their header shows it (STORY-085): the built-in avatar's colour and, while there is
+    /// one they may see, the photo of <paramref name="AvatarImageUrl"/>. The player list and the results draw it.
+    /// </param>
     public sealed record RoomMemberResponse(
         string DisplayName,
         string AvatarId,
@@ -78,7 +82,8 @@ public static class RoomEndpoints
         int? Seat,
         JsonElement? Result,
         ProfileEndpoints.CollectorBadgeResponse? Collector,
-        string? AvatarImageUrl);
+        string? AvatarImageUrl,
+        ProfileEndpoints.AvatarResponse Avatar);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>

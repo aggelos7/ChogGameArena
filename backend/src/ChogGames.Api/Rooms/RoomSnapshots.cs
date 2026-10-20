@@ -87,6 +87,9 @@ public sealed class RoomSnapshots(
             {
                 var player = players[m.PlayerId];
                 var ability = AbilityOf(room, m);
+                var photo = player.AvatarImageId is { } imageId && (m.PlayerId == viewerId || !hiddenImages.Contains(imageId))
+                    ? imageId
+                    : (Guid?)null;
                 return new RoomMemberResponse(
                     player.DisplayName,
                     player.AvatarId,
@@ -102,9 +105,8 @@ public sealed class RoomSnapshots(
                     m.Seat,
                     ResultOf(m),
                     ProfileEndpoints.CollectorBadgeOf(player.ChogsHeld),
-                    player.AvatarImageId is { } imageId && (m.PlayerId == viewerId || !hiddenImages.Contains(imageId))
-                        ? AvatarImageEndpoints.UrlFor(imageId)
-                        : null);
+                    photo is { } id ? AvatarImageEndpoints.UrlFor(id) : null,
+                    ProfileEndpoints.ToResponse(ProfileEndpoints.AvatarOf(player.AvatarId), photo));
             })
             .ToArray();
 

@@ -1,11 +1,7 @@
 import { Component, computed, input } from '@angular/core';
 import { AvatarBadge } from '../../profile/avatar-badge';
-import { Avatar } from '../../profile/profile-api';
-import { RoomCharacter, RoomMember } from '../../rooms/rooms-api';
+import { RoomMember } from '../../rooms/rooms-api';
 import { ordinal, signedMon } from './life-board-model';
-
-/** NFT Chogs have no colour of their own here; they use the brand colour. */
-const NFT_COLOR = 'var(--brand)';
 
 /**
  * Mirrors Chog Life's result for one player (STORY-043, DEC-046), stored with their rank when the match ended. The server
@@ -112,7 +108,4 @@ export class LifeResultsView {
     return `${names(winners)} ${verb}${portfolio === undefined ? '' : ` with ${portfolio} MON`}!`;
   });
 
-  protected badge(character: RoomCharacter): Avatar {
-    return { id: character.id, name: character.name, color: character.color ?? NFT_COLOR };
-  }
 }
