@@ -253,7 +253,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 - **Mock NFT ownership** isn't exclusive: every wallet that isn't a fixture sees the same tokens.
 - **Deferred:** WalletConnect (DEC-014) and smart-contract wallet (ERC-1271) sign-in.
 - **No staging VM yet:** the checklist's first full pass on staging (DEC-053) is a launch gate, not done in the repo. The automated part has passed against the dev servers and inside `deploy:verify`.
-- **Release smoke data:** every `release:verify` run leaves eight guests and three completed matches (one of them Chog Race, so both games must be `Available`) on the target. That's fine on staging, and the reason it never runs against production.
+- **Release smoke data:** every `release:verify` run leaves eight guests and three completed matches (one of them Chog Race, so both games must be `Available`) on the target. That’s fine on a local stack, and the reason it never runs against production.
 - **Leaderboards are ranked per request:** every board call aggregates `XpAwards` (indexed by game and time); fine at this scale, a cache or materialised totals would be needed with many players.
 - **XP can be farmed with extra guests:** anyone can open more guest sessions and beat them; there's no anti-farming rule (e.g. distinct wallets) yet.
 - **Photo reports start over with a new upload:** reports belong to one photo; its owner can upload another (within the 5 changes per 10 minutes), which shows until it is reported in turn. Operators see only photos with reports, not who uploaded what before. Deleted photos stay in the encrypted backups for up to about four weeks.
@@ -265,7 +265,7 @@ Snapshot of where the project stands, for picking work up in a new session. Sour
 
 ## What's next
 
-1. **Before the public launch:** have the terms and privacy text reviewed (DEC-070), set `LEGAL_CONTACT_EMAIL` and `MODERATION_OPERATOR_WALLETS`, set up the staging VM and pass `docs/release-checklist.md` on it (DEC-053), then set both games `Available` in production (DEC-069).
+1. **Before the public launch:** have the terms and privacy text reviewed (DEC-070), set `LEGAL_CONTACT_EMAIL` and `MODERATION_OPERATOR_WALLETS`, pass `docs/release-checklist.md` on a local production-like stack (DEC-071, no staging server), deploy the production server, then set both games `Available` in production (DEC-069).
 2. **Trait rules:** map real traits to abilities before turning `Abilities:TraitBased:Enabled` on (DEC-066).
 3. **After the launch:** Chog Royale, epic E10 (STORY-070–084, requirements in `docs/games/chog-royale-requirements.md`), starting with the engine's simultaneous rounds (STORY-070).
 
