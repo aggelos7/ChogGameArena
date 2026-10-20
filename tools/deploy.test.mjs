@@ -39,7 +39,7 @@ test('defines the web, api, migrate, postgres and redis services, and certbot in
   assert.match(read(production, '.env.example'), /^COMPOSE_PROFILES=letsencrypt(,|$)/m, 'the VM template turns certbot on');
 });
 
-test('only nginx publishes ports: 80 and 443 on every interface by default', { skip }, () => {
+test('only nginx publishes ports: 80 and 443 on every IPv4 and IPv6 address by default', { skip }, () => {
   const { services } = config(WITH_CERTBOT);
   for (const [name, service] of Object.entries(services)) {
     if (name !== 'web') assert.equal(service.ports, undefined, `${name} must not publish a port`);
@@ -48,11 +48,24 @@ test('only nginx publishes ports: 80 and 443 on every interface by default', { s
   assert.deepEqual(ports(REQUIRED), [
     { host_ip: '0.0.0.0', published: '80', target: 80 },
     { host_ip: '0.0.0.0', published: '443', target: 443 },
+    { host_ip: '::', published: '80', target: 80 },
+    { host_ip: '::', published: '443', target: 443 },
   ]);
-  assert.deepEqual(ports({ ...REQUIRED, HTTP_BIND: '127.0.0.1', HTTP_PORT: '18081', HTTPS_PORT: '18443' }), [
+  // A local stack (release checklist, smoke tests) binds both families to loopback and nothing else.
+  const local = { ...REQUIRED, HTTP_BIND: '127.0.0.1', HTTP_BIND_V6: '::1', HTTP_PORT: '18081', HTTPS_PORT: '18443' };
+  assert.deepEqual(ports(local), [
+    { host_ip: '127.0.0.1', published: '18081', target: 80 },
+    { host_ip: '127.0.0.1', published: '18443', target: 443 },
+    { host_ip: '::1', published: '18081', target: 80 },
+    { host_ip: '::1', published: '18443', target: 443 },
+  ]);
+  assert.equal(config().networks.backend.enable_ipv6, true, 'IPv6 clients must reach nginx with their own address, not through a proxy');
+  // HTTP_BIND_V6 equal to HTTP_BIND collapses into one binding: IPv4 only, for a machine without IPv6.
+  assert.deepEqual(ports({ ...local, HTTP_BIND_V6: '127.0.0.1' }), [
     { host_ip: '127.0.0.1', published: '18081', target: 80 },
     { host_ip: '127.0.0.1', published: '18443', target: 443 },
   ]);
+  assert.match(read(root, 'docs', 'release-checklist.md'), /`HTTP_BIND` \/ `HTTP_BIND_V6` \/ `HTTP_PORT` \/ `HTTPS_PORT` \| `127\.0\.0\.1` \/ `::1` \//, 'the local release stack binds IPv6 to loopback too');
 });
 
 test('certbot alone writes the certificate; nginx reads it and the challenge tokens', { skip }, () => {
@@ -153,7 +166,7 @@ test('runtime images run as a non-root user and build no secrets in', () => {
 
 // The server block for the public host on a port, without its nested location blocks' bodies.
 const serverBlock = (nginx, port) => {
-  const start = nginx.search(new RegExp(`server \\{\\s*listen ${port}( ssl)?;[^}]*?server_name \\$\\{PUBLIC_HOSTNAME\\};`));
+  const start = nginx.search(new RegExp(`server \\{\\s*listen ${port}( ssl)?;\\s*listen \\[::\\]:${port}( ssl)?;[^}]*?server_name \\$\\{PUBLIC_HOSTNAME\\};`));
   assert.ok(start >= 0, `no server for PUBLIC_HOSTNAME on ${port}`);
   let depth = 0;
   for (let i = nginx.indexOf('{', start); i < nginx.length; i++) {
@@ -196,8 +209,11 @@ test('nginx serves the app and proxies the API and its WebSocket hub on one orig
 
 test('nginx serves only the public host, and only over TLS 1.2+', () => {
   const nginx = read(production, 'nginx.conf.template');
-  assert.match(nginx, /server \{\s*listen 80 default_server;\s*return 444;\s*\}/, 'other hosts over HTTP get no answer');
-  assert.match(nginx, /server \{\s*listen 443 ssl default_server;\s*ssl_reject_handshake on;\s*\}/, 'other hosts over TLS get no certificate');
+  assert.match(nginx, /server \{\s*listen 80 default_server;\s*listen \[::\]:80 default_server;\s*return 444;\s*\}/, 'other hosts over HTTP get no answer');
+  assert.match(nginx, /server \{\s*listen 443 ssl default_server;\s*listen \[::\]:443 ssl default_server;\s*ssl_reject_handshake on;\s*\}/, 'other hosts over TLS get no certificate');
+  // Every public listen exists for IPv4 and IPv6 alike (STORY-087), so neither family falls through to another server.
+  const listens = [...nginx.matchAll(/^\s*listen (.+);$/gm)].map(([, value]) => value).filter((value) => !value.startsWith('127.0.0.1:'));
+  assert.deepEqual(listens.filter((value) => value.startsWith('[::]:')).map((value) => value.slice(5)), listens.filter((value) => !value.startsWith('[')));
   const https = serverBlock(nginx, 443);
   assert.match(https, /ssl_certificate\s+\/etc\/nginx\/tls\/current\/fullchain\.pem;/);
   assert.match(https, /ssl_certificate_key \/etc\/nginx\/tls\/current\/privkey\.pem;/);

@@ -117,9 +117,13 @@ services:
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME must be set in infrastructure/production/.env (see .env.example)}
     ports:
-      # Port 80 only answers the ACME challenge and redirects to HTTPS.
+      # Port 80 only answers the ACME challenge and redirects to HTTPS. Published on IPv4 (HTTP_BIND) and
+      # IPv6 (HTTP_BIND_V6); setting HTTP_BIND_V6 to HTTP_BIND's value publishes IPv4 only (DEC-075). The
+      # backend network has IPv6, so IPv6 clients reach nginx with their own address (rate limits, logs).
       - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
       - "${HTTP_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+      - "[${HTTP_BIND_V6:-::}]:${HTTP_PORT:-80}:80"
+      - "[${HTTP_BIND_V6:-::}]:${HTTPS_PORT:-443}:443"
     volumes:
       # Written by certbot only; nginx reads the certificate and serves the challenge tokens.
       - letsencrypt:/etc/letsencrypt:ro
@@ -214,6 +218,9 @@ services:
 
 networks:
   backend:
+    # Docker assigns a private (ULA) IPv6 subnet. Without it, Docker's proxy would forward every IPv6 client
+    # from one gateway address (DEC-075).
+    enable_ipv6: true
 
 volumes:
   postgres-data:
