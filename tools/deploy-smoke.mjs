@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// STORY-045/046/048 deployment smoke test (DEC-049, DEC-050, DEC-052): builds and starts the production-like stack
+// STORY-045/046/048/087 deployment smoke test (DEC-049, DEC-050, DEC-052, DEC-075): builds and starts the production-like stack
 // as an isolated Compose project on spare ports, then checks through nginx, over TLS verified against
 // the certificate nginx serves, that the web app, the API and the WebSocket hub (wss) answer with the
-// HTTPS headers, that plain HTTP redirects and other host names are refused. It installs a stand-in
+// HTTPS headers, that plain HTTP redirects and other host names are refused, over IPv4 and, where the machine
+// has it, IPv6 (STORY-087). It installs a stand-in
 // "issued" certificate where certbot would write one and checks nginx switches to it. It creates a
 // guest, checks readiness is public while metrics stay internal, that the API returns the request id nginx
 // logged and logs JSON lines, recreates every container (volumes kept) and checks the session, its player and the
@@ -13,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { X509Certificate, randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { createServer } from 'node:net';
 import { connect } from 'node:tls';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +26,13 @@ const httpPort = process.env.SMOKE_HTTP_PORT ?? '18081';
 const httpsPort = process.env.SMOKE_HTTPS_PORT ?? '18443';
 const origin = `https://${hostname}:${httpsPort}`;
 const project = `chog-deploy-smoke-${process.pid}`;
+// Whether this machine can listen on IPv6 loopback; without it the stack is published on IPv4 only and the
+// IPv6 checks are skipped (STORY-087, DEC-075).
+const hasIpv6 = await new Promise((resolve) => {
+  const server = createServer();
+  server.once('error', () => resolve(false));
+  server.listen(0, '::1', () => server.close(() => resolve(true)));
+});
 const env = {
   ...process.env,
   COMPOSE_PROJECT_NAME: project,
@@ -34,6 +43,8 @@ const env = {
   WALLET_AUTH_DOMAIN: `${hostname}:${httpsPort}`,
   WALLET_AUTH_URI: origin,
   HTTP_BIND: '127.0.0.1',
+  // Equal to HTTP_BIND, the IPv6 binding collapses into the IPv4 one.
+  HTTP_BIND_V6: hasIpv6 ? '::1' : '127.0.0.1',
   HTTP_PORT: httpPort,
   HTTPS_PORT: httpsPort,
   IMAGE_TAG: 'smoke',
@@ -113,9 +124,9 @@ const upgrade = (path, cookie) =>
 
 // A TLS handshake for a host name, unverified: 'refused', or the certificate nginx presented (PEM).
 // Asking nginx, not reading its files, is what tells when a reload has taken effect.
-const handshake = (servername) =>
+const handshake = (servername, host = '127.0.0.1') =>
   new Promise((resolve) => {
-    const socket = connect({ host: '127.0.0.1', port: Number(httpsPort), servername, rejectUnauthorized: false });
+    const socket = connect({ host, port: Number(httpsPort), servername, rejectUnauthorized: false });
     socket.on('secureConnect', () => {
       const certificate = socket.getPeerX509Certificate().toString();
       socket.destroy();
@@ -143,6 +154,12 @@ async function main() {
   step('building images and starting the stack (waits for healthy)');
   compose('up', '-d', '--build', '--wait');
   check(compose('ps', '-a', '--format', '{{.Service}} {{.State}} {{.ExitCode}}').includes('migrate exited 0'), 'migrations did not complete');
+  const published = JSON.parse(compose('ps', '--format', 'json', 'web').split('\n')[0]).Publishers.filter((p) => p.PublishedPort);
+  const loopback = hasIpv6 ? ['127.0.0.1', '::1'] : ['127.0.0.1'];
+  check(
+    published.length === 2 * loopback.length && published.every((p) => loopback.includes(p.URL)),
+    `a stack bound to loopback must publish on ${loopback.join(' and ')} only, not ${published.map((p) => `${p.URL}:${p.PublishedPort}`).join(', ')}`,
+  );
   ca = await servedCertificate();
   check(new X509Certificate(ca).checkHost(hostname), 'the start-up certificate must name PUBLIC_HOSTNAME');
 
@@ -182,6 +199,25 @@ async function main() {
     () => 'closed',
   );
   check(otherHost === 'closed', `HTTP for another host name returned ${otherHost}`);
+
+  if (hasIpv6) {
+    step('over IPv6 too: HTTPS, the redirect, and other host names refused');
+    const v6 = (scheme, port, path, host = `${hostname}:${port}`) => send(`${scheme}://[::1]:${port}${path}`, { headers: { host } });
+    const v6Games = await v6('https', httpsPort, '/api/games');
+    check(v6Games.status === 200 && v6Games.headers['strict-transport-security'] === 'max-age=31536000', `GET /api/games over IPv6 returned ${v6Games.status}`);
+    const v6Redirect = await v6('http', httpPort, '/rooms/ABCDEF');
+    check(v6Redirect.status === 301 && v6Redirect.headers.location === `https://${hostname}/rooms/ABCDEF`, `HTTP over IPv6 returned ${v6Redirect.status} ${v6Redirect.headers.location}`);
+    check((await handshake('other.example.com', '::1')) === 'refused', 'TLS over IPv6 for another host name must be refused');
+    const v6OtherHost = await v6('http', httpPort, '/', 'other.example.com').then((response) => response.status, () => 'closed');
+    check(v6OtherHost === 'closed', `HTTP over IPv6 for another host name returned ${v6OtherHost}`);
+    // Through Docker's IPv6 network, not its proxy into an IPv4-only one: nginx sees an IPv6 client.
+    const v6Id = v6Games.headers['x-request-id'];
+    const v6Entry = compose('logs', '--no-log-prefix', '--no-color', 'web').split('\n').filter((line) => line.startsWith('{'))
+      .map((line) => JSON.parse(line)).find((logged) => logged.requestId === v6Id);
+    check(v6Entry?.remoteAddr?.includes(':'), `nginx must see an IPv6 client address, not ${v6Entry?.remoteAddr}`);
+  } else {
+    step('skipped the IPv6 checks: this machine has no IPv6 loopback');
+  }
 
   step('unauthenticated API calls are refused');
   check((await get('/api/me')).status === 401, 'GET /api/me without a session must be 401');

@@ -101,7 +101,7 @@ Releases (STORY-049, DEC-053, DEC-071): every release passes [`docs/release-chec
 | `CERTBOT_EMAIL` | *(none)* | optional Let's Encrypt account contact |
 | `WALLET_AUTH_DOMAIN` / `WALLET_AUTH_URI` | `PUBLIC_HOSTNAME` / `https://PUBLIC_HOSTNAME` | `WalletAuth:Domain`/`Uri`; override only for a non-standard port |
 | `POSTGRES_DB` / `POSTGRES_USER` | `choggames` | |
-| `HTTP_BIND` / `HTTP_PORT` / `HTTPS_PORT` | `0.0.0.0` / `80` / `443` | where nginx listens |
+| `HTTP_BIND` / `HTTP_BIND_V6` / `HTTP_PORT` / `HTTPS_PORT` | `0.0.0.0` / `::` / `80` / `443` | where nginx listens, over IPv4 and IPv6 (DEC-075); `HTTP_BIND_V6` equal to `HTTP_BIND` publishes IPv4 only |
 | `MONAD_RPC_URL` | `https://rpc.monad.xyz` | `Nfts:Monad:RpcUrl` |
 | `CHOG_LIFE_STATUS` | `ComingSoon` | `Games:Items:0:Status` |
 | `CHOG_RACE_STATUS` | `ComingSoon` | `Games:Items:1:Status` (DEC-061) |

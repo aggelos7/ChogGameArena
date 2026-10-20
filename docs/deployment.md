@@ -21,11 +21,13 @@ Only `web` publishes ports (80 and 443). The API, PostgreSQL and Redis sit on th
 
 ## VM prerequisites
 
-- 64-bit Linux (2 vCPU / 4 GB RAM / 40–80 GB SSD to start), Docker Engine with the Compose plugin (v2.20+).
+- 64-bit Linux (2 vCPU / 4 GB RAM / 40–80 GB SSD to start), Docker Engine 27+ (it assigns the network's IPv6 subnet
+  by itself) with the Compose plugin (v2.20+), and IPv6 enabled in the kernel (the default).
 - A checkout of the repository at the release to deploy. Node.js and the .NET SDK aren't needed: the images build them.
-- A DNS name for the app (`PUBLIC_HOSTNAME`, e.g. `play.<domain>`) with an `A` (and `AAAA`, if the VM has IPv6)
-  record pointing at the VM, before the first start, so Let's Encrypt can validate it.
-- A firewall that allows SSH, 80 and 443 only. Port 80 must stay open: certificate renewals are validated
+- A DNS name for the app (`PUBLIC_HOSTNAME`, e.g. `play.<domain>`) with an `A` record pointing at the VM, before
+  the first start, so Let's Encrypt can validate it. Add the `AAAA` record only once the stack answers over IPv6
+  (see [IPv6](#ipv6)).
+- A firewall that allows SSH, 80 and 443 only, over IPv4 and IPv6. Port 80 must stay open: certificate renewals are validated
   over it.
 
 ## First deployment
@@ -57,7 +59,7 @@ Encrypt allows 5 failed validations per host per hour.
 | `CERTBOT_EMAIL` | *(none)* | Optional Let's Encrypt account contact |
 | `WALLET_AUTH_DOMAIN` / `WALLET_AUTH_URI` | `PUBLIC_HOSTNAME` / `https://PUBLIC_HOSTNAME` | Wallet sign-in address (DEC-015); override only for a non-standard port |
 | `POSTGRES_DB` / `POSTGRES_USER` | `choggames` | |
-| `HTTP_BIND` / `HTTP_PORT` / `HTTPS_PORT` | `0.0.0.0` / `80` / `443` | Where nginx listens on the VM |
+| `HTTP_BIND` / `HTTP_BIND_V6` / `HTTP_PORT` / `HTTPS_PORT` | `0.0.0.0` / `::` / `80` / `443` | Where nginx listens on the VM, over IPv4 and IPv6 (DEC-075). Setting `HTTP_BIND_V6` to `HTTP_BIND`'s value publishes on IPv4 only |
 | `MONAD_RPC_URL` | `https://rpc.monad.xyz` | A dedicated endpoint may carry a key; keep it in `.env` only |
 | `CHOG_LIFE_STATUS` | `ComingSoon` | `Available` lists Chog Life as playable |
 | `CHOG_RACE_STATUS` | `ComingSoon` | `Available` lists Chog Race as playable (DEC-061) |
@@ -77,6 +79,36 @@ Encrypt allows 5 failed validations per host per hour.
   container mounting it); nginx picks them up within a minute. Renewing them is then up to you.
 - The certificate and the Let's Encrypt account key live in the `letsencrypt` volume; `down` keeps it. Losing it
   only means certbot obtains a new certificate (mind the rate limit of 5 per host per week).
+
+## IPv6
+
+nginx is published on every IPv6 address (`HTTP_BIND_V6=::`) next to every IPv4 one, and listens on both inside
+its container (STORY-087, DEC-075). The `backend` network has IPv6 (a private ULA subnet Docker picks), so Docker
+forwards IPv6 visitors to nginx with their own address, as it does IPv4 ones. The per-client rate limits and the
+access log see each visitor's address. Without IPv6 on that network, Docker's proxy would forward every IPv6
+visitor from one gateway address, and they would all share one rate limit.
+
+**Upgrading to this release** (`v1.0.1` and earlier have an IPv4-only `backend` network): `up -d --wait`
+recreates the network, so every container stops and starts once (about a minute; volumes are kept and matches
+resume, DEC-030).
+
+Add the domain's `AAAA` record (the VM's IPv6 address, **DNS only** in Cloudflare) **only after** both of these
+answer from a machine with IPv6, against the VM's address directly:
+
+```bash
+curl -6 -sI --resolve <PUBLIC_HOSTNAME>:443:[<VM IPv6>] https://<PUBLIC_HOSTNAME>/api/health/ready   # 200
+curl -6 -sI --resolve <PUBLIC_HOSTNAME>:80:[<VM IPv6>] http://<PUBLIC_HOSTNAME>/                     # 301 to https://
+```
+
+Check also that nginx logs your own IPv6 address for them
+(`docker compose -f infrastructure/production/docker-compose.yml logs web | grep '"remoteAddr":"2'`), not a `172.`
+or `fd..` one. If something fails, check the firewall: in the Hetzner Cloud firewall the rules for 80 and 443 must
+list **Any IPv6** as a source, and `ufw`, if used, must allow them. Also check that `ss -tlnp | grep -E ':(80|443) '`
+shows `[::]:80` and `[::]:443`.
+
+Once an `AAAA` record exists, Let's Encrypt validates over IPv6 first, so a broken IPv6 path also breaks renewals: if
+IPv6 stops working, remove the record first, then fix it. On a VM without an IPv6 address, set `HTTP_BIND_V6` to
+`HTTP_BIND`'s value (`0.0.0.0`), which publishes on IPv4 only, and don't add the record.
 
 ## Backups and restore
 
@@ -310,7 +342,7 @@ photos stay in the encrypted backups until retention removes those archives, aft
 Done once, from `chogarena.xyz` to `chogkingdom.xyz` (STORY-088, DEC-074):
 
 1. Buy the new domain, add it to Cloudflare, and add an `A` record for it to the VM's address with **DNS only**
-   (no `AAAA` record until nginx publishes on IPv6, STORY-087). Set up Email Routing for the new contact address.
+   (add the `AAAA` record as in [IPv6](#ipv6)). Set up Email Routing for the new contact address.
 2. In `.env`, change `PUBLIC_HOSTNAME`, `LEGAL_CONTACT_EMAIL` and `CERTBOT_EMAIL`, then `$C up -d --wait`. nginx
    serves only the new name; certbot obtains its certificate within a minute or two, and wallet sign-in names the
    new domain by itself. Check `https://<new domain>/api/health/ready` and point the uptime check at it.
@@ -339,7 +371,7 @@ Done once, from `chogarena.xyz` to `chogkingdom.xyz` (STORY-088, DEC-074):
 
 - `docker compose -f infrastructure/production/docker-compose.yml ps` shows every service `healthy`, and `migrate` `exited (0)`.
 - `curl -fsS https://<PUBLIC_HOSTNAME>/api/games` returns the catalog; `curl -sI http://<PUBLIC_HOSTNAME>/` is a
-  `301` to `https://`.
+  `301` to `https://`. With an `AAAA` record, both also answer with `curl -6`.
 - Logs: `docker compose ... logs -f api web` (JSON lines; see "Monitoring and alerts").
 - `curl -fsS https://<PUBLIC_HOSTNAME>/api/health/ready` returns `{"status":"Healthy",...}`.
 - `npm run deploy:verify` (on a development machine or CI) builds and runs an isolated copy for `localhost` on

@@ -796,7 +796,7 @@
 
 #### STORY-087 — Serve the site over IPv6
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E07
 - **Implementation:** At the launch (DEC-073) nginx published ports 80 and 443 on IPv4 only (`HTTP_BIND=0.0.0.0`), so the domain's `AAAA` record pointed at an address where nothing answered and was removed. Publish nginx on IPv6 too, next to IPv4 (for example a second binding, or `HTTP_BIND_V6` defaulting to `::`), keeping `HTTP_BIND`'s existing meaning so the local release stack's `127.0.0.1` still works. `deploy:verify` checks that the stack answers over IPv6 where the machine has it. The runbook says when to add the `AAAA` record back. Let's Encrypt keeps validating over IPv4 or IPv6.
@@ -804,7 +804,7 @@
   - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the production stack answers HTTPS and the HTTP redirect on both IPv4 and IPv6, and the `AAAA` record can be restored.
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: host names other than `PUBLIC_HOSTNAME` are still refused over IPv6, and a local stack bound to `127.0.0.1` publishes nothing on other addresses.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
-- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Port publishing and docs only; no change to TLS, nginx's server blocks or the app.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Port publishing and docs only; no change to TLS, nginx's server blocks or the app. *Widened by DEC-075:* IPv6 on the `backend` network and `listen [::]` beside each IPv4 listen, so IPv6 visitors keep their own address.
 
 
 #### STORY-088 — Rename to Chog Kingdom at chogkingdom.xyz

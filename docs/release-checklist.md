@@ -18,7 +18,7 @@ backup key (DEC-049). Create its settings once, in a git-ignored file outside th
 |---|---|---|
 | `PUBLIC_HOSTNAME` | `localhost` | Served at `https://localhost:8443` with nginx's self-signed certificate (accept the browser warning) |
 | `WALLET_AUTH_DOMAIN` / `WALLET_AUTH_URI` | `localhost:8443` / `https://localhost:8443` | Wallet sign-in names the address you open |
-| `HTTP_BIND` / `HTTP_PORT` / `HTTPS_PORT` | `127.0.0.1` / `8080` / `8443` | Only your machine reaches it; no clash with other services |
+| `HTTP_BIND` / `HTTP_BIND_V6` / `HTTP_PORT` / `HTTPS_PORT` | `127.0.0.1` / `::1` / `8080` / `8443` | Only your machine reaches it, over IPv4 and IPv6 (leaving `HTTP_BIND_V6` out would publish on every IPv6 address); no clash with other services. Without IPv6 on the machine, set `HTTP_BIND_V6` to `127.0.0.1` too |
 | `POSTGRES_PASSWORD` | its own (`openssl rand -hex 24`) | Never production's |
 | `CHOG_LIFE_STATUS` | `Available` | `CHOG_LIFE_STATUS=Available` is what the smoke test and testers play |
 | `CHOG_RACE_STATUS` | `Available` | `CHOG_RACE_STATUS=Available`: the smoke test plays Chog Race beside Chog Life (DEC-061) |
