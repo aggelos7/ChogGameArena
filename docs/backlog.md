@@ -807,6 +807,19 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Port publishing and docs only; no change to TLS, nginx's server blocks or the app.
 
 
+#### STORY-088 — Rename to Chog Kingdom at chogkingdom.xyz
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E07
+- **Implementation:** "Chog Arena" turned out to be taken, so the product is called **Chog Kingdom** and moves to `chogkingdom.xyz` (DEC-074). Rename everything players see (header, tab titles, the home page's hidden heading, the terms, the wallet sign-in statement), replace the logo with the product owner's "Chog Kingdom" artwork, and update the docs that name the production domain. The server move (`PUBLIC_HOSTNAME`, contact addresses, certificate, the old domain's redirect, monitors) follows `docs/deployment.md` with the release.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** every page, tab title, the terms and the wallet sign-in message say "Chog Kingdom", and the home page shows the new logo.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: no player-visible "Chog Arena" remains, and sign-in challenges issued before the change still verify.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Names and artwork only; no change to the repository, code or image names.
+
+
 ## E08 — Chog Race
 
 
