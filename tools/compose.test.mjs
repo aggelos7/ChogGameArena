@@ -80,3 +80,17 @@ test('compose file and env template contain no real secrets', () => {
   const example = readFileSync(join(root, 'infrastructure', '.env.example'), 'utf8');
   assert.match(example, /^POSTGRES_PASSWORD=change-me-local-only$/m);
 });
+
+// STORY-086: on a new database PostgreSQL's image first runs a temporary server on the Unix socket only, then restarts.
+// A socket check passes during that phase; a TCP check passes only once the real server is up.
+test('every PostgreSQL healthcheck checks over TCP, not the socket', () => {
+  for (const file of ['infrastructure/docker-compose.yml', 'infrastructure/production/docker-compose.yml', '.github/workflows/ci.yml']) {
+    const text = readFileSync(join(root, file), 'utf8');
+    const checks = text.match(/pg_isready[^"\]\n]*/g) ?? [];
+    assert.ok(checks.length > 0, `${file} has no pg_isready healthcheck`);
+    for (const check of checks) {
+      assert.match(check, /-h 127\.0\.0\.1/, `${file}: ${check} must check over TCP`);
+    }
+  }
+});
+
