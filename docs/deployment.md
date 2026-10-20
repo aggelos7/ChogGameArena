@@ -305,6 +305,22 @@ Browsers may keep showing a photo they already loaded for up to `AvatarImages:Ca
 photos stay in the encrypted backups until retention removes those archives, after about four weeks (7 daily +
 4 weekly). Say so when you confirm a deletion request.
 
+## Changing the domain
+
+Done once, from `chogarena.xyz` to `chogkingdom.xyz` (STORY-088, DEC-074):
+
+1. Buy the new domain, add it to Cloudflare, and add an `A` record for it to the VM's address with **DNS only**
+   (no `AAAA` record until nginx publishes on IPv6, STORY-087). Set up Email Routing for the new contact address.
+2. In `.env`, change `PUBLIC_HOSTNAME`, `LEGAL_CONTACT_EMAIL` and `CERTBOT_EMAIL`, then `$C up -d --wait`. nginx
+   serves only the new name; certbot obtains its certificate within a minute or two, and wallet sign-in names the
+   new domain by itself. Check `https://<new domain>/api/health/ready` and point the uptime check at it.
+3. Session cookies belong to a domain, so guests start as new guests on the new one; wallet players sign in again and
+   get their player back.
+4. To keep old links working, redirect the old domain in Cloudflare: give it a **proxied** (orange cloud) `A` record,
+   since the VM no longer serves that name (any address works; Cloudflare answers first), and a Redirect Rule for all
+   incoming requests: type **Dynamic**, expression `concat("https://<new domain>", http.request.uri.path)`, status
+   **301**, with **Preserve query string** on. Cloudflare answers those requests itself; nothing reaches the VM.
+
 ## Restarts and upgrades
 
 - Containers restart on failure and after a reboot (`restart: unless-stopped`; enable the Docker service).

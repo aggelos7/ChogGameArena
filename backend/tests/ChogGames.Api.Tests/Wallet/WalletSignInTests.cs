@@ -105,7 +105,7 @@ public sealed partial class WalletSignInTests(MigratedPostgresDatabase database)
         Assert.Equal($"{ApiFactory.WalletAuthDomain} wants you to sign in with your Ethereum account:", lines[0]);
         Assert.Equal(wallet.ChecksumAddress, lines[1]);
         Assert.Equal("", lines[2]);
-        Assert.StartsWith("Sign in to Chog Arena.", lines[3]);
+        Assert.StartsWith("Sign in to Chog Kingdom.", lines[3]);
         Assert.Equal(
             [$"URI: {ApiFactory.WalletAuthUri}", "Version: 1", "Chain ID: 143"],
             lines[5..8]);
