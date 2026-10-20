@@ -204,7 +204,14 @@ async function main() {
   step('a wrong key, a damaged archive and a missing key are refused without changing the database');
   check(/cannot decrypt .* the database was not changed/.test(refused(['run', '--rm', '-T', 'backup', 'restore', 'latest'], { input: otherIdentity })), 'a wrong key must be refused');
   const damaged = archiveDate(new Date(Date.now() + 86_400_000));
-  backupShell(`set -e; cp /offsite/chog-game-arena/${name} /backups/${damaged}; printf X | dd of=/backups/${damaged} bs=1 seek=300 conv=notrunc 2>/dev/null`);
+  // Overwrite one byte of the ciphertext with a different one: writing a fixed 'X' left the archive intact whenever that
+  // byte already was one (1 run in 256), and the "damaged" archive then restored.
+  backupShell(
+    `set -e; f=/backups/${damaged}; cp /offsite/chog-game-arena/${name} "$f"; ` +
+      `b=$(dd if="$f" bs=1 skip=300 count=1 2>/dev/null | od -An -tu1 | tr -d ' '); ` +
+      `if [ "$b" = 88 ]; then c=Y; else c=X; fi; printf "$c" | dd of="$f" bs=1 seek=300 conv=notrunc 2>/dev/null; ` +
+      `cmp -s "$f" /offsite/chog-game-arena/${name} && { echo 'the archive was not changed'; exit 1; } || true`,
+  );
   check(/cannot decrypt .* the database was not changed/.test(refused(['run', '--rm', '-T', 'backup', 'restore', damaged], { input: identity })), 'a damaged archive must be refused');
   backupShell(`rm /backups/${damaged}`);
   check(/no age identity on standard input/.test(refused(['run', '--rm', '-T', 'backup', 'restore', 'latest'], { input: '' })), 'a restore without a key must be refused');
