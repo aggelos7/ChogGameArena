@@ -51,6 +51,8 @@ const baseEnv = {
   WALLET_AUTH_DOMAIN: `localhost:${httpsPort}`,
   WALLET_AUTH_URI: origin,
   HTTP_BIND: '127.0.0.1',
+  // IPv4 only: deploy:verify checks IPv6, and this way it runs on machines without it.
+  HTTP_BIND_V6: '127.0.0.1',
   HTTP_PORT: process.env.SMOKE_HTTP_PORT ?? '18081',
   HTTPS_PORT: httpsPort,
   IMAGE_TAG: 'smoke',

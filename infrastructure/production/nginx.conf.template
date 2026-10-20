@@ -25,16 +25,19 @@ resolver 127.0.0.11 valid=10s ipv6=off;
 # connection, TLS refuses the handshake, so no certificate or content leaks for other names.
 server {
     listen 80 default_server;
+    listen [::]:80 default_server;
     return 444;
 }
 
 server {
     listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
     ssl_reject_handshake on;
 }
 
 server {
     listen 80;
+    listen [::]:80;
     server_name ${PUBLIC_HOSTNAME};
     access_log /var/log/nginx/access.log chog_json;
 
@@ -51,6 +54,7 @@ server {
 
 server {
     listen 443 ssl;
+    listen [::]:443 ssl;
     http2 on;
     server_name ${PUBLIC_HOSTNAME};
     access_log /var/log/nginx/access.log chog_json;
