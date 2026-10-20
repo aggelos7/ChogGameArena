@@ -780,6 +780,20 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. The boards' pawns are unchanged.
 
 
+#### STORY-086 — PostgreSQL healthy only when really ready
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E07
+- **Implementation:** Found when CI on `master` failed `backup:verify` before the `v1.0.0` tag: on a new database, PostgreSQL's image first runs a temporary server that listens only on its Unix socket, then restarts. The healthcheck (`pg_isready` over the socket) passes during that temporary phase, so services and tests that wait for "healthy" can reach the database while it restarts. The healthchecks of the dev and production Compose files and CI's PostgreSQL service check over TCP (`-h 127.0.0.1`), which the temporary server doesn't listen on, so "healthy" means the real server is up. A workspace test keeps them on TCP.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** every PostgreSQL healthcheck (dev, production, CI) checks over TCP, and `npm run deps:verify`, `npm run deploy:verify` and `npm run backup:verify` pass.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a healthcheck over the socket again fails the workspace tests.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Also:** CI on this story's PR then failed `backup:verify`'s damaged-archive check once: the test wrote a fixed `X` over byte 300 of the encrypted archive, which left it intact whenever that byte already was an `X` (1 run in 256). The test now writes a byte different from the one there and checks the archive changed.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Healthchecks and the smoke test only; no change to the database, its settings or the backup scripts.
+
+
 ## E08 — Chog Race
 
 
