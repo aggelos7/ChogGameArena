@@ -7,7 +7,7 @@
     @for (standing of standings(); track $index) {
       <li [class.winner]="standing.rank === 1" [class.you]="standing.member.isYou" data-standing>
         <span class="place" data-place>{{ ordinal(standing.rank) }}</span>
-        <app-avatar-badge [avatar]="badge(standing.member.character)" [name]="standing.member.character.name" [size]="2" />
+        <app-avatar-badge [avatar]="standing.member.avatar" [name]="standing.member.displayName" [size]="2" />
         <span class="who">
           <span class="name">{{ standing.member.displayName }}</span>
           @if (standing.member.isYou) {

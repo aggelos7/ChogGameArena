@@ -38,9 +38,9 @@ describe('app routes', () => {
     http.expectOne('/api/games').flush(CATALOGUE);
     harness.detectChanges();
 
-    expect(heading()).toBe('Chog Game Arena');
+    expect(heading()).toBe('Chog Arena');
     expect((harness.routeNativeElement as HTMLElement).querySelectorAll('.game-card')).toHaveLength(3);
-    expect(TestBed.inject(Title).getTitle()).toBe('Chog Game Arena');
+    expect(TestBed.inject(Title).getTitle()).toBe('Chog Arena');
   });
 
   it('redirects the old /games page to the home page', async () => {
@@ -48,7 +48,7 @@ describe('app routes', () => {
     http.expectOne('/api/games').flush(CATALOGUE);
 
     expect(url()).toBe('/');
-    expect(heading()).toBe('Chog Game Arena');
+    expect(heading()).toBe('Chog Arena');
   });
 
   it('renders the My Chogs page at /chogs', async () => {
@@ -56,7 +56,7 @@ describe('app routes', () => {
     http.expectOne('/api/characters').flush({ nftStatus: 'NoWallet', nfts: [], standard: [], selected: { kind: 'Standard', id: 'classic' } });
 
     expect(heading()).toBe('My Chogs');
-    expect(TestBed.inject(Title).getTitle()).toBe('My Chogs · Chog Game Arena');
+    expect(TestBed.inject(Title).getTitle()).toBe('My Chogs · Chog Arena');
   });
 
   it.each([
@@ -69,7 +69,7 @@ describe('app routes', () => {
 
     expect(url()).toBe(path);
     expect(heading()).toBe(title);
-    expect(TestBed.inject(Title).getTitle()).toBe(`${title} · Chog Game Arena`);
+    expect(TestBed.inject(Title).getTitle()).toBe(`${title} · Chog Arena`);
   });
 
   it.each(['/ladder', '/leaderboard'])('renders the ladder at %s', async (path) => {
@@ -78,7 +78,7 @@ describe('app routes', () => {
 
     expect(url()).toBe('/ladder');
     expect(heading()).toBe('Ladder');
-    expect(TestBed.inject(Title).getTitle()).toBe('Ladder · Chog Game Arena');
+    expect(TestBed.inject(Title).getTitle()).toBe('Ladder · Chog Arena');
   });
 
   it('opens a room at /rooms/:code', async () => {
@@ -90,7 +90,7 @@ describe('app routes', () => {
     harness.detectChanges();
 
     expect(heading()).toBe('Chog Life room');
-    expect(TestBed.inject(Title).getTitle()).toBe('Room · Chog Game Arena');
+    expect(TestBed.inject(Title).getTitle()).toBe('Room · Chog Arena');
   });
 
   it('joins from an invite link at /join/:code and replaces it with the room', async () => {
@@ -117,7 +117,7 @@ describe('app routes', () => {
     http.expectOne('/api/games').flush(CATALOGUE);
 
     expect(url()).toBe('/');
-    expect(heading()).toBe('Chog Game Arena');
+    expect(heading()).toBe('Chog Arena');
   });
 
   describe('launching a game at /games/:gameId', () => {
@@ -133,7 +133,7 @@ describe('app routes', () => {
       http.expectOne('/api/games').flush(CATALOGUE); // the catalogue page loads after the redirect
 
       expect(url()).toBe('/');
-      expect(heading()).toBe('Chog Game Arena');
+      expect(heading()).toBe('Chog Arena');
     });
 
     it('redirects to the home catalogue when the catalogue cannot be loaded', async () => {

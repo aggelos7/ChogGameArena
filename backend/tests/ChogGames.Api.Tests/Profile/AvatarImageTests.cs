@@ -180,6 +180,30 @@ public sealed class AvatarImageTests(MigratedPostgresDatabase database) : IClass
     }
 
     [PostgresFact]
+    public async Task Room_members_carry_their_profile_avatar_for_the_player_list_and_results()
+    {
+        using var alice = await GuestAsync("Alice");
+        using var bob = await GuestAsync("Bob");
+        (await alice.PatchAsJsonAsync("/api/profile", new { avatarId = "ocean" })).Dispose();
+        var url = (await UploadedAsync(bob, Image(300, 300))).Avatar.ImageUrl!;
+        using var created = await alice.PostAsJsonAsync("/api/rooms", new { gameType = "chog-life" });
+        var code = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString();
+        (await bob.PostAsync($"/api/rooms/{code}/join", null)).Dispose();
+        await using (var db = database.CreateDbContext())
+        {
+            // A retired built-in avatar falls back to the default rather than failing.
+            await db.Database.ExecuteSqlRawAsync("UPDATE \"Players\" SET \"AvatarId\" = 'retired' WHERE \"DisplayName\" = 'Bob'");
+        }
+
+        var avatars = (await alice.GetFromJsonAsync<JsonElement>($"/api/rooms/{code}", Json)).GetProperty("members").EnumerateArray()
+            .ToDictionary(m => m.GetProperty("displayName").GetString()!, m => m.GetProperty("avatar"));
+
+        Assert.Equal(("ocean", "#1d4ed8", JsonValueKind.Null),
+            (avatars["Alice"].GetProperty("id").GetString(), avatars["Alice"].GetProperty("color").GetString(), avatars["Alice"].GetProperty("imageUrl").ValueKind));
+        Assert.Equal(("classic", url), (avatars["Bob"].GetProperty("id").GetString(), avatars["Bob"].GetProperty("imageUrl").GetString()));
+    }
+
+    [PostgresFact]
     public async Task A_new_upload_replaces_the_old_photo_which_is_deleted()
     {
         using var alice = await GuestAsync("Alice");

@@ -9,6 +9,7 @@ function member(displayName: string, seat: number, rank: number | null, result: 
     avatarId: 'classic',
     collector: null,
     avatarImageUrl: null,
+    avatar: { id: 'classic', name: 'Classic', color: '#5b2bd6', imageUrl: null },
     isHost: false,
     isYou: false,
     isReady: false,
@@ -51,6 +52,18 @@ describe('Chog Life results', () => {
   }
 
   const texts = (root: Element, selector: string) => Array.from(root.querySelectorAll(selector)).map((e) => e.textContent?.replace(/\s+/g, ' ').trim());
+
+  it('draws each player’s profile avatar, not their match Chog (STORY-085)', () => {
+    const view = render([
+      member('Alice', 1, 1, lifeResult(250, { place: 1 }), { avatar: { id: 'ocean', name: 'Ocean', color: '#1d4ed8', imageUrl: null } }),
+      member('Bob', 2, 2, lifeResult(120, { place: 2 }), { avatar: { id: 'classic', name: 'Classic', color: '#5b2bd6', imageUrl: '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10' } }),
+    ]);
+
+    const [alice, bob] = Array.from(view.querySelectorAll('[data-list="standings"] li'));
+    const aliceBadge = alice.querySelector('app-avatar-badge .badge') as HTMLElement;
+    expect([aliceBadge.style.background, aliceBadge.textContent?.trim()]).toEqual(['rgb(29, 78, 216)', 'A']);
+    expect(bob.querySelector('app-avatar-badge img')?.getAttribute('src')).toBe('/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10');
+  });
 
   it('names the winner and lists every player in rank order with their portfolio and statistics', () => {
     const view = render([
