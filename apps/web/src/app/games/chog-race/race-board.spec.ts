@@ -12,6 +12,7 @@ function member(displayName: string, seat: number, overrides: Partial<RoomMember
     avatarId: 'classic',
     collector: null,
     avatarImageUrl: null,
+    avatar: { id: 'classic', name: 'Classic', color: '#5b2bd6', imageUrl: null },
     isHost: false,
     isYou: false,
     isReady: false,

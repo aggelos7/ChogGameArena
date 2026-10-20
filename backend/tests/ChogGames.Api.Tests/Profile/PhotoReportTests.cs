@@ -246,9 +246,14 @@ public sealed class PhotoReportTests(MigratedPostgresDatabase database) : IClass
         var code = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString();
         (await bob.PostAsync($"/api/rooms/{code}/join", null)).Dispose();
 
-        async Task<string?> AlicesPhotoFor(HttpClient viewer) =>
-            (await viewer.GetFromJsonAsync<JsonElement>($"/api/rooms/{code}", Json)).GetProperty("members").EnumerateArray()
-                .Single(m => m.GetProperty("displayName").GetString() == "Alice").GetProperty("avatarImageUrl").GetString();
+        async Task<string?> AlicesPhotoFor(HttpClient viewer)
+        {
+            var alice = (await viewer.GetFromJsonAsync<JsonElement>($"/api/rooms/{code}", Json)).GetProperty("members").EnumerateArray()
+                .Single(m => m.GetProperty("displayName").GetString() == "Alice");
+            // The pawn's photo and the profile avatar's (STORY-085) always agree.
+            Assert.Equal(alice.GetProperty("avatarImageUrl").GetString(), alice.GetProperty("avatar").GetProperty("imageUrl").GetString());
+            return alice.GetProperty("avatarImageUrl").GetString();
+        }
 
         foreach (var name in new[] { "Rita", "Sam" })
         {

@@ -4,13 +4,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { GameCatalog } from '../../games/game-catalog';
 import { Observable, Subject, Subscription, catchError, of, switchMap } from 'rxjs';
-import { Avatar } from '../../profile/profile-api';
 import { AvatarBadge } from '../../profile/avatar-badge';
 import { CollectorChip } from '../../profile/collector-chip';
 import {
   Room,
   RoomAbility,
-  RoomCharacter,
   RoomMember,
   RoomError,
   RoomsApi,
@@ -28,9 +26,6 @@ import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
 import { RaceAbilityPlay, RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
 import { RACE_END_TURN, RACE_PASS, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
-
-/** NFT Chogs have no colour of their own here; they use the brand colour. */
-const NFT_COLOR = 'var(--brand)';
 
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
@@ -328,9 +323,6 @@ export class RoomPage implements OnInit {
   /** A final place as shown: 1st, 2nd, 3rd, 4th… (rooms hold at most six players). */
   protected readonly place = ordinal;
 
-  protected badge(character: RoomCharacter): Avatar {
-    return { id: character.id, name: character.name, color: character.color ?? NFT_COLOR };
-  }
 
   private act(request: Observable<Room>): void {
     this.busy.set(true);

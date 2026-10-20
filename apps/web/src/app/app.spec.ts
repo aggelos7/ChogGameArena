@@ -78,7 +78,7 @@ describe('App shell', () => {
     it('renders the brand and main navigation', async () => {
       const { element } = await render();
 
-      expect(element.querySelector('.brand')?.textContent).toContain('Chog Game Arena');
+      expect(element.querySelector('.brand')?.textContent).toContain('Chog Arena');
       const links = Array.from(element.querySelectorAll('nav[aria-label="Main"] a'));
       expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/chogs', '/ladder']);
       expect(element.querySelector('main router-outlet')).not.toBeNull();

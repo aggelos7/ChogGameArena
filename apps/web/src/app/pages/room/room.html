@@ -84,7 +84,7 @@
           <ul class="members" data-list="members">
             @for (member of current.members; track $index) {
               <li [attr.data-ready]="member.isReady">
-                <app-avatar-badge [avatar]="badge(member.character)" [name]="member.character.name" [size]="2.5" [frame]="member.collector" />
+                <app-avatar-badge [avatar]="member.avatar" [name]="member.displayName" [size]="2.5" [frame]="member.collector" />
                 <div class="who">
                   <p class="line">
                     <span class="name">{{ member.displayName }}</span>

@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { CollectorBadge } from '../profile/profile-api';
+import { Avatar, CollectorBadge } from '../profile/profile-api';
 
 /**
  * Mirrors `RoomCharacterResponse`: the member's selected Chog, or the one locked at start once the game has started.
@@ -71,6 +71,11 @@ export interface RoomMember {
    * match character stays `character`.
    */
   avatarImageUrl: string | null;
+  /**
+   * The player's profile avatar, as their header shows it (STORY-085): the chosen colour and, while there is one, the
+   * photo of `avatarImageUrl`. The player list and the results draw it; the match character stays `character`.
+   */
+  avatar: Avatar;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */

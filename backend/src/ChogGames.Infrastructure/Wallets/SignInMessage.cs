@@ -7,7 +7,7 @@ namespace ChogGames.Infrastructure.Wallets;
 public static class SignInMessage
 {
     public const string Statement =
-        "Sign in to Chog Game Arena. This proves you own this wallet. It does not send a transaction or cost gas.";
+        "Sign in to Chog Arena. This proves you own this wallet. It does not send a transaction or cost gas.";
 
     public static string Create(
         string domain,

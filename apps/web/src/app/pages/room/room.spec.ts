@@ -26,6 +26,7 @@ describe('Room page', () => {
       avatarId: 'classic',
       collector: null,
       avatarImageUrl: null,
+      avatar: { id: 'classic', name: 'Classic', color: '#5b2bd6', imageUrl: null },
       isHost: false,
       isYou: false,
       isReady: false,
@@ -133,6 +134,27 @@ describe('Room page', () => {
     const [alice, bob] = Array.from(element().querySelectorAll('[data-list="members"] li'));
     expect(alice.querySelector('[data-frame]')?.getAttribute('data-frame')).toBe('patron');
     expect(bob.querySelector('[data-frame]')).toBeNull();
+  });
+
+  it('draws each member’s profile avatar, as their header does, and names their match Chog (STORY-085)', () => {
+    load({
+      ...room,
+      members: [
+        member('Alice', {
+          isHost: true,
+          avatar: { id: 'ocean', name: 'Ocean', color: '#1d4ed8', imageUrl: null },
+          character: { kind: 'Nft', id: '1015', name: 'Chog #1015', color: null },
+        }),
+        member('Bob', { isYou: true, avatar: { id: 'classic', name: 'Classic', color: '#5b2bd6', imageUrl: '/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10' } }),
+      ],
+    });
+
+    const [alice, bob] = Array.from(element().querySelectorAll('[data-list="members"] li'));
+    const aliceBadge = alice.querySelector('app-avatar-badge .badge') as HTMLElement;
+    expect(aliceBadge.style.background).toBe('rgb(29, 78, 216)');
+    expect(aliceBadge.textContent?.trim()).toBe('A');
+    expect(alice.textContent).toContain('Chog #1015');
+    expect(bob.querySelector('app-avatar-badge img')?.getAttribute('src')).toBe('/api/avatar-images/0b8f3a52-6f1c-4d0e-9a51-3f3a1b7c2d10');
   });
 
   it('copies the invite link', async () => {

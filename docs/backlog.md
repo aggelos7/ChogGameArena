@@ -767,6 +767,19 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Photos only: no reports of names or players, no bans, no automatic image scanning, no email notifications.
 
 
+#### STORY-085 — Profile avatars in rooms and results
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E07
+- **Implementation:** Found in the launch's local release test: the room's player list and both games' results draw a badge in the match character's colour (Classic, or the NFT fallback) with the character's initial, not the avatar the player chose on their profile, so a player's colour differs between the header and the room. Rooms send each member's profile avatar (`avatar { id, name, color, imageUrl }`, the photo following the reports' hiding rule of DEC-070), and the player list and results draw it with the player's initial and collector frame; the match character stays as text. No migration.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the room's player list and the Chog Life and Chog Race results show each player's chosen avatar colour or photo, the same as the header, with the match character still named.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a photo hidden by reports shows only to its owner, and a retired avatar id falls back to the default.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. The boards' pawns are unchanged.
+
+
 ## E08 — Chog Race
 
 
