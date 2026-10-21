@@ -40,13 +40,13 @@
         </section>
       }
 
-      @if (current.status === 'Active' && you()?.hasLeft) {
+      @if (shownStatus() === 'Active' && you()?.hasLeft) {
         <p class="started" role="status" data-left>
           You left this game. <a routerLink="/">Find another game</a>
         </p>
-      } @else if (current.status === 'Active') {
+      } @else if (shownStatus() === 'Active') {
         <p class="started" [class.visually-hidden]="boardShown()" role="status" data-started>The game has started.</p>
-      } @else if (current.status === 'Completed') {
+      } @else if (shownStatus() === 'Completed') {
         <p class="started" role="status" data-result>
           @if (you()?.rank === 1) {
             The game is over: you won!
@@ -204,7 +204,7 @@
         </section>
       }
 
-      @if (current.status === 'Active' && you(); as me) {
+      @if (shownStatus() === 'Active' && you(); as me) {
         @if (!me.hasLeft) {
           <section class="match" [class.game-wide]="playing()" aria-labelledby="match-heading">
             @if (lifeBoard(); as board) {
@@ -216,6 +216,7 @@
                 (roll)="roll()"
                 (chooseLane)="chooseLane($event)"
                 (useAbility)="useAbility($event)"
+                (settled)="boardSettled()"
               >
                 <div class="game-header" boardHeader>
                   <h1>{{ gameName() ?? current.gameType }} room</h1>
@@ -240,6 +241,7 @@
                 (playCard)="playCard($event)"
                 (pass)="pass()"
                 (useAbility)="useRaceAbility($event)"
+                (settled)="boardSettled()"
               >
                 <div class="game-header" boardHeader>
                   <h1>{{ gameName() ?? current.gameType }} room</h1>
@@ -260,22 +262,24 @@
                 <app-turn-timer [endsAt]="timer.endsAt" [seconds]="timer.seconds" [name]="timer.name" [isYou]="timer.isYou" />
               }
             }
-            <div class="leave" data-leave>
-              @if (confirmingLeave()) {
-                <p class="warning" role="alert">Leaving forfeits this game, and you can’t come back to it.</p>
-                <button type="button" class="danger" [disabled]="busy()" (click)="leave()">Leave and forfeit</button>
-                <button type="button" [disabled]="busy()" (click)="confirmingLeave.set(false)">Stay</button>
-              } @else {
-                <button type="button" [disabled]="busy()" (click)="leave()">Leave game</button>
-              }
-            </div>
+            @if (!finale()) {
+              <div class="leave" data-leave>
+                @if (confirmingLeave()) {
+                  <p class="warning" role="alert">Leaving forfeits this game, and you can’t come back to it.</p>
+                  <button type="button" class="danger" [disabled]="busy()" (click)="leave()">Leave and forfeit</button>
+                  <button type="button" [disabled]="busy()" (click)="confirmingLeave.set(false)">Stay</button>
+                } @else {
+                  <button type="button" [disabled]="busy()" (click)="leave()">Leave game</button>
+                }
+              </div>
+            }
 
             @if (!playing() && actionError(); as failure) {
               <p class="action-error" role="alert" data-error="action">{{ message(failure) }}</p>
             }
           </section>
         }
-      } @else if (current.status === 'Completed' && lifeBoard(); as board) {
+      } @else if (shownStatus() === 'Completed' && lifeBoard(); as board) {
         @if (hasLifeResults()) {
           <app-life-results [members]="current.members" />
         }
@@ -283,7 +287,7 @@
           <h2 id="final-heading">Final board</h2>
           <app-life-board [board]="board" [members]="current.members" />
         </section>
-      } @else if (current.status === 'Completed' && raceBoard(); as board) {
+      } @else if (shownStatus() === 'Completed' && raceBoard(); as board) {
         @if (hasRaceResults()) {
           <app-race-results [members]="current.members" />
         }

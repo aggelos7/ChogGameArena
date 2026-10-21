@@ -820,6 +820,18 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Names and artwork only; no change to the repository, code or image names.
 
 
+#### STORY-089 — Music and general fixes
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E07
+- **Implementation:** One story for the small changes of one session (DEC-076). **Music:** play the product owner's theme track (`public/audio/chog-kingdom-theme.mp3`) as the music of the whole site. Browsers only allow sound after an interaction, so it starts on the visitor's first click, tap or key press and then loops quietly (35% volume) across pages without restarting on navigation; nothing downloads before that. While the player is in a live match the theme pauses and the game's own track plays instead (a game without one is silent); the theme resumes where it was when the match ends or they leave. **Rolling die:** each roll in Chog Life and Chog Race shows a die tumbling over the board with a rolling sound, landing on the server's number before the pawn hops. **Car sounds:** in Chog Race an engine starts while a pawn drives on and a back-up beeper sounds while one goes back. **What each move did:** after its die and hops, each move shows a banner over the board, a popup over its tile and a line in a Recent moves list; the last-move line waits for the die too. **Last move:** a match's last move (the roll and hops onto the finish) is shown on the live board before the results appear. A speaker toggle in the header mutes and unmutes all music and sounds, remembered on the device. **General fixes:** the collector badge sits centred beside a name everywhere; what's yours (unlocked achievements, your Ladder row, your chosen Chog) has a purple background with white text, and other tiles on My Chogs and the Ladder have thin dashed borders like the profile's tiers, without the white card; the profile's wallet panel moves up beside your summary as a card, with the wallets as a row of logos and a one-line note.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the theme starts on the first interaction and loops at 35% volume across pages, pauses for the game's track during a live match and resumes after it, a roll shows the die landing on its number with the rolling sound before the pawn hops, a Chog Race car sounds while it moves (reversing when it goes back), and the header toggle mutes all of it and plays it again; the profile shows the wallet card beside the summary.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a remembered mute keeps every page silent, a refused playback is retried on the next interaction, and blocked storage only makes the choice last for the visit.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. The changes listed here as the session adds them; no volume slider and no server change. Web only.
+
 ## E08 — Chog Race
 
 

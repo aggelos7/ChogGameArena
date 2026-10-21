@@ -272,6 +272,11 @@
   margin-top: 0;
   color: var(--text-muted);
   font-size: 0.875rem;
+
+  // Kept in the page while empty, so screen readers hear each move as it's told.
+  &:empty {
+    display: none;
+  }
 }
 
 .actions {
@@ -485,4 +490,9 @@ app-life-drawing {
   .actions {
     grid-auto-flow: row;
   }
+}
+
+// The rolling die is laid over the board (DEC-076).
+.stage {
+  position: relative;
 }

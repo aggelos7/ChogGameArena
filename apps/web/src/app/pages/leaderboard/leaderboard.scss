@@ -49,19 +49,15 @@
     gap: 0.75rem;
     min-height: var(--tap-target);
     padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
+    // Dashed for others' places, as the profile's unreached tiers are; solid for yours.
+    border: 1px dashed var(--border);
     border-radius: 0.75rem;
 
+    // Your place, in the profile's purple for what's yours, with the page's white text (DEC-076).
     &.you {
-      // A light box: dark text, also where the page's own text is white over a picture.
-      --text: var(--ink);
-      --text-muted: var(--ink-muted);
-      --link: var(--ink-link);
-      --danger: var(--ink-danger);
-      color: var(--text);
-      text-shadow: none;
+      border-style: solid;
       border-color: var(--brand);
-      background: var(--surface-muted);
+      background: #6305fc57;
     }
 
     /* The viewer's own place below the top, set apart from it. */

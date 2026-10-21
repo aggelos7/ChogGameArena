@@ -1,4 +1,5 @@
-import { Component, input } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
+import { NewsTone } from '../move-news';
 import { LifeEventKind, LifeLayout, LifeTile, LifeTileType, SPOT_FACE_HEIGHT, SPOT_FACE_WIDTH, SPOT_SCALE, spotLabel } from './life-board-model';
 
 /** A pawn as the illustrated board draws it: its seat and colour, and where it stands in board units. */
@@ -58,6 +59,15 @@ export class LifeDrawing {
   readonly lastStop = input<number | null>(null);
   /** The tiles of the lanes being chosen between at a fork. */
   readonly choice = input<ReadonlySet<number>>(new Set());
+  /** What the move just shown did, floating up from the tile it stopped on (DEC-076); null for none. */
+  readonly popup = input<{ tile: number; text: string; tone: NewsTone; id: number } | null>(null);
+
+  /** Where the popup floats up from, in board units. */
+  protected readonly popupAt = computed(() => {
+    const popup = this.popup();
+    const spot = popup ? this.layout().spots.find((place) => place.tile.index === popup.tile) : undefined;
+    return popup && spot ? { ...popup, x: spot.x, y: spot.y - 24 } : null;
+  });
 
   protected readonly spotWidth = SPOT_FACE_WIDTH;
   protected readonly spotHeight = SPOT_FACE_HEIGHT;

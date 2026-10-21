@@ -48,18 +48,21 @@
         }
       }
     </p>
-    @if (lastMove(); as move) {
-      <p class="last-move" data-last-move>{{ move }}</p>
-    }
-    @if (lastPlay(); as play) {
-      <p class="last-move" data-last-play>{{ play }}</p>
-    }
+    <div role="status" data-move-lines>
+      @if (lastMove(); as move) {
+        <p class="last-move" data-last-move>{{ move }}</p>
+      }
+      @if (lastPlay(); as play) {
+        <p class="last-move" data-last-play>{{ play }}</p>
+      }
+    </div>
     @if (lastAbility(); as used) {
       <p class="last-move" data-last-ability>{{ used }}</p>
     }
     @if (nextCard(); as next) {
       <p class="last-move" data-next-card>Next card in the deck: {{ next }}. Only you can see this.</p>
     }
+    <app-recent-moves [moves]="recent()" />
     @if (board().deck !== undefined) {
       <p class="piles" data-piles>Deck {{ board().deck }} · Discard {{ board().discard ?? 0 }}</p>
     }
@@ -143,6 +146,8 @@
 
   <div class="stage">
     <ng-content select="[boardTimer]" />
+    <app-rolling-die [roll]="die()" />
+    <app-move-banner [news]="banner()" />
     <ol
       #track
       class="track"
@@ -165,6 +170,13 @@
         >
           <span class="number" aria-hidden="true">{{ spot.tile.index }}</span>
           <span class="label" aria-hidden="true">{{ label(spot.tile) }}</span>
+          @if (popup(); as shown) {
+            @if (shown.tile === spot.tile.index) {
+              @for (id of [shown.id]; track id) {
+                <span [class]="'popup ' + shown.tone" aria-hidden="true" [attr.data-popup]="shown.tile">{{ shown.text }}</span>
+              }
+            }
+          }
           <span class="pawns" aria-hidden="true">
             @for (pawn of shownOn(spot.tile); track pawn.seat) {
               <span class="car" [class.hopping]="pawn.isHopping">
