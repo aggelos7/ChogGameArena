@@ -16,6 +16,7 @@
   @for (spot of layout().spots; track spot.tile.index) {
     <g
       [class]="'spot type-' + spot.tile.type.toLowerCase() + ' lane-' + spot.tile.lane.toLowerCase()"
+      [class.takes-mon]="takesMon(spot.tile)"
       [class.last-stop]="lastStop() === spot.tile.index"
       [class.choice]="choice().has(spot.tile.index)"
       [attr.transform]="'translate(' + spot.x + ' ' + spot.y + ') scale(' + spotScale + ')'"

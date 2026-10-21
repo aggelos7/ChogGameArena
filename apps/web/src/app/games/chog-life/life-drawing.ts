@@ -1,6 +1,6 @@
 import { Component, computed, input } from '@angular/core';
 import { NewsTone } from '../move-news';
-import { LifeEventKind, LifeLayout, LifeTile, LifeTileType, SPOT_FACE_HEIGHT, SPOT_FACE_WIDTH, SPOT_SCALE, spotLabel } from './life-board-model';
+import { LifeEventKind, LifeLayout, LifeTile, LifeTileType, SPOT_FACE_HEIGHT, SPOT_FACE_WIDTH, SPOT_SCALE, spotLabel, takesMon } from './life-board-model';
 
 /** A pawn as the illustrated board draws it: its seat and colour, and where it stands in board units. */
 export interface DrawingPawn {
@@ -73,6 +73,7 @@ export class LifeDrawing {
   protected readonly spotHeight = SPOT_FACE_HEIGHT;
   protected readonly spotScale = SPOT_SCALE;
   protected readonly label = spotLabel;
+  protected readonly takesMon = takesMon;
 
   protected icon(tile: LifeTile): Icon {
     return tile.type === 'Event' && tile.event ? EVENT_ICONS[tile.event] : TYPE_ICONS[tile.type];

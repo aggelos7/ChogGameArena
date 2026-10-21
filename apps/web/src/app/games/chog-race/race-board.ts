@@ -37,6 +37,7 @@ import {
   raceTileLabel,
   raceWalk,
 } from './race-board-model';
+import { HolderBadge } from '../holder-badge';
 import { ReportPhoto } from '../../moderation/report-photo';
 import { DIE_MS, DieRoll, RollingDie } from '../rolling-die';
 import { BANNER_MS, MoveBanner, MoveNews, RECENT_MOVES, RecentMoves, signedTilesText } from '../move-news';
@@ -103,7 +104,7 @@ function carHeading(now: ReadonlyMap<number, number>, then: ReadonlyMap<number, 
  */
 @Component({
   selector: 'app-race-board',
-  imports: [ReportPhoto, RollingDie, MoveBanner, RecentMoves],
+  imports: [ReportPhoto, RollingDie, MoveBanner, RecentMoves, HolderBadge],
   templateUrl: './race-board.html',
   styleUrl: './race-board.scss',
 })

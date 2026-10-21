@@ -1069,7 +1069,7 @@
 
 #### STORY-091 — Chog Life holder abilities: Double Dice and Tax the Rich
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E09
 - **Implementation:** Two new holder-only Chog Life abilities (DEC-077), added to the catalog with their Tier values in `Abilities:Holder`. **Double Dice:** used before the roll; the server rolls `dice` dice (2, or 3 from Rare) and the player keeps one of them for that move; a turn that runs out keeps the highest. **Tax the Rich:** used on the player's turn; takes `percent` (10% to 20% by Tier) of the MON of the richest other player still in the match, capped, and adds it to the player's; ties pick the first by seat; refused when the player is already the richest. Both show in the match's ability panel and last-move line like the other abilities.

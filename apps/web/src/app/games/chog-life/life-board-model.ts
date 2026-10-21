@@ -45,6 +45,17 @@ export interface LifePawn {
   place?: number;
   /** The id of the ability its player armed before a roll, until it acts (STORY-042, DEC-044). */
   armed?: string;
+  /** The dice Double Dice rolled for its player's next roll, which moves by the one they keep (STORY-091, DEC-078). */
+  dice?: number[];
+  /** The die kept of `dice` when its player's turn ran out: the highest, which their next roll moves by. */
+  kept?: number;
+}
+
+/** Tax the Rich (STORY-091, DEC-078): the player on `seat` took `amount` MON from the liquid MON of the one on `from`. */
+export interface LifeTax {
+  seat: number;
+  from: number;
+  amount: number;
 }
 
 /** A stake that paid out as its pawn rejoined the main track. */
@@ -97,6 +108,10 @@ export interface LifeMove {
   draws?: number;
   /** The route was switched after an Event Preview. */
   switched?: boolean;
+  /** Every die Double Dice rolled for this move; `roll` is the one kept (STORY-091, DEC-078). */
+  dice?: number[];
+  /** What a Tax the Rich used before this roll took. */
+  taxed?: LifeTax;
 }
 
 /** An event outcome as its rule: a fixed `amount` plus `percent` of the player's liquid MON, at least `minimum`. */
@@ -146,6 +161,8 @@ export interface LifeBoard {
   confirming?: number;
   /** Only for the player who used Event Preview, until they roll: their next move on the route chosen. */
   preview?: LifePreview;
+  /** A Tax the Rich used this turn, until its player rolls (STORY-091, DEC-078). */
+  tax?: LifeTax;
 }
 
 /** The command that rolls the die and moves your pawn on your turn. */
@@ -185,6 +202,9 @@ const isStakeReturns = (value: unknown): boolean =>
   value['outcomes'].length > 0 &&
   value['outcomes'].every((outcome) => isRecord(outcome) && isIndex(outcome['chance']) && isIndex(outcome['percent']));
 
+const isDice = (value: unknown): boolean => Array.isArray(value) && value.length > 0 && value.every((die) => isPlace(die));
+const isTax = (value: unknown): boolean => isRecord(value) && isIndex(value['seat']) && isIndex(value['from']) && isIndex(value['amount']);
+
 const isOutcome = (value: unknown): boolean =>
   isRecord(value) &&
   (value['effect'] === 'Gain' || value['effect'] === 'Loss') &&
@@ -208,6 +228,8 @@ const isMove = (move: unknown, tileCount: number): boolean =>
   (move['rerolled'] === undefined || Number.isInteger(move['rerolled'])) &&
   (move['draws'] === undefined || isIndex(move['draws'])) &&
   (move['switched'] === undefined || typeof move['switched'] === 'boolean') &&
+  (move['dice'] === undefined || isDice(move['dice'])) &&
+  (move['taxed'] === undefined || isTax(move['taxed'])) &&
   (move['matured'] === undefined ||
     (isRecord(move['matured']) && ROUTES.includes(move['matured']['lane']) && isIndex(move['matured']['stake']) && isIndex(move['matured']['payout']))) &&
   Array.isArray(move['path']) &&
@@ -241,7 +263,9 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
       (pawn['lane'] === undefined || ROUTES.includes(pawn['lane'])) &&
       (pawn['stake'] === undefined || isStake(pawn['stake'])) &&
       (pawn['place'] === undefined || isPlace(pawn['place'])) &&
-      (pawn['armed'] === undefined || typeof pawn['armed'] === 'string'),
+      (pawn['armed'] === undefined || typeof pawn['armed'] === 'string') &&
+      (pawn['dice'] === undefined || isDice(pawn['dice'])) &&
+      (pawn['kept'] === undefined || isPlace(pawn['kept'])),
   );
   const move = state['lastMove'];
   const validMove = move === undefined || isMove(move, tiles.length);
@@ -265,7 +289,8 @@ export function toLifeBoard(state: unknown): LifeBoard | null {
     (state['forkStake'] === undefined || isIndex(state['forkStake'])) &&
     (returns === undefined || (Array.isArray(returns) && returns.every(isStakeReturns)));
   const validEnd = (state['finishBonus'] === undefined || isIndex(state['finishBonus'])) && (state['ended'] === undefined || ENDINGS.includes(state['ended']));
-  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPreview || !validChoice || !validStakes || !validEnd) {
+  const validTax = state['tax'] === undefined || isTax(state['tax']);
+  if (tiles.length === 0 || !validTiles || !validPawns || !validMove || !validPreview || !validChoice || !validStakes || !validEnd || !validTax) {
     return null;
   }
   return state as unknown as LifeBoard;
@@ -346,6 +371,11 @@ export function stakeSummary(stake: number, returns: LifeStakeReturns | undefine
   return `Stake ${stake} MON, get ${first} or ${rest.join(' or ')}`;
 }
 
+/** Dice as said: "5", "2 and 5" or "1, 6 and 3". */
+export function diceList(dice: number[]): string {
+  return dice.length > 1 ? `${dice.slice(0, -1).join(', ')} and ${dice[dice.length - 1]}` : dice.join('');
+}
+
 /** Signed MON: "+11 MON", "−20 MON" or "0 MON". */
 export function signedMon(change: number): string {
   return change > 0 ? `+${change} MON` : change < 0 ? `−${-change} MON` : '0 MON';
@@ -387,6 +417,14 @@ export function ordinal(place: number): string {
 export function timeLeft(endsAt: number, now: number): string {
   const seconds = Math.max(0, Math.ceil((endsAt - now) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/** Events that always take MON: a Rug pull and a Liquidation. A Market gains as often as it loses, so it isn't one. */
+const MON_TAKING_EVENTS: readonly LifeEventKind[] = ['Rug', 'Liquidation'];
+
+/** Whether a tile always takes MON, so it's drawn red (STORY-091): a Loss tile, a Rug pull or a Liquidation. */
+export function takesMon(tile: LifeTile): boolean {
+  return tile.type === 'Loss' || (tile.type === 'Event' && tile.event !== undefined && MON_TAKING_EVENTS.includes(tile.event));
 }
 
 /** What a tile says on the board. */

@@ -31,6 +31,8 @@ export interface RoomAbility {
   values: Record<string, number>;
   /** For a locked ability: uses left in this game (DEC-036); null for a lobby choice. */
   usesLeft: number | null;
+  /** Only Chog holders may choose it, so it carries a "Holder" badge (STORY-091, DEC-078); absent from older servers. */
+  holderOnly?: boolean;
 }
 
 /** Mirrors `RoomAchievementResponse`: an achievement this player unlocked with the completed match (DEC-063). */
@@ -114,6 +116,11 @@ export interface Room {
   state: unknown;
   /** What this player may choose from while the room waits; empty for a game without abilities and once started. */
   abilities: RoomAbility[];
+  /**
+   * The holder-only abilities this player can't choose while the room waits, with Base values, shown locked (STORY-091,
+   * DEC-078); empty for a holder and once started, absent from older servers.
+   */
+  unavailableAbilities?: RoomAbility[];
   /** Achievements this player unlocked with the completed match (STORY-058); empty otherwise and for everyone else's. */
   achievements: RoomAchievement[];
 }

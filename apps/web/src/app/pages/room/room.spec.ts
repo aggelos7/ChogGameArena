@@ -346,6 +346,41 @@ describe('Room page', () => {
     expect(element().querySelector('[data-ability-hint]')).toBeNull();
   });
 
+  it('groups a holder’s holder abilities under a gold heading, choosable (STORY-091)', () => {
+    const dice: RoomAbility = { ...reroll, id: 'double_dice', name: 'Double Dice', holderOnly: true };
+    load({ ...withAbilities(), abilities: [boost, dice], unavailableAbilities: [] });
+
+    expect(element().querySelector('[data-holder-heading]')?.textContent?.trim()).toBe('♛ Holder abilities');
+    expect(abilityButtons().map((b) => [b.querySelector('.ability-name')?.textContent?.trim(), b.classList.contains('holder')])).toEqual([
+      ['Reward Boost', false],
+      ['Double Dice', true],
+    ]);
+    expect(element().querySelector('[data-locked-option]')).toBeNull();
+    expect(element().querySelector('[data-unlock-hint]')).toBeNull();
+
+    abilityButtons()[1].click();
+    expect(http.expectOne('/api/rooms/K7QF3M/ability').request.body).toEqual({ abilityId: 'double_dice' });
+  });
+
+  it('shows a non-holder the holder abilities locked, which can’t be chosen (STORY-091)', () => {
+    const dice: RoomAbility = { ...reroll, id: 'double_dice', name: 'Double Dice', holderOnly: true };
+    const tax: RoomAbility = { ...reroll, id: 'tax_the_rich', name: 'Tax the Rich', holderOnly: true };
+    load({ ...withAbilities(), abilities: [boost], unavailableAbilities: [dice, tax] });
+
+    expect(abilityButtons().length).toBe(1);
+    expect(element().querySelector('[data-holder-heading]')).not.toBeNull();
+    const locked = Array.from(element().querySelectorAll<HTMLElement>('[data-locked-option]'));
+    expect(locked.map((option) => [option.dataset['lockedOption'], option.getAttribute('aria-disabled')])).toEqual([
+      ['double_dice', 'true'],
+      ['tax_the_rich', 'true'],
+    ]);
+    expect(locked[0].textContent).toContain('🔒 Locked');
+    expect(element().querySelector('[data-unlock-hint]')?.textContent?.trim()).toBe('Play as a Chog NFT you own to unlock these.');
+
+    locked[0].click();
+    http.expectNone('/api/rooms/K7QF3M/ability');
+  });
+
   it('does not send the ability already chosen again', () => {
     load(withAbilities({ ability: boost, hasAbility: true }));
 
@@ -865,6 +900,21 @@ describe('Room page', () => {
       expect(element().querySelector('[data-use-ability]')).toBeNull();
       expect(element().querySelector('[data-armed]')?.textContent?.trim()).toBe('Reward Boost armed');
       expect(element().querySelector('[data-roll]')).not.toBeNull();
+    });
+
+    it('rolls keeping the die you pick of your Double Dice (STORY-091)', () => {
+      const dice = { id: 'double_dice', name: 'Double Dice', description: 'Keep a die.', target: 'None' as const, maxUses: 1, values: { dice: 2 }, usesLeft: 0 };
+      load({
+        ...room,
+        version: 10,
+        status: 'Active',
+        state: { ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0, 100, { dice: [2, 5] })] },
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true, ability: dice })],
+      });
+
+      element().querySelector<HTMLButtonElement>('[data-keep-die="5"]')?.click();
+      const roll = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(roll.request.body).toMatchObject({ expectedVersion: 10, type: 'ROLL', payload: { die: 5 } });
     });
 
     it('shows whose turn it is and how much of it is left (DEC-045)', () => {

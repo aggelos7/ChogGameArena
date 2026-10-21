@@ -96,6 +96,8 @@ Use stable `gameType` identifiers (`chog-life`, `chog-race`), versioned game con
 | `loss_protection` | Loss Protection | Reduce one eligible negative event loss by 50%. |
 | `event_preview` | Event Preview | Reveal the upcoming event before an eligible decision. |
 | `event_reroll` | Lucky Reroll | Reroll one eligible random event. |
+| `double_dice` | Double Dice | Before the roll, roll 2 dice and move by the one kept; a turn that runs out keeps the highest for the next roll (STORY-091, DEC-078). |
+| `tax_the_rich` | Tax the Rich | Before the roll, take 10% of the liquid MON of the opponent with the highest total portfolio, at most 50 MON; refused while the player's own total is the highest (STORY-091, DEC-078). |
 
 **Chog Race MVP ability pool:**
 
@@ -106,7 +108,7 @@ Use stable `gameType` identifiers (`chog-life`, `chog-race`), versioned game con
 | `card_preview` | Card Vision | Privately view the next card in the deck. |
 | `card_steal` | Card Steal | Take one server-random card from an eligible opponent. |
 
-Since DEC-077 these effects are the Base values. Reward Boost, Loss Protection, Shield and Card Vision are standard; Event Preview, Lucky Reroll, Speed Boost and Card Steal are holder-only, and rarer Tiers strengthen every ability (DEC-077's table).
+Since DEC-077 these effects are the Base values. Reward Boost, Loss Protection, Shield and Card Vision are standard; Event Preview, Lucky Reroll, Double Dice, Tax the Rich, Speed Boost and Card Steal are holder-only, and rarer Tiers strengthen every ability (DEC-077's table).
 
 Ability values, activation windows, and per-match limits are configuration-driven. Preview information is private to the player; other players receive only appropriate public state changes.
 
@@ -217,7 +219,7 @@ Persist match results and game-config version; avoid storing full raw event hist
 
 **Multiple NFTs:** Given a verified wallet with several eligible Chogs, when the player opens My Chogs, then all owned NFTs appear and exactly one may be selected for the upcoming match.
 
-**Holder abilities:** Given an Epic Chog holder and a guest in the same Chog Life lobby, when they choose abilities, then the guest receives the 2 standard abilities with Base values, the holder all four with the Epic Tier's values, and the guest choosing a holder-only ability is refused (DEC-077; this replaces the MVP's "Equal abilities").
+**Holder abilities:** Given an Epic Chog holder and a guest in the same Chog Life lobby, when they choose abilities, then the guest receives the 2 standard abilities with Base values, the holder all six with the Epic Tier's values, and the guest choosing a holder-only ability is refused (DEC-077; this replaces the MVP's "Equal abilities").
 
 **Ability lock:** Given a player selected Reward Boost and marked Ready, when the match starts, then the chosen ability and versioned parameters are snapshotted and cannot be changed mid-match.
 

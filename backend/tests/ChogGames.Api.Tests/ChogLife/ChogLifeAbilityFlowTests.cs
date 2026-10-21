@@ -21,6 +21,8 @@ namespace ChogGames.Api.Tests.ChogLife;
 /// STORY-042, DEC-044: Chog Life's real abilities in a match. Every player is offered the same four; each works once,
 /// only on its player's own turn and in its window; a use keeps the turn and draws nothing, except Event Preview, whose
 /// draws the next roll replays. Only the previewing player sees the preview, over REST and live. Refusals change nothing.
+/// STORY-091, DEC-078: Double Dice's dice are rolled on use and the roll keeps one of them; Tax the Rich moves MON from the
+/// richest opponent.
 /// </summary>
 public sealed class ChogLifeAbilityFlowTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -205,7 +207,7 @@ public sealed class ChogLifeAbilityFlowTests(MigratedPostgresDatabase database) 
     private static string LastMove(JsonElement room) => room.GetProperty("state").GetProperty("lastMove").GetRawText();
 
     [PostgresFact]
-    public async Task Every_player_is_offered_the_same_four_abilities_and_must_choose_one()
+    public async Task Without_holder_rules_every_player_is_offered_the_whole_catalog_and_must_choose_one()
     {
         var alice = await GuestAsync("Alice");
         var bob = await GuestAsync("Bob");
@@ -213,7 +215,7 @@ public sealed class ChogLifeAbilityFlowTests(MigratedPostgresDatabase database) 
         var code = created.GetProperty("code").GetString()!;
         var joined = await SendAsync(bob, HttpMethod.Post, $"/api/rooms/{code}/join");
 
-        string[] offered = ["reward_boost", "loss_protection", "event_preview", "event_reroll"];
+        string[] offered = ["reward_boost", "loss_protection", "event_preview", "event_reroll", "double_dice", "tax_the_rich"];
         Assert.Equal(offered, created.GetProperty("abilities").EnumerateArray().Select(a => a.GetProperty("id").GetString()));
         Assert.Equal(created.GetProperty("abilities").GetRawText(), joined.GetProperty("abilities").GetRawText());
         var problem = await SendAsync(bob, HttpMethod.Put, $"/api/rooms/{code}/ready", new { ready = true }, HttpStatusCode.Conflict);
@@ -340,5 +342,52 @@ public sealed class ChogLifeAbilityFlowTests(MigratedPostgresDatabase database) 
         await CommandAsync(bob, await ViewAsync(bob, code), "ROLL");
         await CommandAsync(alice, await ViewAsync(alice, code), "ROLL");
         Assert.Equal("""{"seat":1,"roll":1,"from":9,"to":10,"path":[10],"change":10}""", LastMove(await ViewAsync(bob, code)));
+    }
+
+    private static async Task<JsonElement> RejectedAsync(Guest guest, JsonElement room, string type, object? payload, string reason)
+    {
+        var problem = await CommandAsync(guest, room, type, payload, HttpStatusCode.Conflict);
+        Assert.Equal(MatchCommandEndpoints.ErrorCodes.CommandRejected, problem.GetProperty("code").GetString());
+        Assert.Equal(reason, problem.GetProperty("reason").GetString());
+        return problem;
+    }
+
+    [PostgresFact]
+    public async Task Double_dice_moves_by_the_die_kept_and_tax_the_rich_takes_from_the_richest()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync((alice, "double_dice"), (bob, "tax_the_rich"));
+
+        // Bob can't tax on Alice's turn.
+        await RefusedAsync(bob, await ViewAsync(bob, code), "tax_the_rich", MatchCommandEndpoints.ErrorCodes.NotYourTurn, null);
+
+        _dice.Enqueue(5);
+        _dice.Enqueue(2);
+        await UseAsync(alice, await ViewAsync(alice, code), "double_dice");
+        var rolled = await ViewAsync(bob, code);
+        Assert.Equal(("[5,2]", "Alice", 0), (Pawn(rolled, 1).GetProperty("dice").GetRawText(), TurnOf(rolled), UsesLeft(rolled, "Alice")));
+
+        await RejectedAsync(alice, rolled, "ROLL", null, "choose_die");
+        await RejectedAsync(alice, rolled, "ROLL", new { die = 4 }, "invalid_die");
+        var draws = _dice.Draws.Count;
+        await CommandAsync(alice, await ViewAsync(alice, code), "ROLL", new { die = 2 });
+        var moved = await ViewAsync(bob, code);
+        Assert.Equal("""{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2],"change":20,"dice":[5,2]}""", LastMove(moved));
+        Assert.Equal(draws, _dice.Draws.Count);
+        Assert.Equal("Bob", TurnOf(moved));
+
+        await UseAsync(bob, moved, "tax_the_rich");
+        var taxed = await ViewAsync(alice, code);
+        Assert.Equal((108, 112), (Pawn(taxed, 1).GetProperty("mon").GetInt32(), Pawn(taxed, 2).GetProperty("mon").GetInt32()));
+        Assert.Equal("""{"seat":2,"from":1,"amount":12}""", taxed.GetProperty("state").GetProperty("tax").GetRawText());
+        Assert.Equal(draws, _dice.Draws.Count);
+        await RefusedAsync(bob, taxed, "tax_the_rich", MatchCommandEndpoints.ErrorCodes.CommandRejected, AbilityRefusal.UsedUp);
+
+        _dice.Enqueue(1);
+        await CommandAsync(bob, await ViewAsync(bob, code), "ROLL");
+        Assert.Equal(
+            """{"seat":2,"roll":1,"from":0,"to":1,"path":[1],"taxed":{"seat":2,"from":1,"amount":12}}""",
+            LastMove(await ViewAsync(alice, code)));
     }
 }

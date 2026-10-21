@@ -149,18 +149,25 @@
             <fieldset class="abilities" data-list="abilities">
               <legend>Choose your ability</legend>
               <p class="hint">Use it once in the game. The others won’t see your choice until the game starts.</p>
-              @for (ability of current.abilities; track ability.id) {
-                <button
-                  type="button"
-                  class="ability"
-                  [class.chosen]="me.ability?.id === ability.id"
-                  [attr.aria-pressed]="me.ability?.id === ability.id"
-                  [disabled]="busy()"
-                  (click)="chooseAbility(ability)"
-                >
-                  <span class="ability-name">{{ ability.name }}</span>
-                  <span class="ability-description">{{ ability.description }}</span>
-                </button>
+              @let groups = abilityGroups();
+              @for (ability of groups.standard; track ability.id) {
+                <ng-container *ngTemplateOutlet="abilityChoice; context: { $implicit: ability, me }" />
+              }
+              @if (groups.holder.length > 0 || groups.locked.length > 0) {
+                <!-- Holder abilities, grouped and marked; a non-holder sees them locked (STORY-091, DEC-078). -->
+                <p class="holder-heading" data-holder-heading><span aria-hidden="true">♛</span> Holder abilities</p>
+                @for (ability of groups.holder; track ability.id) {
+                  <ng-container *ngTemplateOutlet="abilityChoice; context: { $implicit: ability, me }" />
+                }
+                @for (ability of groups.locked; track ability.id) {
+                  <div class="ability holder locked" aria-disabled="true" [attr.data-locked-option]="ability.id">
+                    <span class="ability-name">{{ ability.name }} <span class="lock">🔒 Locked</span></span>
+                    <span class="ability-description">{{ ability.description }}</span>
+                  </div>
+                }
+                @if (groups.locked.length > 0) {
+                  <p class="hint" data-unlock-hint>Play as a Chog NFT you own to unlock these.</p>
+                }
               }
               @if (me.isReady) {
                 <p class="hint">Choosing another ability means marking ready again.</p>
@@ -216,6 +223,7 @@
                 (roll)="roll()"
                 (chooseLane)="chooseLane($event)"
                 (useAbility)="useAbility($event)"
+                (keepDie)="keepDie($event)"
                 (settled)="boardSettled()"
               >
                 <div class="game-header" boardHeader>
@@ -300,12 +308,32 @@
   }
 }
 
+<!-- One ability to choose in the lobby; a holder ability is outlined in gold (STORY-091, DEC-078). -->
+<ng-template #abilityChoice let-ability let-me="me">
+  <button
+    type="button"
+    class="ability"
+    [class.holder]="ability.holderOnly"
+    [class.chosen]="me.ability?.id === ability.id"
+    [attr.aria-pressed]="me.ability?.id === ability.id"
+    [disabled]="busy()"
+    (click)="chooseAbility(ability)"
+  >
+    <span class="ability-name">{{ ability.name }}</span>
+    <span class="ability-description">{{ ability.description }}</span>
+  </button>
+</ng-template>
+
 <!-- The locked ability's description shows its values (DEC-077); Chog Race's own ability panel already shows it. -->
 <ng-template #playingAs let-me let-describe="describe">
   @if (me.ability; as ability) {
     <p class="hint">
       You’re playing as <strong>{{ me.character.name }}</strong> with
-      <strong data-locked-ability>{{ ability.name }}</strong> for this game.
+      <strong data-locked-ability>{{ ability.name }}</strong>
+      @if (ability.holderOnly) {
+        <app-holder-badge />
+      }
+      for this game.
       @if (ability.usesLeft !== null) {
         <span data-uses-left>{{ usesLeftLabel(ability.usesLeft) }}</span>
       }
