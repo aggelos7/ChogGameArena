@@ -67,8 +67,14 @@ public sealed class AbilityEngine
 
         // The values locked at start apply, even if a deploy changed the catalog since; a handler that is gone or no
         // longer takes those values can't apply them.
-        var ability = locked.ToDefinition();
-        if (catalog is null || !catalog.TryFind(abilityId, out _, out var handler) || !AbilityCatalog.Fits(ability, handler))
+        // A value added since the ability was locked takes its handler's default, as the effect was then.
+        if (catalog is null || !catalog.TryFind(abilityId, out _, out var handler))
+        {
+            return AbilityResult.Reject(AbilityRefusal.Unavailable);
+        }
+
+        var ability = AbilityCatalog.WithDefaults(locked.ToDefinition(), handler);
+        if (!AbilityCatalog.Fits(ability, handler))
         {
             return AbilityResult.Reject(AbilityRefusal.Unavailable);
         }

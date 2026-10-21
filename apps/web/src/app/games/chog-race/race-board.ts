@@ -322,11 +322,13 @@ export class RaceBoardView {
     const pawn = this.armed().get(you.seat);
     switch (ability.id) {
       case RACE_SPEED_BOOST:
-        return phase === 'Move' && !pawn?.boost ? [{ abilityId: ability.id, label: `Use ${ability.name}: +2 to your roll` }] : [];
+        return phase === 'Move' && !pawn?.boost
+          ? [{ abilityId: ability.id, label: `Use ${ability.name}: +${ability.values['tiles'] ?? 2} to your roll` }]
+          : [];
       case RACE_SHIELD:
         return pawn?.shielded ? [] : [{ abilityId: ability.id, label: `Use ${ability.name}` }];
       case RACE_CARD_VISION:
-        return (board.deck ?? 0) > 0 ? [{ abilityId: ability.id, label: `Use ${ability.name}: see the next card` }] : [];
+        return (board.deck ?? 0) > 0 ? [{ abilityId: ability.id, label: `Use ${ability.name}: see the ${this.nextCards(ability.values['cards'])}` }] : [];
       case RACE_CARD_STEAL:
         if ((board.hand?.length ?? 0) >= (board.maxHand ?? Infinity)) {
           return [];
@@ -353,11 +355,27 @@ export class RaceBoardView {
     return { ...ability, status: this.abilityPlays().length > 0 ? null : this.abilityStatus(you.seat, you.isTurn) };
   });
 
-  /** The deck's top card Card Vision shows you, by name (DEC-059). */
+  /** What Card Vision shows you: the deck's top cards by name, top first (DEC-059, DEC-077). */
   protected readonly nextCard = computed(() => {
-    const next = this.board().next;
-    return next ? this.cardName(next) : null;
+    const board = this.board();
+    const seen = board.seen ?? (board.next ? [board.next] : []);
+    if (seen.length === 0) {
+      return null;
+    }
+    const names = seen.map((card) => this.cardName(card)).join(', then ');
+    return `${seen.length === 1 ? 'Next card' : `Next ${seen.length} cards`} in the deck: ${names}`;
   });
+
+  /** A raised Shield's tag: "Shielded", with the attacks it still blocks when more than one (DEC-077). */
+  protected shieldLabel(seat: number): string {
+    const blocks = this.armed().get(seat)?.blocks ?? 1;
+    return blocks > 1 ? `Shielded ×${blocks}` : 'Shielded';
+  }
+
+  /** How many cards seeing shows: "next card", or "next 2 cards" from a rarer Tier (DEC-077). */
+  private nextCards(count = 1): string {
+    return count === 1 ? 'next card' : `next ${count} cards`;
+  }
 
   /** The latest ability used, in words; a stolen card is named only when the server sent it, to its two players (DEC-059). */
   protected readonly lastAbility = computed(() => {
@@ -370,7 +388,11 @@ export class RaceBoardView {
     if (used.target === undefined) {
       return `${action}.`;
     }
-    const took = used.card ? this.cardName(used.card) : 'a card';
+    const cards = used.cards ?? (used.card ? [used.card] : []);
+    const taken = used.taken ?? 1;
+    const took = cards.length > 0
+      ? cards.map((card) => this.cardName(card)).join(' and ')
+      : taken === 1 ? 'a card' : `${taken} cards`;
     return `${action} and took ${took} from ${this.nameOf(used.target, false)}.`;
   });
 
@@ -614,7 +636,10 @@ export class RaceBoardView {
       return `Armed: your next roll moves ${pawn.boost} more.`;
     }
     if (pawn?.shielded) {
-      return 'Raised: it blocks the next Rug, Liquidated or Whale played on you.';
+      const blocks = pawn.blocks ?? 1;
+      return blocks === 1
+        ? 'Raised: it blocks the next Rug, Liquidated or Whale played on you.'
+        : `Raised: it blocks the next ${blocks} Rugs, Liquidateds or Whales played on you.`;
     }
     if (!ability?.usesLeft) {
       return 'Used.';

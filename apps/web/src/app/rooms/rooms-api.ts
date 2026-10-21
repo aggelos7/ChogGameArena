@@ -24,6 +24,11 @@ export interface RoomAbility {
   description: string;
   target: 'None' | 'Opponent';
   maxUses: number;
+  /**
+   * The values its effect uses, by name, such as `percent` or `tiles`: the player's Chog Tier's in the lobby and as
+   * locked at the start (STORY-090, DEC-077). The description already reads them.
+   */
+  values: Record<string, number>;
   /** For a locked ability: uses left in this game (DEC-036); null for a lobby choice. */
   usesLeft: number | null;
 }

@@ -298,6 +298,7 @@ describe('Room page', () => {
     description: 'Raise one reward.',
     target: 'None',
     maxUses: 1,
+    values: {},
     usesLeft: null,
   };
   const reroll: RoomAbility = {
@@ -306,6 +307,7 @@ describe('Room page', () => {
     description: 'Reroll one event.',
     target: 'None',
     maxUses: 1,
+    values: {},
     usesLeft: null,
   };
 
@@ -829,7 +831,7 @@ describe('Room page', () => {
     });
 
     it('uses your ability on your turn and shows the room as the server left it (STORY-042)', () => {
-      const boost = { id: 'reward_boost', name: 'Reward Boost', description: 'Boost a reward.', target: 'None' as const, maxUses: 1 };
+      const boost = { id: 'reward_boost', name: 'Reward Boost', description: 'Boost a reward.', target: 'None' as const, maxUses: 1, values: {} };
       const started: Room = {
         ...room,
         version: 8,
@@ -838,6 +840,8 @@ describe('Room page', () => {
         members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true, ability: { ...boost, usesLeft: 1 } })],
       };
       load(started);
+      // The locked ability's description, with its values (DEC-077).
+      expect(element().querySelector('[data-locked-description]')?.textContent?.trim()).toBe('Boost a reward.');
 
       element().querySelector<HTMLButtonElement>('[data-use-ability]')?.click();
       const use = http.expectOne('/api/rooms/K7QF3M/commands');
@@ -1088,7 +1092,7 @@ describe('Room page', () => {
     });
 
     it('uses a Chog Race ability on your turn, naming Card Steal’s target (STORY-055)', () => {
-      const steal = { id: 'card_steal', name: 'Card Steal', description: '', target: 'Opponent' as const, maxUses: 1, usesLeft: 1 };
+      const steal = { id: 'card_steal', name: 'Card Steal', description: '', target: 'Opponent' as const, maxUses: 1, values: {}, usesLeft: 1 };
       const started: Room = {
         ...room,
         version: 9,

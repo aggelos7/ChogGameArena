@@ -13,7 +13,9 @@ namespace ChogGames.Games.ChogLife.Tests;
 /// STORY-042, DEC-044: Chog Life's four abilities through the shared engine. Reward Boost, Loss Protection and Lucky
 /// Reroll are armed before a roll and act on the first tile outcome they fit. Event Preview is armed at a fork; choosing
 /// a lane then draws the next move there and shows only its player the die, tile and event outcome. Keeping the lane
-/// plays it out exactly as shown; switching moves the stake and draws the next roll afresh.
+/// plays it out exactly as shown; switching moves the stake and draws the next roll afresh. STORY-090, DEC-077: with a
+/// holder Tier's locked values, the boost and the protection are stronger, Lucky Reroll draws more often and Event
+/// Preview has more uses.
 /// </summary>
 public class ChogLifeAbilityTests
 {
@@ -47,8 +49,20 @@ public class ChogLifeAbilityTests
     }
 
     /// <summary>A started two-player match: seat 1 locked <paramref name="ability"/>, seat 2 Reward Boost.</summary>
-    private static (GameRoom Room, Player[] Players) Started(string ability)
+    private static (GameRoom Room, Player[] Players) Started(string ability) =>
+        StartedWith(Catalog.Definitions.Single(d => d.Id == ability));
+
+    /// <summary>The catalog's ability with a holder Tier's values and uses (STORY-090, DEC-077).</summary>
+    private static AbilityDefinition Tiered(string id, Dictionary<string, decimal> values, int? uses = null)
     {
+        var defined = Catalog.Definitions.Single(d => d.Id == id);
+        return defined.WithValues(values, uses ?? defined.MaxUses);
+    }
+
+    /// <summary>A started two-player match: seat 1 locked <paramref name="definition"/> with its values, seat 2 Reward Boost.</summary>
+    private static (GameRoom Room, Player[] Players) StartedWith(AbilityDefinition definition)
+    {
+        var ability = definition.Id;
         var players = Enumerable.Range(1, 2).Select(n =>
         {
             Assert.True(PlayerDisplayName.TryCreate($"Player {n}", out var name));
@@ -74,7 +88,7 @@ public class ChogLifeAbilityTests
             Now.AddMinutes(1),
             new Dictionary<Guid, AbilitySnapshot>
             {
-                [players[0].Id] = Locked(ability),
+                [players[0].Id] = AbilitySnapshot.Lock(Catalog, definition),
                 [players[1].Id] = Locked(LifeAbilities.RewardBoost),
             },
             started => Rules.StartState(new MatchStartContext(started, random))?.GetRawText());
@@ -143,13 +157,13 @@ public class ChogLifeAbilityTests
     [Fact]
     public void The_catalog_offers_the_four_abilities_once_each_with_their_windows_and_values()
     {
-        Assert.Equal((GameDefinition.ChogLife, 1), (Catalog.GameType, Catalog.Version));
+        Assert.Equal((GameDefinition.ChogLife, 2), (Catalog.GameType, Catalog.Version));
         Assert.Equal(
             [
                 ("reward_boost", "Reward Boost", "before_roll", "percent=25"),
                 ("loss_protection", "Loss Protection", "before_roll", "percent=50"),
                 ("event_preview", "Event Preview", "at_fork", ""),
-                ("event_reroll", "Lucky Reroll", "before_roll", ""),
+                ("event_reroll", "Lucky Reroll", "before_roll", "draws=2"),
             ],
             Catalog.Definitions.Select(d => (
                 d.Id,
@@ -268,6 +282,70 @@ public class ChogLifeAbilityTests
         Assert.Equal([(1, 7), (0, 100), (0, 100)], dice.Draws);
         Assert.Equal((change, discarded), (LastMove(rolled).GetProperty("change").GetInt32(), LastMove(rolled).GetProperty("rerolled").GetInt32()));
         Assert.False(PawnView(room, players[0], rolled, 1).TryGetProperty("armed", out _));
+    }
+
+    [Fact]
+    public void A_legendary_reward_boost_adds_half_of_the_next_reward()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.RewardBoost, new() { [LifeAbilities.Percent] = 50 }));
+        var armed = Armed(room, players[0], LifeAbilities.RewardBoost, room.State!);
+
+        var rolled = Roll(room, players[0], armed, new Dice(2));
+
+        Assert.Equal((20, 10), (LastMove(rolled).GetProperty("change").GetInt32(), LastMove(rolled).GetProperty("boost").GetInt32()));
+    }
+
+    [Fact]
+    public void A_legendary_loss_protection_takes_only_a_quarter_of_the_next_loss()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.LossProtection, new() { [LifeAbilities.Percent] = 25 }));
+        var armed = Armed(room, players[0], LifeAbilities.LossProtection, room.State!);
+
+        // The loss tile at 5 takes 15: 25% of it is taken, rounding up, and 11 saved.
+        var rolled = Roll(room, players[0], armed, new Dice(5));
+
+        Assert.Equal("""{"seat":1,"roll":5,"from":0,"to":5,"path":[1,2,3,4,5],"change":-4,"saved":11}""", LastMove(rolled).GetRawText());
+        Assert.Equal(96, PawnView(room, players[0], rolled, 1).GetProperty("mon").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(99, 99, 0, 10)] // two losses, then a gain: the gain applies
+    [InlineData(99, 99, 99, -10)] // three losses: one applies
+    public void A_rare_lucky_reroll_draws_an_event_three_times_and_keeps_the_best(int first, int second, int third, int change)
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.EventReroll, new() { [LifeAbilities.Draws] = 3 }));
+        var armed = Armed(room, players[0], LifeAbilities.EventReroll, room.State!);
+        var dice = new Dice(6, first, second, third);
+
+        var rolled = Roll(room, players[0], armed, dice);
+
+        Assert.Equal([(1, 7), (0, 100), (0, 100), (0, 100)], dice.Draws);
+        var move = LastMove(rolled);
+        Assert.Equal((change, -10, 3), (move.GetProperty("change").GetInt32(), move.GetProperty("rerolled").GetInt32(), move.GetProperty("draws").GetInt32()));
+    }
+
+    [Fact]
+    public void A_lucky_reroll_armed_before_tier_values_draws_twice()
+    {
+        var (room, players) = Started(LifeAbilities.EventReroll);
+        var armed = State("""{"seat":1,"tile":0,"mon":100,"armed":{"ability":"event_reroll"}}""");
+        var dice = new Dice(6, 99, 0);
+
+        var rolled = Roll(room, players[0], armed, dice);
+
+        Assert.Equal([(1, 7), (0, 100), (0, 100)], dice.Draws);
+        Assert.Equal((10, 2), (LastMove(rolled).GetProperty("change").GetInt32(), LastMove(rolled).GetProperty("draws").GetInt32()));
+    }
+
+    [Fact]
+    public void An_epic_event_preview_has_two_uses()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.EventPreview, [], uses: 2));
+        var member = room.Members.Single(m => m.PlayerId == players[0].Id);
+
+        Assert.Equal((2, 2), (member.Ability!.MaxUses, member.AbilityUsesLeft));
+        Assert.EndsWith("2 uses per game.", member.Ability.Description);
+        Assert.EndsWith("1 use per game.", Catalog.Definitions.Single(d => d.Id == LifeAbilities.EventPreview).Description);
     }
 
     [Theory]

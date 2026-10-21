@@ -23,7 +23,7 @@ public static class MockNftFixtures
     /// <summary>Every request fails as if the RPC provider were down.</summary>
     public static readonly WalletAddress UnavailableHolder = Address("0x000000000000000000000000000000000000c003");
 
-    /// <summary>A complete token.</summary>
+    /// <summary>A complete token, of the Common Tier (DEC-077).</summary>
     public static readonly OwnedNft Classic = new(
         NftTokenId.From(1),
         "Chog #1",
@@ -35,9 +35,10 @@ public static class MockNftFixtures
             new("Mouth", "Grin"),
             new("Head", "Beanie"),
             new("Accessory", "None"),
+            new("Tier", "Common"),
         ]);
 
-    /// <summary>A complete token with a different look.</summary>
+    /// <summary>A complete token with a different look, of the Epic Tier, so its holder's abilities are stronger (DEC-077).</summary>
     public static readonly OwnedNft Golden = new(
         NftTokenId.From(7),
         "Chog #7",
@@ -49,6 +50,7 @@ public static class MockNftFixtures
             new("Mouth", "Smile"),
             new("Head", "Crown"),
             new("Accessory", "Chain"),
+            new("Tier", "Epic"),
         ]);
 
     /// <summary>Metadata without a usable image.</summary>

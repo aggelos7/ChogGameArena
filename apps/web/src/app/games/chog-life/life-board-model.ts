@@ -91,8 +91,10 @@ export interface LifeMove {
   boost?: number;
   /** MON Loss Protection kept from this move's loss. */
   saved?: number;
-  /** The signed MON of the event outcome a Lucky Reroll discarded for the better one. */
+  /** The signed MON of the worst event outcome a Lucky Reroll discarded for the best one. */
   rerolled?: number;
+  /** How many times Lucky Reroll drew the event: 2, or 3 from a rarer Tier (STORY-090, DEC-077). */
+  draws?: number;
   /** The route was switched after an Event Preview. */
   switched?: boolean;
 }
@@ -204,6 +206,7 @@ const isMove = (move: unknown, tileCount: number): boolean =>
   (move['boost'] === undefined || isIndex(move['boost'])) &&
   (move['saved'] === undefined || isIndex(move['saved'])) &&
   (move['rerolled'] === undefined || Number.isInteger(move['rerolled'])) &&
+  (move['draws'] === undefined || isIndex(move['draws'])) &&
   (move['switched'] === undefined || typeof move['switched'] === 'boolean') &&
   (move['matured'] === undefined ||
     (isRecord(move['matured']) && ROUTES.includes(move['matured']['lane']) && isIndex(move['matured']['stake']) && isIndex(move['matured']['payout']))) &&

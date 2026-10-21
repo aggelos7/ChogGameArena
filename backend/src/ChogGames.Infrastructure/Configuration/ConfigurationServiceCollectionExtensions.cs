@@ -133,17 +133,22 @@ public static class ConfigurationServiceCollectionExtensions
         services.AddScoped<TurnTimeoutService>();
         services.AddScoped<MatchRecoveryService>();
 
-        // Games add their AbilityCatalog as their abilities are built (DEC-032). Every player gets the shared pool
-        // unless trait-based abilities are switched on, which replaces only this one registration (DEC-033, DEC-066).
+        // Games add their AbilityCatalog as their abilities are built (DEC-032). Holders get more abilities and their
+        // Tier's values (DEC-077) unless the superseded trait rules are switched on, which replace only this one
+        // registration (DEC-033, DEC-066).
         services.AddSingleton<AbilityEngine>();
         services.AddSingleton<IValidateOptions<TraitAbilityOptions>, TraitAbilityOptionsValidator>();
         services.AddOptions<TraitAbilityOptions>()
             .Bind(configuration.GetSection(TraitAbilityOptions.SectionName))
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<HolderAbilityOptions>, HolderAbilityOptionsValidator>();
+        services.AddOptions<HolderAbilityOptions>()
+            .Bind(configuration.GetSection(HolderAbilityOptions.SectionName))
+            .ValidateOnStart();
         services.AddSingleton<IAbilityAssignmentStrategy>(provider =>
             provider.GetRequiredService<IOptions<TraitAbilityOptions>>().Value is { Enabled: true } traitBased
                 ? new TraitBasedAbilityStrategy(new ConfiguredTraitAbilityResolver(traitBased.ToRules()))
-                : new SharedAbilityPoolStrategy());
+                : new HolderAbilityStrategy(provider.GetRequiredService<IOptions<HolderAbilityOptions>>().Value.ToRules()));
         services.AddSingleton<AbilityPool>();
         services.AddScoped<LobbyCharacters>();
 

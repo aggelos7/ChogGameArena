@@ -68,7 +68,8 @@ public sealed class LobbyService(
     }
 
     /// <summary>
-    /// The player chooses the ability they will use in the match (STORY-033, DEC-035); it must be one their pool offers.
+    /// The player chooses the ability they will use in the match (STORY-033, DEC-035); it must be one their pool offers
+    /// for the Chog they have selected (DEC-077).
     /// Choosing another one than before makes them not ready.
     /// </summary>
     public async Task<RoomResult> SelectAbilityAsync(Player player, RoomCode code, string abilityId, CancellationToken cancellationToken)
@@ -89,7 +90,10 @@ public sealed class LobbyService(
         var current = await db.Players.AsNoTracking().SingleAsync(p => p.Id == player.Id, cancellationToken);
         if (!abilities.Offers(room.GameType, await lobbyCharacters.ForAsync(current, cancellationToken), abilityId))
         {
-            return new RoomResult(RoomOutcome.UnknownAbility);
+            // A holder-only ability for a non-holder is refused as unavailable to them, anything else as unknown (DEC-077).
+            return new RoomResult(abilities.Defines(room.GameType, abilityId)
+                ? RoomOutcome.AbilityNotOffered
+                : RoomOutcome.UnknownAbility);
         }
 
         room.SelectAbility(player.Id, abilityId);

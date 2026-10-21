@@ -318,6 +318,57 @@ public class AbilityEngineTests
         Assert.Equal(125, result.State!.Value.GetProperty("reward").GetInt32());
     }
 
+    /// <summary>
+    /// STORY-090: a value a deploy adds to a locked ability takes its handler's default, so the match keeps going as it
+    /// did; a value without a default can't be applied.
+    /// </summary>
+    [Fact]
+    public void A_value_added_after_the_lock_takes_its_default()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players);
+        var withDefault = new RecordingHandler("boost", new AbilityParameter("percent", 1, 100), new AbilityParameter("rounds", 1, 5, Default: 2));
+        var withoutDefault = new RecordingHandler("boost", new AbilityParameter("percent", 1, 100), new AbilityParameter("rounds", 1, 5));
+        AbilityDefinition Deployed() => AbilityDefinition.Create(
+            "boost", "Boost", "Raise the pending reward.", AbilityTargetKind.None, ["before_reward"],
+            new Dictionary<string, decimal> { ["percent"] = 50, ["rounds"] = 4 });
+        var request = new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"boost"}"""), State("before_reward"), new ScriptedRandomSource());
+
+        var used = new AbilityEngine([AbilityCatalog.Create(GameType, 2, [Deployed(), Steal()], [withDefault, _steal], new StateWindow())]).Use(request);
+        var refused = new AbilityEngine([AbilityCatalog.Create(GameType, 2, [Deployed(), Steal()], [withoutDefault, _steal], new StateWindow())]).Use(request);
+
+        Assert.True(used.Used);
+        Assert.Equal(new Dictionary<string, decimal> { ["percent"] = 25, ["rounds"] = 2 }, withDefault.Seen);
+        Assert.Equal(AbilityRefusal.Unavailable, refused.Reason);
+        Assert.Null(withoutDefault.Seen);
+    }
+
+    [Fact]
+    public void A_handler_default_outside_its_range_stops_the_catalog()
+    {
+        var handler = new RecordingHandler("boost", new AbilityParameter("percent", 1, 100, Default: 0));
+
+        Assert.Throws<ArgumentException>(() => AbilityCatalog.Create(GameType, 1, [Boost()], [handler], new StateWindow()));
+    }
+
+    /// <summary>A handler that records the values it was given.</summary>
+    private sealed class RecordingHandler(string abilityId, params AbilityParameter[] parameters) : IAbilityHandler
+    {
+        public Dictionary<string, decimal>? Seen { get; private set; }
+
+        public string AbilityId => abilityId;
+
+        public IReadOnlyList<AbilityParameter> Parameters => parameters;
+
+        public string? CanExecute(AbilityContext context) => null;
+
+        public JsonElement Execute(AbilityContext context)
+        {
+            Seen = context.Ability.Parameters.ToDictionary();
+            return context.State!.Value;
+        }
+    }
+
     [Fact]
     public void Locked_ability_the_game_can_no_longer_apply_is_unavailable()
     {

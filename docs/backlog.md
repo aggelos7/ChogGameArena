@@ -1051,6 +1051,48 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. No new storage service or container; NFT avatars are out of scope.
 
 
+### Feature: Holder advantage
+
+
+#### STORY-090 — Holder ability pool and Tier strength
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E09
+- **Implementation:** Give Chog holders an advantage in matches (DEC-077). A holder is a player whose match character is a Chog they own, checked live at start; the Tier comes from that Chog's `Tier` trait. A new holder strategy replaces `SharedAbilityPoolStrategy` as the registered `IAbilityAssignmentStrategy`: everyone may choose the game's 2 standard abilities, holders all of them. It returns each ability with the values of the character's Tier, and `AbilityPool`/`AbilitySnapshot` lock those values at start instead of requiring the catalog's own (catalog v2 for both games). The split and the Tier table live in `Abilities:Holder`, checked at startup against each handler's parameter ranges. The existing abilities get the new values they need: Chog Life Event Preview `uses`, Lucky Reroll `draws`; Chog Race Shield `blocks`, Card Vision `cards`, Card Steal `cards`, with their effects scaled. Chog Life: Reward Boost and Loss Protection standard, Event Preview and Lucky Reroll holder-only. Chog Race: Shield and Card Vision standard, Speed Boost and Card Steal holder-only. The match's ability panel shows the locked values and uses left. Update NFT-011–017 and the "Equal abilities" acceptance test in `docs/requirements.md`.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a guest or a standard Chog sees only the 2 standard abilities with Base values, a holder of a Common Chog sees all of the game's abilities with Base values, and holders of rarer Tiers lock the Tier's values from the config, which their effects apply in the match (e.g. an Epic Speed Boost moves 4 more tiles, a Rare Shield blocks 2 attacks).
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a non-holder choosing a holder-only ability is refused (`ability_unavailable`), a Chog sold before the start plays with the standard pool, traits and values never come from a request, a config change never alters a running match, and a bad `Abilities:Holder` value stops the API at startup.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. No new abilities (STORY-091, STORY-092) and no Chog Royale abilities; no perk shown on My Chogs or the character picker.
+
+
+#### STORY-091 — Chog Life holder abilities: Double Dice and Tax the Rich
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E09
+- **Implementation:** Two new holder-only Chog Life abilities (DEC-077), added to the catalog with their Tier values in `Abilities:Holder`. **Double Dice:** used before the roll; the server rolls `dice` dice (2, or 3 from Rare) and the player keeps one of them for that move; a turn that runs out keeps the highest. **Tax the Rich:** used on the player's turn; takes `percent` (10% to 20% by Tier) of the MON of the richest other player still in the match, capped, and adds it to the player's; ties pick the first by seat; refused when the player is already the richest. Both show in the match's ability panel and last-move line like the other abilities.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a holder can lock and use either ability, Double Dice moves by the die they keep and Tax the Rich moves the Tier's share of MON from the richest opponent, with the results counted in the final standings.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: non-holders can't choose them, use outside the window, a second use or Tax the Rich while richest is refused with a stable code, and the kept die must be one the server rolled.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Life only.
+
+
+#### STORY-092 — Chog Race holder abilities: Double Dice and Freeze
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E09
+- **Implementation:** Two new holder-only Chog Race abilities (DEC-077), added to the catalog with their Tier values in `Abilities:Holder`. **Double Dice:** used before the roll; the server rolls `dice` dice (2, or 3 from Rare) and the player keeps one of them for that move; a turn that runs out keeps the highest. **Freeze:** used on the player's turn on an opponent still racing; that opponent skips their next turn, using the engine's existing skip-turn support (DEC-058), with `uses` 1, or 2 from Epic. Both show in the "Your ability" panel and the latest ability line like the other abilities.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a holder can lock and use either ability, Double Dice moves by the die they keep and a Frozen opponent is passed over once, shown with a "Skips a turn" tag.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: non-holders can't choose them, use outside the window, beyond the Tier's uses, on a finished or absent opponent, or on one already skipping is refused with a stable code, and the kept die must be one the server rolled.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Race only.
+
+
 ## E10 — Chog Royale
 
 Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requirements.md) (ROYALE-001–066). These stories replace the `ROY-STORY-001–022` drafts in [`docs/games/chog-royale-backlog.md`](games/chog-royale-backlog.md), which keeps the mapping. Chog Royale starts after the public launch (E07 release checklist passed). Its product questions are asked story by story, before coding, and recorded as decisions.

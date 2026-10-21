@@ -190,9 +190,17 @@ public class GameRoomAbilityTests
     }
 
     [Fact]
-    public void A_snapshot_is_only_taken_of_the_catalogs_own_definition()
+    public void A_snapshot_is_only_taken_of_a_catalog_ability_with_values_in_range()
     {
-        Assert.Throws<ArgumentException>(() => AbilitySnapshot.Lock(FakeAbilityGame.Catalog(), FakeAbilityGame.Boost(percent: 99)));
+        var renamed = AbilityDefinition.Create(
+            "boost", "Mega Boost", "Raise the pending reward.", AbilityTargetKind.None, ["before_reward"],
+            new Dictionary<string, decimal> { ["percent"] = 25 });
+
+        // A Tier's values within the handler's range are locked as given (STORY-090, DEC-077).
+        var stronger = AbilitySnapshot.Lock(FakeAbilityGame.Catalog(), FakeAbilityGame.Boost(percent: 99));
+        Assert.Equal(99, stronger.Parameters["percent"]);
+        Assert.Throws<ArgumentException>(() => AbilitySnapshot.Lock(FakeAbilityGame.Catalog(new FakeAbilityGame.BoostHandler(maxPercent: 50)), FakeAbilityGame.Boost(percent: 51)));
+        Assert.Throws<ArgumentException>(() => AbilitySnapshot.Lock(FakeAbilityGame.Catalog(), renamed));
     }
 
     /// <summary>A started pair, seated host first, both locking <c>boost</c>; the host plays the first turn.</summary>

@@ -209,7 +209,7 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
             armed = resolved.Armed;
             move = new LifeMove(
                 pawn.Seat, roll, pawn.Tile, path[^1], path, change, Matured: matured,
-                Boost: resolved.Boost, Saved: resolved.Saved, Rerolled: resolved.Rerolled);
+                Boost: resolved.Boost, Saved: resolved.Saved, Rerolled: resolved.Rerolled, Draws: resolved.Draws);
         }
 
         var finished = state.Finished ?? [];
@@ -546,7 +546,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// player's <paramref name="Place"/> in the order of arrival and the finish <paramref name="Bonus"/> it won, if any.
     /// An armed ability that acted on the tile's outcome says what it did (STORY-042, DEC-044): the bonuses a Reward Boost
     /// added (<paramref name="Boost"/>), the MON Loss Protection kept from a loss (<paramref name="Saved"/>) or the signed
-    /// MON of the event outcome a Lucky Reroll discarded (<paramref name="Rerolled"/>). A lane switched after an Event
+    /// MON of the worst event outcome a Lucky Reroll discarded (<paramref name="Rerolled"/>) of its
+    /// <paramref name="Draws"/> (STORY-090). A lane switched after an Event
     /// Preview sets <paramref name="Switched"/>.
     /// </summary>
     private sealed record LifeMove(
@@ -565,7 +566,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         int? Boost = null,
         int? Saved = null,
         int? Rerolled = null,
-        bool? Switched = null);
+        bool? Switched = null,
+        int? Draws = null);
 
     /// <summary>A stake of <paramref name="Stake"/> MON on <paramref name="Lane"/> that paid <paramref name="Payout"/> MON back.</summary>
     private sealed record LifeMaturity(LifeLane Lane, int Stake, int Payout);

@@ -39,7 +39,11 @@ public interface IAbilityTiming
 }
 
 /// <summary>A configured value an ability's effect needs, with the range a definition may give it.</summary>
-public sealed record AbilityParameter(string Name, decimal Min, decimal Max);
+/// <param name="Default">
+/// For a parameter added after matches locked the ability: the value those matches use, as the effect was before
+/// (STORY-090). A catalog's definitions still configure every parameter.
+/// </param>
+public sealed record AbilityParameter(string Name, decimal Min, decimal Max, decimal? Default = null);
 
 /// <summary>A player of the match as abilities see them: who they are and where they sit, nothing about their character.</summary>
 /// <param name="Seat">Turn order from 1; targets are named by seat, since player ids never reach clients.</param>

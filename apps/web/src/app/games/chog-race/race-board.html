@@ -23,7 +23,7 @@
             <span class="tag" data-skipping>Skips a turn</span>
           }
           @if (armed().get(member.seat)?.shielded) {
-            <span class="tag" data-shielded>Shielded</span>
+            <span class="tag" data-shielded>{{ shieldLabel(member.seat) }}</span>
           }
           @if (armed().get(member.seat)?.boost; as boost) {
             <span class="tag" data-boosted>Boost +{{ boost }}</span>
@@ -60,7 +60,7 @@
       <p class="last-move" data-last-ability>{{ used }}</p>
     }
     @if (nextCard(); as next) {
-      <p class="last-move" data-next-card>Next card in the deck: {{ next }}. Only you can see this.</p>
+      <p class="last-move" data-next-card>{{ next }}. Only you can see this.</p>
     }
     <app-recent-moves [moves]="recent()" />
     @if (board().deck !== undefined) {

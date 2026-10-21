@@ -11,8 +11,9 @@ using Microsoft.Extensions.Options;
 namespace ChogGames.Api.Tests.Abilities;
 
 /// <summary>
-/// STORY-031, DEC-033: the API uses the shared ability pool for every player, and a game's abilities reach it by
-/// registering the game's <see cref="AbilityCatalog"/>, with no other change. STORY-032, DEC-034: a trait-based strategy
+/// STORY-031, DEC-033: a game's abilities reach the API by registering the game's <see cref="AbilityCatalog"/>, with no
+/// other change; STORY-090, DEC-077: the holder strategy is the registered one, and a game it has no rules for is
+/// offered whole to everyone, as with the shared pool. STORY-032, DEC-034: a trait-based strategy
 /// replaces that one registration, and nothing else. STORY-061, DEC-066: it does so only when
 /// <c>Abilities:TraitBased:Enabled</c> is on, and the rules are checked against the catalogs at startup.
 /// </summary>
@@ -38,11 +39,11 @@ public class AbilityPoolRegistrationTests
     }
 
     [Fact]
-    public async Task The_shared_pool_is_the_only_strategy()
+    public async Task The_holder_strategy_is_the_only_strategy()
     {
         await using var factory = new ApiFactory(ApiFactory.UnusedDatabase);
 
-        Assert.IsType<SharedAbilityPoolStrategy>(Assert.Single(factory.Services.GetServices<IAbilityAssignmentStrategy>()));
+        Assert.IsType<HolderAbilityStrategy>(Assert.Single(factory.Services.GetServices<IAbilityAssignmentStrategy>()));
     }
 
     [Fact]
@@ -101,7 +102,7 @@ public class AbilityPoolRegistrationTests
         await using var factory = new ApiFactory(ApiFactory.UnusedDatabase, LegendaryRerolls(enabled), s => s.AddSingleton(Catalog()));
         var pool = factory.Services.GetRequiredService<AbilityPool>();
 
-        Assert.IsType<SharedAbilityPoolStrategy>(Assert.Single(factory.Services.GetServices<IAbilityAssignmentStrategy>()));
+        Assert.IsType<HolderAbilityStrategy>(Assert.Single(factory.Services.GetServices<IAbilityAssignmentStrategy>()));
         Assert.Equal(["reward_boost", "event_reroll"], pool.For(GameType, NftChog()).Select(a => a.Id));
     }
 

@@ -9,18 +9,21 @@ namespace ChogGames.Games.ChogLife.Abilities;
 /// <list type="bullet">
 /// <item>Reward Boost, Loss Protection and Lucky Reroll are used on the player's turn before they roll. Each stays armed
 /// until the first tile outcome it fits, which it changes, then it is spent: a gain from a Reward tile or an event earns
-/// 25% more as bonuses, a loss from a Loss tile or an event is halved, and an event with several outcomes is drawn twice
-/// and the better one for the player applies. Fork stakes and the finish bonus are never changed.</item>
+/// <c>percent</c> more as bonuses (25% at Base), only <c>percent</c> of a loss from a Loss tile or an event is taken (50%
+/// at Base), and an event with several outcomes is drawn <c>draws</c> times (2 at Base) and the best one for the player
+/// applies. Fork stakes and the finish bonus are never changed.</item>
 /// <item>Event Preview is used at a fork before choosing a lane. Choosing then draws the next move on that lane and shows
 /// only that player the die, the tile and the event outcome there (never a stake's payout). In the same turn they keep
 /// the lane, and the roll plays out exactly as shown, or switch to the other lane blind, and the next roll is drawn
-/// afresh. A turn that runs out keeps the lane.</item>
+/// afresh. A turn that runs out keeps the lane. Holders of rarer Tiers may use it more than once.</item>
 /// </list>
-/// These are proposed defaults to balance in STORY-044; a change to any definition means catalog version 2.
+/// The values here are the Base Tier's; holders of rarer Tiers lock stronger ones from <c>Abilities:Holder</c> (STORY-090,
+/// DEC-077). Version 2 added <c>draws</c> and made <c>percent</c> of Loss Protection the share of a loss taken (unchanged at
+/// 50%).
 /// </summary>
 public static class LifeAbilities
 {
-    public const int Version = 1;
+    public const int Version = 2;
 
     public const string RewardBoost = "reward_boost";
     public const string LossProtection = "loss_protection";
@@ -33,10 +36,15 @@ public static class LifeAbilities
     /// <summary>The player's turn, while they choose a lane at a fork their roll stopped on.</summary>
     public const string AtFork = "at_fork";
 
-    /// <summary>The share of a gain added, or of a loss kept, in percent; a whole number of 1 to 100.</summary>
+    /// <summary>The share of a gain added, or of a loss still taken, in percent; a whole number of 1 to 100.</summary>
     public const string Percent = "percent";
 
-    /// <summary>The catalog, version 1, whose handlers act on <paramref name="game"/>'s match states.</summary>
+    /// <summary>How many times Lucky Reroll draws an event, the best kept; 2 to <see cref="MaxDraws"/>.</summary>
+    public const string Draws = "draws";
+
+    public const int MaxDraws = 5;
+
+    /// <summary>The catalog, version 2, whose handlers act on <paramref name="game"/>'s match states.</summary>
     public static AbilityCatalog Catalog(ChogLifeMatchRules game)
     {
         ArgumentNullException.ThrowIfNull(game);
@@ -45,10 +53,10 @@ public static class LifeAbilities
             Version,
             Definitions(),
             [
-                new ArmHandler(game, RewardBoost, withPercent: true),
-                new ArmHandler(game, LossProtection, withPercent: true),
-                new ArmHandler(game, EventReroll, withPercent: false),
-                new ArmHandler(game, EventPreview, withPercent: false),
+                new ArmHandler(game, RewardBoost, [new AbilityParameter(Percent, 1, 100)]),
+                new ArmHandler(game, LossProtection, [new AbilityParameter(Percent, 1, 100)]),
+                new ArmHandler(game, EventReroll, [new AbilityParameter(Draws, 2, MaxDraws, Default: 2)]),
+                new ArmHandler(game, EventPreview, []),
             ],
             new Timing(game));
     }
@@ -58,37 +66,37 @@ public static class LifeAbilities
         AbilityDefinition.Create(
             RewardBoost,
             "Reward Boost",
-            "Use before you roll. Your next gain from a reward tile or an event earns 25% more, added to your bonuses.",
+            "Use before you roll. Your next gain from a reward tile or an event earns {percent}% more, added to your bonuses.",
             AbilityTargetKind.None,
             [BeforeRoll],
             new Dictionary<string, decimal> { [Percent] = 25 }),
         AbilityDefinition.Create(
             LossProtection,
             "Loss Protection",
-            "Use before you roll. Your next loss from a loss tile or an event is halved.",
+            "Use before you roll. You take only {percent}% of your next loss from a loss tile or an event.",
             AbilityTargetKind.None,
             [BeforeRoll],
             new Dictionary<string, decimal> { [Percent] = 50 }),
         AbilityDefinition.Create(
             EventPreview,
             "Event Preview",
-            "Use at a fork, then choose a route: only you see what your next roll does there. Keep it, or switch to the other route blind.",
+            "Use at a fork, then choose a route: only you see what your next roll does there. Keep it, or switch to the other route blind. {uses|1 use|# uses} per game.",
             AbilityTargetKind.None,
             [AtFork]),
         AbilityDefinition.Create(
             EventReroll,
             "Lucky Reroll",
-            "Use before you roll. Your next event with several outcomes is drawn twice, and the better one for you applies.",
+            "Use before you roll. Your next event with several outcomes is drawn {draws} times, and the best one for you applies.",
             AbilityTargetKind.None,
-            [BeforeRoll]),
+            [BeforeRoll],
+            new Dictionary<string, decimal> { [Draws] = 2 }),
     ];
 
-    private sealed class ArmHandler(ChogLifeMatchRules game, string abilityId, bool withPercent) : IAbilityHandler
+    private sealed class ArmHandler(ChogLifeMatchRules game, string abilityId, IReadOnlyList<AbilityParameter> parameters) : IAbilityHandler
     {
         public string AbilityId => abilityId;
 
-        public IReadOnlyList<AbilityParameter> Parameters { get; } =
-            withPercent ? [new AbilityParameter(Percent, 1, 100)] : [];
+        public IReadOnlyList<AbilityParameter> Parameters => parameters;
 
         public string? CanExecute(AbilityContext context) => game.CanArm(context);
 

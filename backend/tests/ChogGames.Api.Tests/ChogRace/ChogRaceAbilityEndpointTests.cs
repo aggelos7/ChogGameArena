@@ -183,11 +183,11 @@ public sealed class ChogRaceAbilityEndpointTests(MigratedPostgresDatabase databa
         var aliceView = await ViewAsync(alice, code);
         Assert.Equal("""["Hodl"]""", Hand(aliceView));
         Assert.Equal("""["Rug"]""", Hand(await ViewAsync(bob, code)));
-        const string Stolen = """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl"}""";
+        const string Stolen = """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl","cards":["Hodl"],"taken":1}""";
         Assert.Equal(Stolen, aliceView.GetProperty("state").GetProperty("ability").GetRawText());
         Assert.Equal(Stolen, (await ViewAsync(bob, code)).GetProperty("state").GetProperty("ability").GetRawText());
         var carolView = await ViewAsync(carol, code);
-        Assert.Equal("""{"seat":1,"ability":"card_steal","target":2}""", carolView.GetProperty("state").GetProperty("ability").GetRawText());
+        Assert.Equal("""{"seat":1,"ability":"card_steal","target":2,"taken":1}""", carolView.GetProperty("state").GetProperty("ability").GetRawText());
         Assert.DoesNotContain("Hodl", carolView.GetRawText());
         Assert.Equal(0, UsesLeft(aliceView, "Alice"));
 
