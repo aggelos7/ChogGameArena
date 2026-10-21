@@ -1168,7 +1168,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-075 — Pump, Rug Pull and Diamond Hands
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Pump gains 20 MON; Rug Pull steals up to 15 MON from a target, never more than they hold; Diamond Hands blocks the first hostile effect aimed at its player in resolution order and gains 5 MON (ROYALE-017, 025, 029). Values live in the rules version.
@@ -1181,7 +1181,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-076 — Whale Swap, Airdrop and Chaos
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Whale Swap exchanges 20% of balance with a target, at most 20 MON each way, from the pre-round snapshot, with at most one successful swap per player per round; Airdrop gains 5–25 MON from server randomness, recorded in the ledger; Chaos adds one modifier from a bounded pool, at most one per round however many are played (ROYALE-024–025, 030, 062). The Whale Swap edge cases are settled as a decision before coding.
@@ -1194,7 +1194,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-077 — Market events
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Draw one shared, weighted market event per round from server randomness and show it before decisions: Meme Hype (Pump +50%), Market Crash (Pump halved), Whale Incoming (+5 to a successful Rug, within the victim's balance), Community Airdrop (+5 to everyone after cards) and Calm Market (ROYALE-021–025). Amounts round down to whole MON.
@@ -1207,7 +1207,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-078 — Royale finish, rankings and stats
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** After round five, rank by MON, then fewer losses taken, then more successful cards, then a shared place (ROYALE-009). Results carry each player's MON, change and tie-break values; profiles, XP and the Ladder count the match as decided before coding.

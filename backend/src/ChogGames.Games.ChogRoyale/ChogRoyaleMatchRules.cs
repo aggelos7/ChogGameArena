@@ -17,7 +17,9 @@ namespace ChogGames.Games.ChogRoyale;
 /// another player's hand or pending action, only the public ledger of resolved rounds. Each round resolves in the
 /// documented phase order against a snapshot taken before any effect, with seat priority rotated each round, and adds a
 /// ledger entry per player (STORY-074, ROYALE-026–032, DEC-085); a played card is replaced afterwards, except after the
-/// last round. The match ends after its last round, ranked by MON, or when its time cap is up.
+/// last round. The cards move MON (STORY-075, STORY-076, DEC-086, DEC-087) under a shared market event drawn and shown
+/// before each round's decisions (STORY-077, DEC-088). The match ends after its last round, or when its time cap is up,
+/// ranked by MON, then fewer MON lost to opponents, then more successful cards (STORY-078, ROYALE-009, DEC-089).
 /// </summary>
 public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
 {
@@ -54,7 +56,7 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
 
     /// <summary>
     /// Every seated player with the starting MON and a full hand, dealt in seat order, one weighted draw per card
-    /// (DEC-084).
+    /// (DEC-084), then round 1's market event (DEC-088).
     /// </summary>
     public JsonElement? StartState(MatchStartContext context)
     {
@@ -65,7 +67,8 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
             .Select(member => new RoyalePlayer(
                 member.Seat!.Value, _current.StartingMon, Deal(_current, _current.HandSize, ref nextCard, context.Random)))
             .ToArray();
-        return Serialize(new RoyaleMatchState(_current.Version, 1, nextCard, players, []));
+        var firstEvent = DrawEvent(_current, context.Random);
+        return Serialize(new RoyaleMatchState(_current.Version, 1, firstEvent, nextCard, players, []));
     }
 
     /// <summary>
@@ -112,12 +115,12 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
     public JsonElement? TimeOutTurn(MatchTurnContext context) => null;
 
     /// <summary>
-    /// The time cap is up (ENG-011): the round in play is dropped unresolved and the players are ranked by MON as it
-    /// stands. A state this server can't play ranks everyone first together.
+    /// The time cap is up (ENG-011): the round in play is dropped unresolved and the players are ranked as it stands, by
+    /// the same tie-breaks as after the last round. A state this server can't play ranks everyone first together.
     /// </summary>
     public MatchEnding? EndMatch(MatchEndContext context)
     {
-        if (Readable(context.State) is not { } state || !_rulesByVersion.ContainsKey(state.RulesVersion))
+        if (Readable(context.State) is not { } state || !_rulesByVersion.TryGetValue(state.RulesVersion, out var rules))
         {
             return new MatchEnding(
                 context.State is { ValueKind: JsonValueKind.Object } unreadable ? unreadable : Serialize(new { }),
@@ -125,13 +128,13 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
         }
 
         var players = state.Players.Select(p => p with { Action = null }).ToArray();
-        return new MatchEnding(Serialize(state with { Players = players }), Standings(context.Match, players));
+        return new MatchEnding(Serialize(state with { Players = players }), Standings(context.Match, rules, players, state.Ledger));
     }
 
     /// <summary>
-    /// What one player sees (ROYALE-048, ROYALE-050, ROYALE-060): the round, every player still playing with their MON
-    /// and how many cards they hold, the ledger, and only their own hand and pending action. A player who left sees no
-    /// hand. Null for a state this server can't read.
+    /// What one player sees (ROYALE-048, ROYALE-050, ROYALE-060): the round and its market event (ROYALE-021), every
+    /// player still playing with their MON and how many cards they hold, the ledger, and only their own hand and pending
+    /// action. A player who left sees no hand. Null for a state this server can't read.
     /// </summary>
     public JsonElement? ViewFor(MatchViewContext context)
     {
@@ -147,6 +150,7 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
             state.RulesVersion,
             state.Round,
             rules.Rounds,
+            state.Event,
             [.. state.Players.Where(p => playing.Contains(p.Seat)).Select(p => new RoyalePlayerView(p.Seat, p.Mon, p.Hand.Length))],
             viewer?.Hand ?? [],
             viewer?.Action,
@@ -155,7 +159,7 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
 
     /// <summary>What a player sees of the match (DEC-083).</summary>
     private sealed record RoyaleView(
-        int RulesVersion, int Round, int Rounds, RoyalePlayerView[] Players, RoyaleHandCard[] Hand, RoyaleAction? Action, RoyaleRoundLedger[] Ledger);
+        int RulesVersion, int Round, int Rounds, RoyaleMarketEvent Event, RoyalePlayerView[] Players, RoyaleHandCard[] Hand, RoyaleAction? Action, RoyaleRoundLedger[] Ledger);
 
     /// <summary>Another player as everyone sees them: never their cards, only how many.</summary>
     private sealed record RoyalePlayerView(int Seat, int Mon, int Cards);
@@ -245,6 +249,7 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
         && _rulesByVersion.TryGetValue(state.RulesVersion, out var rules)
         && state.Round == match.TurnNumber
         && state.Round <= rules.Rounds
+        && Enum.IsDefined(state.Event)
         && state.Players.All(p => p.Mon >= 0 && p.Mon <= rules.MaxMon && p.Hand.Length <= rules.HandSize)
             ? (state, rules)
             : null;
@@ -275,19 +280,36 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
     private static int? SeatOf(GameRoom match, Guid playerId) => match.Members.SingleOrDefault(m => m.PlayerId == playerId)?.Seat;
 
     /// <summary>
-    /// Ranks every player still playing by MON, highest first, sharing a place on equal MON; each result carries their MON.
-    /// The full tie-breaks come with STORY-078.
+    /// Ranks every player still playing (STORY-078, ROYALE-009, DEC-089): by MON, highest first, then fewer MON lost to
+    /// other players' cards over the match, then more successful cards (played and <see cref="RoyaleOutcome.Applied"/>);
+    /// players equal on all three share a place. Each result carries their MON, its change from the start and both
+    /// tie-break values.
     /// </summary>
-    private static List<MatchStanding> Standings(GameRoom match, IReadOnlyList<RoyalePlayer> players)
+    private static List<MatchStanding> Standings(
+        GameRoom match, RoyaleRules rules, IReadOnlyList<RoyalePlayer> players, IReadOnlyList<RoyaleRoundLedger> ledger)
     {
-        var mon = Playing(match).ToDictionary(m => m.PlayerId, m => players.FirstOrDefault(p => p.Seat == m.Seat)?.Mon ?? 0);
+        var entries = ledger.SelectMany(round => round.Entries).ToList();
+        var results = Playing(match)
+            .Select(member => new RoyaleResult(
+                member.PlayerId,
+                players.FirstOrDefault(p => p.Seat == member.Seat)?.Mon ?? 0,
+                entries.Where(e => e.Seat == member.Seat).Sum(e => e.Lost),
+                entries.Count(e => e.Seat == member.Seat && e.Outcome == RoyaleOutcome.Applied)))
+            .ToList();
         return
         [
-            .. mon.Select(player => new MatchStanding(
-                player.Key,
-                1 + mon.Values.Count(other => other > player.Value),
-                Serialize(new { mon = player.Value }))),
+            .. results.Select(result => new MatchStanding(
+                result.PlayerId,
+                1 + results.Count(other => other.Beats(result)),
+                Serialize(new { mon = result.Mon, change = result.Mon - rules.StartingMon, lost = result.Lost, successfulCards = result.SuccessfulCards }))),
         ];
+    }
+
+    private sealed record RoyaleResult(Guid PlayerId, int Mon, int Lost, int SuccessfulCards)
+    {
+        /// <summary>Whether this result ranks ahead of <paramref name="other"/>.</summary>
+        public bool Beats(RoyaleResult other) =>
+            (Mon, -Lost, SuccessfulCards).CompareTo((other.Mon, -other.Lost, other.SuccessfulCards)) > 0;
     }
 
     private static JsonElement Serialize<T>(T value) => JsonSerializer.SerializeToElement(value, Json);
