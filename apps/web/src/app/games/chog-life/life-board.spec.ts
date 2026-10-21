@@ -22,6 +22,16 @@ import {
   timeLeft,
   toLifeBoard,
 } from './life-board-model';
+import { DIE_MS, DIE_TUMBLE_MS } from '../rolling-die';
+import { BANNER_MS } from '../move-news';
+import { SoundEffects } from '../../shell/sound-effects';
+
+/** Sounds the board plays, recorded instead of heard. */
+const played: string[] = [];
+const quietSounds = () => {
+  played.length = 0;
+  return { provide: SoundEffects, useValue: { play: (effect: string) => played.push(effect) } };
+};
 
 function member(displayName: string, seat: number, overrides: Partial<RoomMember> = {}): RoomMember {
   return {
@@ -420,10 +430,15 @@ describe('Chog Life board', () => {
 
   beforeEach(() => {
     localStorage.clear();
-    TestBed.configureTestingModule({ imports: [LifeBoardView] });
+    TestBed.configureTestingModule({ imports: [LifeBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(LifeBoardView);
     page = fixture.nativeElement as HTMLElement;
   });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** Moves show at once, without die or hops, for specs about what the board says rather than when (DEC-076). */
+  const withoutMotion = () => vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
 
   it('shows every tile with its type and lane', () => {
     render(FORK_BOARD, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
@@ -521,6 +536,7 @@ describe('Chog Life board', () => {
   });
 
   it('shows the last move and marks where it ended', () => {
+    withoutMotion();
     const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
     render({ ...FORK_BOARD, pawns: [lifePawn(1, 2, 100), lifePawn(2, 0, 100)], lastMove: { seat: 1, roll: 2, from: 0, to: 2, path: [1, 2] } }, members);
 
@@ -533,7 +549,7 @@ describe('Chog Life board', () => {
     expect(page.querySelector('.last-stop')).toBeNull();
 
     render(FORK_BOARD, members);
-    expect(page.querySelector('[data-last-move]')).toBeNull();
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('');
   });
 
   describe('at a fork', () => {
@@ -613,6 +629,7 @@ describe('Chog Life board', () => {
     });
 
     it('says which route was taken, and when time chose it', () => {
+      withoutMotion();
       const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
       const chosen = (seat: number, byDefault?: boolean): LifeBoard => ({
         ...FORK_BOARD,
@@ -634,6 +651,7 @@ describe('Chog Life board', () => {
     });
 
     it('says what was staked on the route and what a stake paid back', () => {
+      withoutMotion();
       const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
       const fork = { seat: 2, roll: 2, from: 0, to: 2, path: [1, 2] };
       const lastMove = (board: Partial<LifeBoard['lastMove']>, seat = 2) => {
@@ -682,6 +700,7 @@ describe('Chog Life board', () => {
   });
 
   it('says what the tile did to the mover’s MON', () => {
+    withoutMotion();
     const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
     const moved = (change: number, seat = 1) => ({
       ...FORK_BOARD,
@@ -871,6 +890,7 @@ describe('Chog Life board', () => {
     });
 
     it('marks who finished in which place and says who won the bonus', () => {
+      withoutMotion();
       render(
         {
           ...FORK_BOARD,
@@ -1076,6 +1096,19 @@ describe('Chog Life board', () => {
       render(moved, members);
       // The list always shows where the server put the pawn.
       expect(pawnsOn(2)).toEqual(['1']);
+      // The die tumbles, with its sound, and lands on the roll while the pawn waits where it was.
+      const die = () => page.querySelector('[data-die] .die');
+      expect(die()?.classList).not.toContain('landed');
+      expect(played).toEqual(['diceRoll']);
+      expect(at(1)).toBe(0);
+      vi.advanceTimersByTime(DIE_TUMBLE_MS);
+      fixture.detectChanges();
+      expect(die()?.classList).toContain('landed');
+      expect(die()?.getAttribute('data-face')).toBe('2');
+      expect(at(1)).toBe(0);
+      vi.advanceTimersByTime(DIE_MS - DIE_TUMBLE_MS);
+      fixture.detectChanges();
+      expect(die()).toBeNull();
       const seen = [at(1)];
       for (let i = 0; i < 4; i++) {
         vi.advanceTimersByTime(HOP_MS);
@@ -1085,9 +1118,57 @@ describe('Chog Life board', () => {
       expect(seen).toEqual([0, 1, 2, 2, 2]);
       expect(at(2)).toBe(0);
 
-      // The same move again, as when the page refetches after a command, doesn't hop again.
+      // The same move again, as when the page refetches after a command, doesn't roll or hop again.
       render({ ...moved, choosing: 1 }, members);
       expect(at(1)).toBe(2);
+      expect(page.querySelector('[data-die]')).toBeNull();
+      expect(played).toEqual(['diceRoll']);
+    });
+
+    it('tells what a roll did once the pawn stops: a banner, a popup on its tile and Recent moves (DEC-076)', () => {
+      underFakeTimers();
+      const members = [member('Alice', 1, { isYou: true }), member('Bob', 2, { isTurn: true })];
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0)] }, members);
+      expect(page.querySelector('[data-recent-moves]')).toBeNull();
+
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 1, 120), lifePawn(2, 0)], lastMove: { seat: 1, roll: 1, from: 0, to: 1, path: [1], change: 20 } }, members);
+      // Nothing is told while the die rolls and the pawn hops.
+      expect(page.querySelector('[data-banner]')).toBeNull();
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('');
+
+      vi.advanceTimersByTime(DIE_MS + HOP_MS * 2);
+      fixture.detectChanges();
+      const banner = page.querySelector('[data-banner]');
+      expect(banner?.getAttribute('data-banner')).toBe('good');
+      expect(banner?.querySelector('[data-banner-title]')?.textContent?.trim()).toBe('You rolled 1');
+      expect(banner?.querySelector('[data-banner-detail]')?.textContent?.trim()).toBe('Reward! +20 MON');
+      expect(page.querySelector('[data-drawing] [data-popup="1"]')?.textContent?.trim()).toBe('+20 MON');
+      expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1, landed on tile 1 (+20 MON) and won 20 MON.');
+      const recent = () => Array.from(page.querySelectorAll('[data-recent-moves] li')).map((li) => [li.getAttribute('data-tone'), li.textContent?.replace(/\s+/g, ' ').trim()]);
+      expect(recent()).toEqual([['good', '▲ You rolled 1: Reward! +20 MON']]);
+
+      vi.advanceTimersByTime(BANNER_MS);
+      fixture.detectChanges();
+      expect(page.querySelector('[data-banner]')).toBeNull();
+      expect(page.querySelector('[data-popup]')).toBeNull();
+
+      // A loss is bad news, newest first in Recent moves.
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 1, 120), lifePawn(2, 1, 80)], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1], change: -20 } }, members);
+      vi.advanceTimersByTime(DIE_MS + HOP_MS * 2);
+      fixture.detectChanges();
+      expect(page.querySelector('[data-banner]')?.getAttribute('data-banner')).toBe('bad');
+      expect(recent()).toEqual([
+        ['bad', '▼ Bob rolled 1: Loss! −20 MON'],
+        ['good', '▲ You rolled 1: Reward! +20 MON'],
+      ]);
+    });
+
+    it('lists the move it loads with in Recent moves, without a banner', () => {
+      underFakeTimers();
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 1, 120)], lastMove: { seat: 1, roll: 1, from: 0, to: 1, path: [1], change: 20 } }, [member('Alice', 1, { isYou: true })]);
+
+      expect(page.querySelector('[data-banner]')).toBeNull();
+      expect(page.querySelectorAll('[data-recent-moves] li')).toHaveLength(1);
     });
 
     it('shows a move without hops when the page loads, and with reduced motion', () => {
@@ -1099,6 +1180,8 @@ describe('Chog Life board', () => {
       vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
       render({ ...FORK_BOARD, pawns: [lifePawn(1, 2), lifePawn(2, 5)], lastMove: { seat: 2, roll: 1, from: 2, to: 5, path: [5], lane: 'Degen' } }, members);
       expect(at(2)).toBe(5);
+      expect(page.querySelector('[data-die]')).toBeNull();
+      expect(played).toEqual([]);
     });
   });
 });

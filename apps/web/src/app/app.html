@@ -2,25 +2,50 @@
 <header class="shell-header">
   <div class="header-top">
     <a class="brand" routerLink="/">Chog Kingdom</a>
-    @if (session.player(); as player) {
-      <a
-        class="player"
-        routerLink="/profile"
-        routerLinkActive="active"
-        ariaCurrentWhenActive="page"
-        [attr.aria-label]="'Your profile: ' + player.displayName"
+    <div class="header-end">
+      @if (session.player(); as player) {
+        <a
+          class="player"
+          routerLink="/profile"
+          routerLinkActive="active"
+          ariaCurrentWhenActive="page"
+          [attr.aria-label]="'Your profile: ' + player.displayName"
+        >
+          @if (session.avatar(); as avatar) {
+            <app-avatar-badge [avatar]="avatar" [name]="player.displayName" [size]="1.75" />
+          }
+          <strong>{{ player.displayName }}</strong>
+        </a>
+      } @else if (session.status() === 'error') {
+        <p class="player player-error" role="status">
+          Guest sign-in unavailable
+          <button type="button" (click)="session.ensureGuest()">Retry</button>
+        </p>
+      }
+      <button
+        type="button"
+        class="music"
+        aria-label="Sound"
+        [attr.aria-pressed]="!music.muted()"
+        [title]="music.muted() ? 'Turn sound on' : 'Mute sound'"
+        (click)="music.toggle()"
       >
-        @if (session.avatar(); as avatar) {
-          <app-avatar-badge [avatar]="avatar" [name]="player.displayName" [size]="1.75" />
-        }
-        <strong>{{ player.displayName }}</strong>
-      </a>
-    } @else if (session.status() === 'error') {
-      <p class="player player-error" role="status">
-        Guest sign-in unavailable
-        <button type="button" (click)="session.ensureGuest()">Retry</button>
-      </p>
-    }
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" />
+          @if (music.muted()) {
+            <path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" />
+          } @else {
+            <path
+              d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              fill="none"
+            />
+          }
+        </svg>
+      </button>
+    </div>
   </div>
   <nav aria-label="Main">
     <ul>

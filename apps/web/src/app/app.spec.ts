@@ -8,6 +8,8 @@ import { appRoutes } from './app.routes';
 import { CurrentPlayer, PlayerSession, PlayerSessionStatus } from './identity/player-session';
 import { Avatar } from './profile/profile-api';
 import { PAGE_LOAD, withNavigationErrorState } from './shell/navigation-status';
+import { MusicTrack } from './shell/music-track';
+import { MUSIC_TRACK } from './shell/theme-music';
 
 @Component({ template: '<h1>Stub page</h1>' })
 class StubPage {}
@@ -40,12 +42,23 @@ describe('App shell', () => {
     ensureGuest: vi.fn(),
   };
   const pageLoad = vi.fn();
+  // The theme music's track; a stand-in that plays and fades at once.
+  const audio: MusicTrack = {
+    paused: true,
+    play: vi.fn(() => Promise.resolve()),
+    pause: vi.fn(),
+    setVolume: vi.fn(),
+    fade: vi.fn(() => Promise.resolve()),
+  };
 
   async function setup(routes: Route[]) {
     session.player.set(null);
     session.status.set('loading');
     session.ensureGuest.mockReset();
     pageLoad.mockReset();
+    vi.mocked(audio.play).mockClear();
+    vi.mocked(audio.pause).mockClear();
+    localStorage.clear();
     slowPage = deferredPage();
     await TestBed.configureTestingModule({
       imports: [App],
@@ -56,6 +69,7 @@ describe('App shell', () => {
         provideHttpClientTesting(),
         { provide: PlayerSession, useValue: session },
         { provide: PAGE_LOAD, useValue: pageLoad },
+        { provide: MUSIC_TRACK, useValue: () => audio },
       ],
     }).compileComponents();
   }
@@ -122,6 +136,30 @@ describe('App shell', () => {
 
       expect(element.querySelector('a.player')?.textContent?.trim()).toBe('Chog 4821');
       expect(element.querySelector('a.player app-avatar-badge')).toBeNull();
+    });
+
+    it('has a music toggle in the header that mutes the theme and plays it again', async () => {
+      const { fixture, element } = await render();
+      const toggle = element.querySelector('header button.music') as HTMLButtonElement;
+      expect(toggle.getAttribute('aria-label')).toBe('Sound');
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+      // The tap on the toggle is the first interaction: it starts the music, then the click mutes it.
+      toggle.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      toggle.click();
+      await fixture.whenStable();
+
+      expect(audio.play).toHaveBeenCalledOnce();
+      expect(audio.pause).toHaveBeenCalledOnce();
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(toggle.title).toBe('Turn sound on');
+
+      toggle.click();
+      await fixture.whenStable();
+
+      expect(audio.play).toHaveBeenCalledTimes(2);
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      expect(toggle.title).toBe('Mute sound');
     });
 
     it('offers a retry when the guest session could not be established', async () => {

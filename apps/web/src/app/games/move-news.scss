@@ -1,0 +1,67 @@
+// Over the top of the board, kept in view while a long board scrolls past.
+.banner-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 0.75rem;
+  pointer-events: none;
+}
+
+.banner {
+  position: sticky;
+  top: 4.5rem;
+  display: grid;
+  gap: 0.15rem;
+  max-width: min(26rem, 100%);
+  padding: 0.7rem 1.2rem;
+  border-radius: 1rem;
+  border: 2px solid #0b0e43;
+  color: #0b0e43;
+  background: #fff;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.3);
+  text-align: center;
+  animation: banner-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
+
+  strong {
+    font-size: 1.05rem;
+  }
+
+  span {
+    font-size: 1.25rem;
+    font-weight: 800;
+  }
+
+  &.good {
+    border-color: #1a7f37;
+    background: #e3f7e8;
+
+    span {
+      color: #116329;
+    }
+  }
+
+  &.bad {
+    border-color: #b42318;
+    background: #fdecea;
+
+    span {
+      color: #a1140b;
+    }
+  }
+}
+
+@keyframes banner-in {
+  from {
+    transform: translateY(-1rem) scale(0.9);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .banner {
+    animation: none;
+  }
+}

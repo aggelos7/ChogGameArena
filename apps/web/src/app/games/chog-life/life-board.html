@@ -65,9 +65,8 @@
         }
       }
     </p>
-    @if (lastMove(); as move) {
-      <p class="last-move" data-last-move>{{ move }}</p>
-    }
+    <p class="last-move" role="status" data-last-move>{{ lastMove() }}</p>
+    <app-recent-moves [moves]="recent()" />
   </div>
 
   <div class="controls">
@@ -138,6 +137,8 @@
 
   <div class="stage">
     <ng-content select="[boardTimer]" />
+    <app-rolling-die [roll]="die()" />
+    <app-move-banner [news]="banner()" />
     @if (layout(); as plan) {
       @if (view() === 'drawing') {
         <div class="board-box" #box [style.height.px]="fitHeight()">
@@ -146,6 +147,7 @@
             [layout]="plan"
             [pawns]="boardPawns()"
             [lastStop]="lastStop()"
+            [popup]="popup()"
             [choice]="choiceTiles()"
           />
         </div>

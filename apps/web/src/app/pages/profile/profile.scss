@@ -1,11 +1,33 @@
+// Right under the title: your summary, with the wallet's top level with it on wide screens and below it on phones.
+h1 {
+  margin-bottom: 0.75rem;
+}
+
+.top {
+  display: grid;
+  gap: 1rem 2rem;
+  margin-bottom: 1.5rem;
+
+  @media (min-width: 48rem) {
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+    align-items: start;
+    // Collector tucks up under the wallet card's foot.
+    margin-bottom: -10px;
+  }
+}
+
 .summary {
   display: flex;
   align-items: center;
   gap: 1rem;
-  margin-bottom: 1.5rem;
 }
 
+// The name, with the collector badge centred beside it.
 .name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
   margin: 0;
   font-size: 1.25rem;
   font-weight: 700;
@@ -161,6 +183,7 @@
     &.unlocked {
       border-color: var(--brand);
       color: var(--text);
+      background: #6305fc57;
     }
   }
 

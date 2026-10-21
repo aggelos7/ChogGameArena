@@ -188,3 +188,46 @@ svg {
   font-weight: 700;
   fill: #fff;
 }
+
+// What the move just shown did, floating up from its tile (DEC-076).
+.popup {
+  font-size: 20px;
+  font-weight: 800;
+  fill: #0b0e43;
+  stroke: #fff;
+  stroke-width: 4px;
+  paint-order: stroke;
+  animation: float-up 2.4s ease-out both;
+
+  &.good {
+    fill: #116329;
+  }
+
+  &.bad {
+    fill: #a1140b;
+  }
+}
+
+@keyframes float-up {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  15% {
+    transform: none;
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-24px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup {
+    animation: none;
+  }
+}

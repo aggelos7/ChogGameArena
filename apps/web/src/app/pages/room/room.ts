@@ -1,5 +1,5 @@
 import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
-import { Component, DestroyRef, OnInit, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { GameCatalog } from '../../games/game-catalog';
@@ -18,6 +18,7 @@ import {
   toRoomError,
 } from '../../rooms/rooms-api';
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
+import { ThemeMusic } from '../../shell/theme-music';
 import { LifeBoardView } from '../../games/chog-life/life-board';
 import { LifeResultsView, toLifeResult } from '../../games/chog-life/life-results';
 import { RaceResultsView, toRaceResult } from '../../games/chog-race/race-results';
@@ -26,6 +27,9 @@ import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
 import { RaceAbilityPlay, RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
 import { RACE_END_TURN, RACE_PASS, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
+
+/** The longest a match's last move keeps the live board up before the results show anyway (DEC-076). */
+export const FINALE_MOST_MS = 10_000;
 
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
@@ -96,8 +100,21 @@ export class RoomPage implements OnInit {
     return !!(this.lifeBoard() || this.raceBoard()) && (room?.status === 'Completed' || !this.you()?.hasLeft);
   });
 
+  /**
+   * The match you were playing just ended, and its last move is still being shown on the live board (DEC-076): the
+   * die and the hops over the line come before the results, which wait until the board has settled.
+   */
+  protected readonly finale = signal(false);
+  private finaleTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly injector = inject(Injector);
+  private readonly liveLifeBoard = viewChild(LifeBoardView);
+  private readonly liveRaceBoard = viewChild(RaceBoardView);
+
+  /** The room's status as the page shows it: still Active while the last move of a match you played is shown. */
+  protected readonly shownStatus = computed(() => (this.finale() ? 'Active' : this.room()?.status));
+
   /** You're playing a live match: its title and details go beside the board, for Chog Life and Chog Race alike (DEC-048). */
-  protected readonly playing = computed(() => !!(this.lifeBoard() || this.raceBoard()) && this.boardShown() && this.room()?.status === 'Active');
+  protected readonly playing = computed(() => !!(this.lifeBoard() || this.raceBoard()) && this.boardShown() && this.shownStatus() === 'Active');
 
   /** A completed Chog Life match whose results the server stored (STORY-043, DEC-046), shown above the final board. */
   protected readonly hasLifeResults = computed(() => {
@@ -159,7 +176,14 @@ export class RoomPage implements OnInit {
           this.show(current);
         }
       });
-    this.destroyRef.onDestroy(() => this.liveSubscription?.unsubscribe());
+    this.destroyRef.onDestroy(() => {
+      this.liveSubscription?.unsubscribe();
+      clearTimeout(this.finaleTimer);
+    });
+    // The theme pauses while you play a live match, and the game's own music plays instead (DEC-076).
+    const music = inject(ThemeMusic);
+    effect(() => music.setLiveGame(this.playing() ? (this.room()?.gameType ?? null) : null));
+    this.destroyRef.onDestroy(() => music.setLiveGame(null));
   }
 
   ngOnInit(): void {
@@ -356,7 +380,25 @@ export class RoomPage implements OnInit {
   /** Shows `room` unless a newer snapshot is already shown (DEC-028). */
   private show(room: Room): void {
     if (isNewerRoom(room, this.room())) {
+      // A match you're playing ends: keep the live board until it has shown the last move (or long enough for it).
+      if (this.playing() && this.room()?.status === 'Active' && room.status === 'Completed') {
+        this.finale.set(true);
+        clearTimeout(this.finaleTimer);
+        this.finaleTimer = setTimeout(() => this.finale.set(false), FINALE_MOST_MS);
+        // Once the board has taken the final state in: nothing to show if it isn't showing a move, else wait for it.
+        afterNextRender(() => this.boardSettled(this.liveLifeBoard()?.moving() ?? this.liveRaceBoard()?.moving() ?? false), {
+          injector: this.injector,
+        });
+      }
       this.room.set(room);
+    }
+  }
+
+  /** The live board has shown its move; after a match's last one, the results take its place. */
+  protected boardSettled(moving = false): void {
+    if (this.finale() && !moving && this.room()?.status === 'Completed') {
+      clearTimeout(this.finaleTimer);
+      this.finale.set(false);
     }
   }
 

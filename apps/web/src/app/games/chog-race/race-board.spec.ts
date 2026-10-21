@@ -5,6 +5,23 @@ import { seatColor } from '../seats';
 import { RaceBoardView } from './race-board';
 import { HOP_MS, SIDE_BY_SIDE } from '../chog-life/life-board';
 import { RaceBoard, raceColumns, raceFitColumns, raceLayout, raceTileLabel, raceWalk, toRaceBoard } from './race-board-model';
+import { DIE_MS } from '../rolling-die';
+import { BANNER_MS } from '../move-news';
+import { SoundEffects } from '../../shell/sound-effects';
+
+/** Moves show at once, without die or hops, for specs about what the board says rather than when (DEC-076). */
+const withoutMotion = () => vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+afterEach(() => vi.unstubAllGlobals());
+
+/** Sounds the boards play, recorded instead of heard. */
+const played: string[] = [];
+const quietSounds = () => {
+  played.length = 0;
+  return {
+    provide: SoundEffects,
+    useValue: { play: (effect: string) => played.push(effect), stop: (effect: string) => played.push(`stop ${effect}`) },
+  };
+};
 
 function member(displayName: string, seat: number, overrides: Partial<RoomMember> = {}): RoomMember {
   return {
@@ -186,7 +203,7 @@ describe('Chog Race board', () => {
   const pawnsOn = (index: number) => Array.from(tile(index).querySelectorAll('[data-pawn]')).map((p) => p.textContent?.trim());
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
   });
@@ -382,7 +399,7 @@ describe('Chog Race board moves (STORY-051)', () => {
   const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)];
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     events = [];
@@ -420,6 +437,7 @@ describe('Chog Race board moves (STORY-051)', () => {
   });
 
   it('says what the latest move did', () => {
+    withoutMotion();
     const moved = (lastMove: RaceBoard['lastMove'], extra: Partial<RaceBoard> = {}) => render({ ...RACE_BOARD, lastMove, ...extra }, you);
 
     moved({ seat: 2, roll: 3, from: 0, landed: 3, to: 3 });
@@ -453,7 +471,7 @@ describe('Chog Race board cards (STORY-052)', () => {
   const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)];
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
   });
@@ -511,6 +529,7 @@ describe('Chog Race board cards (STORY-052)', () => {
   });
 
   it('says what a Card tile drew, naming the card only to the player who drew it', () => {
+    withoutMotion();
     const drew = (lastMove: RaceBoard['lastMove']) => {
       render({ ...RACE_BOARD, lastMove });
       return text('[data-last-move]');
@@ -563,7 +582,7 @@ describe('Chog Race board card plays (STORY-053)', () => {
   const roll = { roll: 1, from: 4, landed: 5, to: 5 };
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     plays = [];
@@ -603,6 +622,7 @@ describe('Chog Race board card plays (STORY-053)', () => {
   });
 
   it('says what a card moving its player did, after the roll', () => {
+    withoutMotion();
     expect(played({ seat: 2, ...roll, play: { card: 'Pump', steps: 3, from: 5, landed: 8, to: 8 } })).toBe(
       'Bob played Pump (3 forward) and moved to tile 8.',
     );
@@ -622,6 +642,7 @@ describe('Chog Race board card plays (STORY-053)', () => {
   });
 
   it('says who Whale swapped with and who Reverse pushed back', () => {
+    withoutMotion();
     expect(played({ seat: 2, ...roll, play: { card: 'Whale', from: 5, to: 12, target: 1 } })).toBe(
       'Bob played Whale and swapped places with you (now on tile 5) and moved to tile 12.',
     );
@@ -676,7 +697,7 @@ describe('Chog Race board attacks and defense (STORY-054)', () => {
   const labels = () => Array.from(page.querySelectorAll('[data-play]')).map((button) => button.textContent?.trim());
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     plays = [];
@@ -738,6 +759,7 @@ describe('Chog Race board attacks and defense (STORY-054)', () => {
   });
 
   it('says how an attack ended and who skips a turn', () => {
+    withoutMotion();
     const played = (play: NonNullable<RaceBoard['lastMove']>['play'], members = bobsTurn, skipping?: number[]) => {
       render({ phase: 'Move', lastMove: { seat: 1, ...roll, play }, skipping }, members);
       return text('[data-last-play]');
@@ -795,7 +817,7 @@ describe('Chog Race board abilities (STORY-055)', () => {
   const labels = () => Array.from(page.querySelectorAll('[data-ability]')).map((button) => button.textContent?.trim());
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     uses = [];
@@ -995,7 +1017,7 @@ describe('Chog Race board hops', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
   });
@@ -1012,7 +1034,16 @@ describe('Chog Race board hops', () => {
     render(moved);
     expect(page.querySelector('[data-tile="6"]')?.getAttribute('aria-label')).toContain('Alice (you)');
     expect(page.querySelector('[data-pawn="1"]')?.closest('.car')?.classList).toContain('hopping');
-    expect(hopsOf(1, 6)).toEqual([1, 2, 3, 4, 5, 6, 6]);
+    // The die rolls first, with its sound, while the pawn waits where it was; then it hops.
+    expect(page.querySelector('[data-die]')).not.toBeNull();
+    expect(played).toEqual(['diceRoll']);
+    expect(at(1)).toBe(1);
+    vi.advanceTimersByTime(DIE_MS - HOP_MS);
+    fixture.detectChanges();
+    expect(hopsOf(1, 7)).toEqual([1, 1, 2, 3, 4, 5, 6, 6]);
+    expect(page.querySelector('[data-die]')).toBeNull();
+    // The engine starts as the car sets off and is heard to its end, not cut when the car stops.
+    expect(played).toEqual(['diceRoll', 'carForward']);
     expect(page.querySelector('[data-pawn="1"]')?.closest('.car')?.classList).not.toContain('hopping');
     expect(at(2)).toBe(0);
 
@@ -1021,15 +1052,79 @@ describe('Chog Race board hops', () => {
     expect(at(1)).toBe(6);
   });
 
+  it('starts the engine as a car drives on and sounds the beeper while a Setback tile sends it back (DEC-076)', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 1 }, { seat: 2, tile: 0 }] });
+
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 3, from: 1, landed: 4, to: 2, effect: 'Setback' } });
+    vi.advanceTimersByTime(DIE_MS);
+    fixture.detectChanges();
+    const seen = [at(1)];
+    const heard = [played.slice(1)];
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(HOP_MS);
+      fixture.detectChanges();
+      seen.push(at(1));
+      heard.push(played.slice(1));
+    }
+
+    expect(seen).toEqual([1, 2, 3, 4, 3, 2, 2]);
+    // The engine as it sets off; the beeper from the hop back off the Setback tile until the car stops.
+    expect(heard[0]).toEqual(['carForward']);
+    expect(heard[2]).toEqual(['carForward']);
+    expect(heard[3]).toEqual(['carForward', 'carReverse']);
+    expect(heard[6]).toEqual(['carForward', 'carReverse', 'stop carReverse']);
+  });
+
+  it('tells what a roll did once the car stops: a banner, a popup on its tile and Recent moves (DEC-076)', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 1 }, { seat: 2, tile: 0 }] });
+
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 3, from: 1, landed: 4, to: 2, effect: 'Setback' } });
+    expect(page.querySelector('[data-banner]')).toBeNull();
+    expect(page.querySelector('[data-last-move]')).toBeNull();
+
+    vi.advanceTimersByTime(DIE_MS + HOP_MS * 6);
+    fixture.detectChanges();
+    const banner = page.querySelector('[data-banner]');
+    expect(banner?.getAttribute('data-banner')).toBe('bad');
+    expect(banner?.querySelector('[data-banner-title]')?.textContent?.trim()).toBe('You rolled 3');
+    expect(banner?.querySelector('[data-banner-detail]')?.textContent?.trim()).toBe('Setback! Back to tile 2');
+    expect(page.querySelector('[data-tile="2"] [data-popup]')?.textContent?.trim()).toBe('−2 tiles');
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 3, landed on the Setback at tile 4 and fell back to tile 2.');
+    expect(Array.from(page.querySelectorAll('[data-recent-moves] li')).map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      '▼ You rolled 3: Setback! Back to tile 2',
+    ]);
+
+    vi.advanceTimersByTime(BANNER_MS);
+    fixture.detectChanges();
+    expect(page.querySelector('[data-banner]')).toBeNull();
+  });
+
+  it('tells a card’s move after the roll, newest first, and a reduced-motion move at once', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 5 }] });
+    const roll = { seat: 1, roll: 2, from: 0, landed: 2, to: 2 };
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 5 }], lastMove: roll });
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 5 }], lastMove: { ...roll, play: { card: 'Pump', steps: 2, from: 2, landed: 4, to: 4 } } });
+
+    expect(page.querySelector('[data-banner-title]')?.textContent?.trim()).toBe('You played Pump');
+    expect(page.querySelector('[data-banner-detail]')?.textContent?.trim()).toBe('+2 tiles, to tile 4');
+    expect(Array.from(page.querySelectorAll('[data-recent-moves] li')).map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      '▲ You played Pump: +2 tiles, to tile 4',
+      '• You rolled 2: Moved to tile 2',
+    ]);
+  });
+
   it('hops a card’s move after the roll, then the pawns a card pushed back', () => {
     render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 5 }] });
     const roll = { seat: 1, roll: 2, from: 0, landed: 2, to: 2 };
     const rolled: RaceBoard = { ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 5 }], lastMove: roll };
     render(rolled);
+    vi.advanceTimersByTime(DIE_MS);
     hopsOf(1, 3);
 
-    // Only the new play hops: Pump moves Alice 2 on from where she rolled to.
+    // Only the new play hops, without a die: Pump moves Alice 2 on from where she rolled to.
     render({ ...rolled, pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 5 }], lastMove: { ...roll, play: { card: 'Pump', steps: 2, from: 2, landed: 4, to: 4 } } });
+    expect(page.querySelector('[data-die]')).toBeNull();
     expect(hopsOf(1, 3)).toEqual([2, 3, 4, 4]);
 
     render({
@@ -1037,7 +1132,9 @@ describe('Chog Race board hops', () => {
       pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 3 }],
       lastMove: { seat: 1, roll: 1, from: 3, landed: 4, to: 4, play: { card: 'Reverse', pushed: [{ seat: 2, from: 5, landed: 3, to: 3 }] } },
     });
-    // Bob waits on his tile while Alice's roll hops, then is pushed back a tile at a time.
+    // Bob waits on his tile while Alice's die and roll hops, then is pushed back a tile at a time.
+    vi.advanceTimersByTime(DIE_MS);
+    fixture.detectChanges();
     const alice = [at(1)];
     const bob = [at(2)];
     for (let i = 0; i < 4; i++) {
@@ -1048,6 +1145,9 @@ describe('Chog Race board hops', () => {
     }
     expect(alice).toEqual([3, 4, 4, 4, 4]);
     expect(bob).toEqual([5, 5, 5, 4, 3]);
+    // Alice's engine starts, then Bob's beeper sounds while Reverse pushes him back, and stops when he does.
+    vi.advanceTimersByTime(HOP_MS * 2);
+    expect(played.slice(-3)).toEqual(['carForward', 'carReverse', 'stop carReverse']);
   });
 
   it('shows a move without hops when the page loads, and with reduced motion', () => {
@@ -1057,5 +1157,7 @@ describe('Chog Race board hops', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
     render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 3 }, { seat: 2, tile: 2 }], lastMove: { seat: 2, roll: 2, from: 0, landed: 2, to: 2 } });
     expect(at(2)).toBe(2);
+    expect(page.querySelector('[data-die]')).toBeNull();
+    expect(played).toEqual([]);
   });
 });

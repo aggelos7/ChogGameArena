@@ -1,0 +1,66 @@
+// Over the board, at its centre, and kept within the middle of the screen while a long board scrolls past.
+.die-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.die {
+  position: sticky;
+  top: calc(50vh - 3rem);
+  bottom: calc(50vh - 3rem);
+  width: 6rem;
+  height: 6rem;
+  filter: drop-shadow(0 0.5rem 0.75rem rgb(0 0 0 / 0.35));
+  animation: tumble 0.7s cubic-bezier(0.3, 0.6, 0.4, 1) both;
+
+  svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  rect {
+    fill: #fff;
+    stroke: #0b0e43;
+    stroke-width: 3;
+  }
+
+  circle {
+    fill: #0b0e43;
+  }
+
+  // Landed: the number rolled, in the logo's gold, with a little bounce.
+  &.landed {
+    animation: land 0.3s ease-out both;
+
+    rect {
+      fill: #ffc832;
+    }
+  }
+}
+
+@keyframes tumble {
+  from {
+    transform: translateY(-2.5rem) rotate(-200deg) scale(0.6);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes land {
+  50% {
+    transform: scale(1.15);
+  }
+  to {
+    transform: none;
+  }
+}
