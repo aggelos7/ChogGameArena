@@ -108,11 +108,15 @@ public sealed class RoyaleTable
 
     public MatchRuleDecision Hodl(int seat, bool locks = false) => Submit(seat, new { hodl = true, @lock = locks });
 
-    /// <summary>The round's deadline passes and it resolves; returns the rules' resolution.</summary>
-    public MatchRoundResolution Resolve()
+    /// <summary>
+    /// The round's deadline passes and it resolves; returns the rules' resolution. <paramref name="edit"/> changes the
+    /// stored state first, for balances or an event a test needs.
+    /// </summary>
+    public MatchRoundResolution Resolve(Func<RoyaleMatchState, RoyaleMatchState>? edit = null)
     {
         Now = Match.IsRoundDue(Now) ? Now : Match.TurnEndsAt!.Value;
-        var resolution = Rules.ResolveRound(new MatchRoundContext(Match, State, Random));
+        var state = edit is null ? State : JsonSerializer.SerializeToElement(edit(Stored), Json);
+        var resolution = Rules.ResolveRound(new MatchRoundContext(Match, state, Random));
         Match.ResolveRound(resolution.State.GetRawText(), Now, Rules.RoundTiming.OpensAfter, resolution.Standings);
         if (Match.Status == RoomStatus.Active)
         {

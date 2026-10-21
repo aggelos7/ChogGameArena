@@ -9,7 +9,7 @@ namespace ChogGames.Games.ChogRoyale.Tests;
 /// <summary>
 /// Chog Royale's match state and rounds (STORY-071, DEC-082), hidden actions and HODL (STORY-072, DEC-083), deck and
 /// hands (STORY-073, DEC-084), and round resolution with its ledger (STORY-074, DEC-085), played through the shared
-/// engine's round mode.
+/// engine's round mode. What the cards and the market do is in <see cref="ChogRoyaleCardsTests"/>.
 /// </summary>
 public class ChogRoyaleMatchRulesTests
 {
@@ -20,6 +20,9 @@ public class ChogRoyaleMatchRulesTests
     private const int Whale = 65;
     private const int Airdrop = 75;
     private const int Chaos = 90;
+
+    // An event draw of 0 is Calm Market.
+    private const int Calm = 0;
 
     private static RoyaleCard[] Cards(RoyaleHandCard[] hand) => [.. hand.Select(c => c.Card)];
 
@@ -43,7 +46,8 @@ public class ChogRoyaleMatchRulesTests
         Assert.Equal(Enumerable.Range(1, players), state.Players.Select(p => p.Seat));
         Assert.All(state.Players, p => Assert.Equal((100, 3, (RoyaleAction?)null), (p.Mon, p.Hand.Length, p.Action)));
         Assert.Equal(Enumerable.Range(1, 3 * players).Select(i => $"c{i}"), state.Players.SelectMany(p => Ids(p.Hand)));
-        Assert.Equal(Enumerable.Repeat((0, 100), 3 * players), draws.Asked);
+        Assert.Equal(Enumerable.Repeat((0, 100), 3 * players + 1), draws.Asked);
+        Assert.Equal(RoyaleMarketEvent.CalmMarket, state.Event);
         Assert.Empty(state.Ledger);
         Assert.Equal((MatchPlay.Rounds, 1, TimeSpan.FromSeconds(15)), (table.Match.Play, table.Match.TurnNumber, table.Match.TurnTimeout));
         Assert.Equal(RoyaleTable.Start + TimeSpan.FromSeconds(5), table.Match.RoundOpensAt);
@@ -92,7 +96,7 @@ public class ChogRoyaleMatchRulesTests
 
         Assert.Equal(RoomStatus.Completed, table.Match.Status);
         Assert.All(table.Match.Members, m => Assert.Equal(1, m.Rank));
-        Assert.All(table.Match.Members, m => Assert.Equal("""{"mon":100}""", m.Result));
+        Assert.All(table.Match.Members, m => Assert.Equal("""{"mon":100,"change":0,"lost":0,"successfulCards":0}""", m.Result));
         var state = table.Stored;
         Assert.Equal((5, 5), (state.Round, state.Ledger.Length));
         Assert.All(state.Ledger.SelectMany(r => r.Entries), e => Assert.Equal((true, (RoyaleCard?)null, 0, 100), (e.ByDefault, e.Card, e.Change, e.Balance)));
@@ -259,7 +263,9 @@ public class ChogRoyaleMatchRulesTests
         var entry = table.Stored.Ledger.Single().Entries[0];
         Assert.Equal(((RoyaleCard?)null, false, 0), (entry.Card, entry.ByDefault, entry.Change));
         Assert.Equal(hand, table.Hand(1));
-        Assert.Equal(dealt, draws.Asked.Count);
+
+        // No card is dealt; the only draw is round 2's market event.
+        Assert.Equal([(0, 100)], draws.Asked[dealt..]);
     }
 
     [Fact]
@@ -327,7 +333,8 @@ public class ChogRoyaleMatchRulesTests
         var ledger = table.Stored.Ledger;
         Assert.Equal([1, 2, 3], ledger.Select(r => r.Round));
         Assert.Equal([[1, 2, 3], [2, 3, 1], [1, 3]], ledger.Select(r => r.Priority));
-        Assert.Equal(new RoyaleLedgerEntry(1, RoyaleCard.RugPull, 3, false, null, 0, 0, 100), ledger[0].Entries[0]);
+        Assert.Equal(new RoyaleLedgerEntry(1, RoyaleCard.RugPull, 3, false, RoyaleOutcome.Applied, 15, null, 0, 0, 15, 115), ledger[0].Entries[0]);
+        Assert.Equal((RoyaleMarketEvent.CalmMarket, (RoyaleMarketEvent?)null), (ledger[0].Event, ledger[0].Chaos));
         Assert.Equal([1, 2, 3], ledger[0].Entries.Select(e => e.Seat));
         Assert.Equal([1, 3], ledger[2].Entries.Select(e => e.Seat));
     }
@@ -342,7 +349,7 @@ public class ChogRoyaleMatchRulesTests
         table.Resolve();
 
         var entry = table.Stored.Ledger.Single().Entries[0];
-        Assert.Equal((RoyaleCard.RugPull, 3, 100), (entry.Card!.Value, entry.Target!.Value, entry.Balance));
+        Assert.Equal((RoyaleCard.RugPull, 3, RoyaleOutcome.TargetLeft, 100), (entry.Card!.Value, entry.Target!.Value, entry.Outcome, entry.Balance));
         Assert.Equal(["c2", "c3", "c10"], Ids(table.Hand(1)));
     }
 
@@ -369,7 +376,7 @@ public class ChogRoyaleMatchRulesTests
     [Fact]
     public void Resolving_the_same_state_again_gives_the_same_result_and_the_engine_resolves_a_round_once()
     {
-        var table = new RoyaleTable(2, new Draws(Pump, Pump, Pump, Pump, Pump, Pump, Rug, Rug));
+        var table = new RoyaleTable(2, new Draws(Pump, Pump, Pump, Pump, Pump, Pump, Calm, Rug, Rug));
         table.Play(1, 0, locks: true);
         table.Play(2, 1, locks: true);
         var context = new MatchRoundContext(table.Match, table.State, new Draws(Rug, Rug));
@@ -410,6 +417,7 @@ public class ChogRoyaleMatchRulesTests
         """{"rulesVersion":1,"round":1,"nextCard":1,"players":[{"seat":1,"mon":-1,"hand":[]},{"seat":2,"mon":5,"hand":[]}],"ledger":[]}""",
         """{"rulesVersion":1,"round":1,"nextCard":1,"players":[{"seat":1,"mon":5,"hand":[{"id":"a","card":"Pump"},{"id":"b","card":"Pump"},{"id":"c","card":"Pump"},{"id":"d","card":"Pump"}]}],"ledger":[]}""",
         """{"rulesVersion":1,"round":1}""",
+        """{"rulesVersion":1,"round":1,"event":42,"nextCard":1,"players":[],"ledger":[]}""",
     };
 
     [Theory]

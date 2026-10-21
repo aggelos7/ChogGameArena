@@ -16,9 +16,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ChogGames.Api.Tests.ChogRoyale;
 
 /// <summary>
-/// Chog Royale end to end with the real rules (STORY-071–074, DEC-082–085): a match starts with 100 MON and three private
+/// Chog Royale end to end with the real rules (STORY-071–078, DEC-082–089): a match starts with 100 MON and three private
 /// cards each and plays five rounds to its end even with nobody acting; actions are hidden from everyone else over REST and
-/// live until the round resolves, idle players HODL, and a round resolves once however often it is retried.
+/// live until the round resolves, idle players HODL, and a round resolves once however often it is retried. The cards
+/// move MON under the round's market event, and the finished match is ranked and counted in profiles, XP and the Ladder.
 /// </summary>
 public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -70,8 +71,8 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
     }
 
     /// <summary>
-    /// Card draws (0–99) take the queued values first, then 0, a Pump; every other draw is the highest allowed, so a
-    /// shuffle never swaps and seats stay in join order.
+    /// Card and market event draws (0–99) take the queued values first, then 0: a Pump, or Calm Market; every other draw
+    /// is the highest allowed, so a shuffle never swaps and seats stay in join order.
     /// </summary>
     private sealed class LowDraws : IRandomSource
     {
@@ -256,6 +257,13 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
     private static string[] HandIds(JsonElement room) =>
         [.. State(room).GetProperty("hand").EnumerateArray().Select(c => c.GetProperty("id").GetString()!)];
 
+    /// <summary>A member's result: MON, change, MON lost to opponents and successful cards (DEC-089).</summary>
+    private static (int Mon, int Change, int Lost, int SuccessfulCards) Result(JsonElement member)
+    {
+        var result = member.GetProperty("result");
+        return (result.GetProperty("mon").GetInt32(), result.GetProperty("change").GetInt32(), result.GetProperty("lost").GetInt32(), result.GetProperty("successfulCards").GetInt32());
+    }
+
     /// <summary>The first round opens 5 s after the start.</summary>
     private void ToFirstRound() => _clock.Advance(TimeSpan.FromSeconds(5));
 
@@ -437,5 +445,76 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         Assert.Empty(State(seen).GetProperty("hand").EnumerateArray());
         Assert.Equal([1, 2], State(seen).GetProperty("players").EnumerateArray().Select(p => p.GetProperty("seat").GetInt32()));
         Assert.Equal(2, (await StoredAsync(code)).TurnNumber);
+    }
+
+    [PostgresFact]
+    public async Task Every_player_sees_the_rounds_event_before_deciding_and_a_pump_pays_30_under_meme_hype()
+    {
+        // Six Pumps dealt, then round 1's event: a draw of 30 is Meme Hype.
+        _random.Enqueue(0, 0, 0, 0, 0, 0, 30);
+        var (alice, bob) = (await GuestAsync("Alice"), await GuestAsync("Bob"));
+        var code = await StartedAsync(alice, bob);
+
+        foreach (var player in new[] { alice, bob })
+        {
+            Assert.Equal("MemeHype", State(await ViewAsync(player, code)).GetProperty("event").GetString());
+        }
+
+        ToFirstRound();
+        await OkAsync(SubmitAsync(alice, code, new { card = HandIds(await ViewAsync(alice, code))[0], @lock = true }));
+        await OkAsync(SubmitAsync(bob, code, new { hodl = true, @lock = true }));
+
+        var round = State(await ViewAsync(bob, code)).GetProperty("ledger")[0];
+        Assert.Equal("MemeHype", round.GetProperty("event").GetString());
+        var pump = round.GetProperty("entries")[0];
+        Assert.Equal(("Applied", 30, 130), (pump.GetProperty("outcome").GetString(), pump.GetProperty("amount").GetInt32(), pump.GetProperty("balance").GetInt32()));
+    }
+
+    [PostgresFact]
+    public async Task A_finished_match_is_ranked_counted_in_profiles_xp_and_the_ladder_and_refuses_later_actions()
+    {
+        var (alice, bob) = (await GuestAsync("Alice"), await GuestAsync("Bob"));
+        var code = await StartedAsync(alice, bob);
+
+        // Alice pumps every round (she is only dealt Pumps) and Bob HODLs; both lock, so each round resolves at once.
+        ToFirstRound();
+        for (var round = 1; round <= 5; round++)
+        {
+            await OkAsync(SubmitAsync(alice, code, new { card = HandIds(await ViewAsync(alice, code))[0], @lock = true }));
+            await OkAsync(SubmitAsync(bob, code, new { hodl = true, @lock = true }));
+            _clock.Advance(TimeSpan.FromSeconds(20));
+        }
+
+        var final = await ViewAsync(bob, code);
+        Assert.Equal("Completed", final.GetProperty("status").GetString());
+        var members = final.GetProperty("members").EnumerateArray().ToDictionary(m => m.GetProperty("displayName").GetString()!);
+        Assert.Equal((1, 2), (members["Alice"].GetProperty("rank").GetInt32(), members["Bob"].GetProperty("rank").GetInt32()));
+        Assert.Equal((200, 100, 0, 5), Result(members["Alice"]));
+        Assert.Equal((100, 0, 0, 0), Result(members["Bob"]));
+
+        var profiles = new Dictionary<string, JsonElement>();
+        foreach (var player in new[] { alice, bob })
+        {
+            using var response = await player.Client.GetAsync("/api/profile");
+            profiles[player.Name] = await response.Content.ReadFromJsonAsync<JsonElement>(Json);
+        }
+
+        Assert.Equal((1, 1), (profiles["Alice"].GetProperty("gamesPlayed").GetInt32(), profiles["Alice"].GetProperty("wins").GetInt32()));
+        Assert.Equal((1, 0), (profiles["Bob"].GetProperty("gamesPlayed").GetInt32(), profiles["Bob"].GetProperty("wins").GetInt32()));
+        Assert.True(profiles["Alice"].GetProperty("xp").GetInt32() > profiles["Bob"].GetProperty("xp").GetInt32());
+        Assert.True(profiles["Bob"].GetProperty("xp").GetInt32() > 0);
+
+        using (var ladder = await alice.Client.GetAsync("/api/leaderboards?game=chog-royale"))
+        {
+            Assert.Equal(HttpStatusCode.OK, ladder.StatusCode);
+            var entries = (await ladder.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("entries");
+            Assert.Equal(
+                [("Alice", profiles["Alice"].GetProperty("xp").GetInt32(), 1), ("Bob", profiles["Bob"].GetProperty("xp").GetInt32(), 0)],
+                entries.EnumerateArray().Select(e => (e.GetProperty("displayName").GetString()!, e.GetProperty("xp").GetInt32(), e.GetProperty("wins").GetInt32())));
+        }
+
+        var version = (await StoredAsync(code)).Version;
+        await RefusedAsync(SubmitAsync(alice, code, new { hodl = true }), "room_closed");
+        Assert.Equal(version, (await StoredAsync(code)).Version);
     }
 }

@@ -6,7 +6,8 @@ namespace ChogGames.Games.ChogRoyale.Rules;
 /// <summary>
 /// A version of the Chog Royale rules (STORY-071, ROYALE-001–004, 010–012, 053–056, 059, DEC-082): how many rounds a match
 /// plays, each round's phases, the fictional MON every player starts with and the most a balance may hold, the match's
-/// time cap and, since STORY-073 (ROYALE-015–020, DEC-084), the weighted deck and the hand size. Like the other games'
+/// time cap, since STORY-073 (ROYALE-015–020, DEC-084) the weighted deck and the hand size, and since STORY-075–077
+/// (ROYALE-021–025, DEC-086–088) what the cards do and the market. Like the other games'
 /// rules (DEC-037, DEC-054) it is versioned code in the game module, checked when it is built, so invalid rules stop the
 /// API at startup. A match records the version it started with. Nothing here touches a wallet or the chain (ROYALE-012).
 /// </summary>
@@ -35,7 +36,9 @@ public sealed class RoyaleRules
         int startingMon,
         int maxMon,
         IReadOnlyDictionary<RoyaleCard, int> deck,
-        int handSize)
+        int handSize,
+        RoyaleCardEffects effects,
+        RoyaleMarket market)
     {
         Version = version;
         Rounds = rounds;
@@ -45,6 +48,8 @@ public sealed class RoyaleRules
         MaxMon = maxMon;
         Deck = deck;
         HandSize = handSize;
+        Effects = effects;
+        Market = market;
         TotalWeight = deck.Values.Sum();
     }
 
@@ -76,6 +81,12 @@ public sealed class RoyaleRules
     /// <summary>Cards each player holds; a played card is replaced after the round, except after the last (ROYALE-016).</summary>
     public int HandSize { get; }
 
+    /// <summary>What each card does (ROYALE-025).</summary>
+    public RoyaleCardEffects Effects { get; }
+
+    /// <summary>The round's market events and the Chaos pool (ROYALE-021–024).</summary>
+    public RoyaleMarket Market { get; }
+
     /// <summary>The rules, checked; any inconsistency throws <see cref="ArgumentException"/> (DEC-082).</summary>
     public static RoyaleRules Create(
         int version,
@@ -85,10 +96,16 @@ public sealed class RoyaleRules
         int startingMon,
         int maxMon,
         IReadOnlyDictionary<RoyaleCard, int> deck,
-        int handSize)
+        int handSize,
+        RoyaleCardEffects effects,
+        RoyaleMarket market)
     {
         ArgumentNullException.ThrowIfNull(timing);
         ArgumentNullException.ThrowIfNull(deck);
+        ArgumentNullException.ThrowIfNull(effects);
+        ArgumentNullException.ThrowIfNull(market);
+        ArgumentNullException.ThrowIfNull(market.Events);
+        ArgumentNullException.ThrowIfNull(market.Chaos);
         if (version < 1)
         {
             throw new ArgumentException("A rules version counts from 1.", nameof(version));
@@ -126,8 +143,9 @@ public sealed class RoyaleRules
             throw new ArgumentException($"A hand holds 1 to {HandLimit} cards.", nameof(handSize));
         }
 
+        effects.Check();
         return new RoyaleRules(
-            version, rounds, timing, timeCap, startingMon, maxMon, new Dictionary<RoyaleCard, int>(deck), handSize);
+            version, rounds, timing, timeCap, startingMon, maxMon, new Dictionary<RoyaleCard, int>(deck), handSize, effects, market.Checked());
     }
 
     /// <summary>
