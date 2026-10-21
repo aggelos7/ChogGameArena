@@ -14,6 +14,7 @@ public static class ProjectDependencyRules
             ["ChogGames.Core"] = new HashSet<string>(),
             ["ChogGames.Games.ChogLife"] = new HashSet<string> { "ChogGames.Core" },
             ["ChogGames.Games.ChogRace"] = new HashSet<string> { "ChogGames.Core" },
+            ["ChogGames.Games.ChogRoyale"] = new HashSet<string> { "ChogGames.Core" },
             ["ChogGames.Infrastructure"] = new HashSet<string> { "ChogGames.Core" },
             ["ChogGames.Api"] = new HashSet<string>
             {
@@ -21,6 +22,7 @@ public static class ProjectDependencyRules
                 "ChogGames.Infrastructure",
                 "ChogGames.Games.ChogLife",
                 "ChogGames.Games.ChogRace",
+                "ChogGames.Games.ChogRoyale",
             },
         };
 

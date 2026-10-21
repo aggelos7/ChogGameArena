@@ -81,6 +81,12 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             Id = "chog-race",
                             MaxPlayers = 6,
                             MinPlayers = 2
+                        },
+                        new
+                        {
+                            Id = "chog-royale",
+                            MaxPlayers = 6,
+                            MinPlayers = 2
                         });
                 });
 
@@ -363,8 +369,19 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<int>("MinPlayers")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Play")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<Guid?>("ReplyingPlayerId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RoundOpensAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("RoundVersion")
+                        .HasColumnType("bigint");
 
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
@@ -413,7 +430,7 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_GameRooms_Code_Format", "\"Code\" ~ '^[2-9A-HJKMNP-Z]{6}$'");
 
-                            t.HasCheckConstraint("CK_GameRooms_CurrentTurn", "(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> 'Active') AND (\"TurnEndsAt\" IS NULL) = (\"CurrentPlayerId\" IS NULL)");
+                            t.HasCheckConstraint("CK_GameRooms_CurrentTurn", "(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> 'Active' OR \"Play\" = 'Rounds') AND (\"TurnEndsAt\" IS NULL) = (\"Status\" <> 'Active')");
 
                             t.HasCheckConstraint("CK_GameRooms_EndedAt", "(\"EndedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Active'))");
 
@@ -421,7 +438,11 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_GameRooms_MinPlayers", "\"MinPlayers\" >= 2 AND \"MinPlayers\" <= \"Capacity\"");
 
+                            t.HasCheckConstraint("CK_GameRooms_Play", "\"Play\" IN ('Turns', 'Rounds')");
+
                             t.HasCheckConstraint("CK_GameRooms_ReplyingPlayer", "\"ReplyingPlayerId\" IS NULL OR (\"Status\" = 'Active' AND \"CurrentPlayerId\" IS NOT NULL AND \"ReplyingPlayerId\" <> \"CurrentPlayerId\")");
+
+                            t.HasCheckConstraint("CK_GameRooms_Round", "(\"RoundOpensAt\" IS NULL) = (\"Status\" <> 'Active' OR \"Play\" <> 'Rounds') AND (\"RoundVersion\" IS NULL) = (\"RoundOpensAt\" IS NULL) AND (\"RoundOpensAt\" IS NULL OR (\"RoundOpensAt\" <= \"TurnEndsAt\" AND \"RoundVersion\" <= \"Version\"))");
 
                             t.HasCheckConstraint("CK_GameRooms_StartedAt", "(\"StartedAt\" IS NULL) = (\"Status\" IN ('Waiting', 'Cancelled'))");
 
@@ -484,6 +505,12 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                     b.Property<string>("Result")
                         .HasColumnType("jsonb");
 
+                    b.Property<bool>("RoundLocked")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("RoundSubmitted")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("Seat")
                         .HasColumnType("integer");
 
@@ -517,6 +544,8 @@ namespace ChogGames.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_RoomMembers_Ready", "(\"ReadyCharacterKind\" IS NULL) = (\"ReadyCharacterId\" IS NULL) AND (\"ReadyCharacterKind\" IS NULL OR \"ReadyCharacterKind\" IN ('Standard', 'Nft'))");
 
                             t.HasCheckConstraint("CK_RoomMembers_Result", "\"Result\" IS NULL OR (jsonb_typeof(\"Result\") = 'object' AND \"Rank\" IS NOT NULL AND \"LeftAt\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_RoomMembers_Round", "(NOT \"RoundSubmitted\" OR \"Seat\" IS NOT NULL) AND (NOT \"RoundLocked\" OR \"RoundSubmitted\")");
 
                             t.HasCheckConstraint("CK_RoomMembers_Seat", "\"Seat\" IS NULL OR \"Seat\" BETWEEN 1 AND 6");
 

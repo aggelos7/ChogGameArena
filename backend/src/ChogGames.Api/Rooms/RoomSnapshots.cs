@@ -20,6 +20,7 @@ namespace ChogGames.Api.Rooms;
 /// locked, everyone sees its uses left and each member's seat, which ability targets name (DEC-036). Achievements a
 /// completed match unlocked are shown only to the player who earned them (DEC-063). Each member shows their cosmetic
 /// collector badge, never how many Chogs they hold (DEC-065). A photo that reports hid shows only to its owner (DEC-070).
+/// In a match played in rounds, others see only whether a member has submitted and locked, never what (DEC-081).
 /// </summary>
 public sealed class RoomSnapshots(
     ChogGamesDbContext db,
@@ -106,7 +107,9 @@ public sealed class RoomSnapshots(
                     ResultOf(m),
                     ProfileEndpoints.CollectorBadgeOf(player.ChogsHeld),
                     photo is { } id ? AvatarImageEndpoints.UrlFor(id) : null,
-                    ProfileEndpoints.ToResponse(ProfileEndpoints.AvatarOf(player.AvatarId), photo));
+                    ProfileEndpoints.ToResponse(ProfileEndpoints.AvatarOf(player.AvatarId), photo),
+                    room.Status == RoomStatus.Active && m.RoundSubmitted,
+                    room.Status == RoomStatus.Active && m.RoundLocked);
             })
             .ToArray();
 
@@ -130,7 +133,9 @@ public sealed class RoomSnapshots(
             view,
             options,
             [.. Achievement.All.Where(a => unlocked.Contains(a.Id)).Select(a => new RoomAchievementResponse(a.Id, a.Name, a.Description))],
-            UnavailableAbilities(room, options));
+            UnavailableAbilities(room, options),
+            room.Play,
+            room.RoundOpensAt);
     }
 
     private static JsonElement? ResultOf(RoomMember member)

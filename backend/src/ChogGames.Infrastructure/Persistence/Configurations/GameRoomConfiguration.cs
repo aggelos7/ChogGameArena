@@ -26,7 +26,8 @@ internal sealed class GameDefinitionConfiguration : IEntityTypeConfiguration<Gam
         // Supported games are added by reviewed migrations; enabling one is configuration (Games:Items).
         builder.HasData(
             new { Id = GameDefinition.ChogLife, MinPlayers = 2, MaxPlayers = 6 },
-            new { Id = GameDefinition.ChogRace, MinPlayers = 2, MaxPlayers = 6 });
+            new { Id = GameDefinition.ChogRace, MinPlayers = 2, MaxPlayers = 6 },
+            new { Id = GameDefinition.ChogRoyale, MinPlayers = 2, MaxPlayers = 6 });
     }
 }
 
@@ -35,6 +36,7 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
     public void Configure(EntityTypeBuilder<GameRoom> builder)
     {
         var statuses = string.Join(", ", Enum.GetNames<RoomStatus>().Select(name => $"'{name}'"));
+        var plays = string.Join(", ", Enum.GetNames<MatchPlay>().Select(name => $"'{name}'"));
         builder.ToTable("GameRooms", table =>
         {
             table.HasCheckConstraint("CK_GameRooms_Code_Format", "\"Code\" ~ '^[2-9A-HJKMNP-Z]{6}$'");
@@ -58,15 +60,25 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
                 "CK_GameRooms_State",
                 $"\"State\" IS NULL OR (jsonb_typeof(\"State\") = 'object' AND \"StartedAt\" IS NOT NULL)");
 
-            // A started match has a turn timeout and has begun counting turns; exactly an active one has a current
-            // player with a deadline (DEC-027).
+            // A started match has a turn timeout and has begun counting turns; exactly an active one has a deadline, and
+            // a current player unless it is played in rounds (DEC-027, DEC-081).
             table.HasCheckConstraint(
                 "CK_GameRooms_TurnTimeout",
                 "(\"TurnTimeout\" IS NULL) = (\"StartedAt\" IS NULL) AND (\"TurnTimeout\" IS NULL OR \"TurnTimeout\" > interval '0')");
             table.HasCheckConstraint("CK_GameRooms_TurnNumber", "\"TurnNumber\" >= 0 AND (\"TurnNumber\" = 0) = (\"StartedAt\" IS NULL)");
             table.HasCheckConstraint(
                 "CK_GameRooms_CurrentTurn",
-                $"(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> '{nameof(RoomStatus.Active)}') AND (\"TurnEndsAt\" IS NULL) = (\"CurrentPlayerId\" IS NULL)");
+                $"(\"CurrentPlayerId\" IS NULL) = (\"Status\" <> '{nameof(RoomStatus.Active)}' OR \"Play\" = '{nameof(MatchPlay.Rounds)}') "
+                + $"AND (\"TurnEndsAt\" IS NULL) = (\"Status\" <> '{nameof(RoomStatus.Active)}')");
+
+            // Exactly an active match played in rounds has a round, which opens no later than its deadline and began at a
+            // version the room has reached (STORY-070, DEC-081).
+            table.HasCheckConstraint("CK_GameRooms_Play", $"\"Play\" IN ({plays})");
+            table.HasCheckConstraint(
+                "CK_GameRooms_Round",
+                $"(\"RoundOpensAt\" IS NULL) = (\"Status\" <> '{nameof(RoomStatus.Active)}' OR \"Play\" <> '{nameof(MatchPlay.Rounds)}') "
+                + "AND (\"RoundVersion\" IS NULL) = (\"RoundOpensAt\" IS NULL) "
+                + "AND (\"RoundOpensAt\" IS NULL OR (\"RoundOpensAt\" <= \"TurnEndsAt\" AND \"RoundVersion\" <= \"Version\"))");
 
             // Only an active match's turn waits for a reply, from someone other than the current player (STORY-054,
             // DEC-058); an active match always has a current player, so the comparison is never NULL there.
@@ -86,6 +98,7 @@ internal sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
         builder.Property(r => r.Code).HasMaxLength(RoomCode.Length).IsFixedLength();
         builder.Property(r => r.GameType).HasMaxLength(GameDefinition.MaxIdLength);
         builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
+        builder.Property(r => r.Play).HasConversion<string>().HasMaxLength(16);
 
         // Rooms change under a row lock; the version check also refuses a write from a copy that went stale (DEC-026).
         builder.Property(r => r.Version).IsConcurrencyToken();
@@ -132,6 +145,10 @@ internal sealed class RoomMemberConfiguration : IEntityTypeConfiguration<RoomMem
 
             // Only a seated match player can finish the game (STORY-041).
             table.HasCheckConstraint("CK_RoomMembers_FinishedAt", "\"FinishedAt\" IS NULL OR \"Seat\" IS NOT NULL");
+
+            // Only a seated match player submits in a round, and only a submission can be locked (STORY-070, DEC-081).
+            table.HasCheckConstraint(
+                "CK_RoomMembers_Round", "(NOT \"RoundSubmitted\" OR \"Seat\" IS NOT NULL) AND (NOT \"RoundLocked\" OR \"RoundSubmitted\")");
 
             // Only a seated match player gets a final place, from 1 (DEC-030).
             table.HasCheckConstraint(

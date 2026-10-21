@@ -96,6 +96,7 @@ services:
       Nfts__Monad__RpcUrl: ${MONAD_RPC_URL:-https://rpc.monad.xyz}
       Games__Items__0__Status: ${CHOG_LIFE_STATUS:-ComingSoon}
       Games__Items__1__Status: ${CHOG_RACE_STATUS:-ComingSoon}
+      Games__Items__2__Status: ${CHOG_ROYALE_STATUS:-ComingSoon}
       # Shown on the terms and privacy pages; set it before the launch (DEC-070).
       Legal__ContactEmail: ${LEGAL_CONTACT_EMAIL:-}
       # Wallets of the operators who review photo reports; none by default (DEC-070).

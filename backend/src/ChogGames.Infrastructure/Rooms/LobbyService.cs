@@ -242,7 +242,8 @@ public sealed class LobbyService(
             timeProvider.GetUtcNow(),
             locked,
             started => gameRules?.StartState(new MatchStartContext(started, random))?.GetRawText(),
-            gameRules?.TimeLimit);
+            gameRules?.TimeLimit,
+            (gameRules as IRoundMatchRules)?.RoundTiming);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new RoomResult(RoomOutcome.Started, room);

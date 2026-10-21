@@ -18,6 +18,8 @@ public sealed class GameDefinition
 
     public const string ChogRace = "chog-race";
 
+    public const string ChogRoyale = "chog-royale";
+
     public string Id { get; private set; } = string.Empty;
 
     public int MinPlayers { get; private set; }

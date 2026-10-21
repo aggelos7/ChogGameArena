@@ -43,6 +43,9 @@ public static class MatchCommandEndpoints
         public const string NotYourTurn = "not_your_turn";
         public const string TurnExpired = "turn_expired";
         public const string TimeUp = "time_up";
+        public const string RoundNotOpen = "round_not_open";
+        public const string RoundClosed = "round_closed";
+        public const string ActionLocked = "action_locked";
     }
 
     /// <summary>Resumes active matches at startup (DEC-030), before the turn scheduler (DEC-027) starts.</summary>
@@ -153,6 +156,11 @@ public static class MatchCommandEndpoints
             MatchCommandOutcome.NotYourTurn => (StatusCodes.Status409Conflict, ErrorCodes.NotYourTurn, "It isn't your turn."),
             MatchCommandOutcome.TurnExpired => (StatusCodes.Status409Conflict, ErrorCodes.TurnExpired, "Your turn has run out."),
             MatchCommandOutcome.TimeUp => (StatusCodes.Status409Conflict, ErrorCodes.TimeUp, "This game's time is up."),
+            MatchCommandOutcome.RoundNotOpen => (
+                StatusCodes.Status409Conflict, ErrorCodes.RoundNotOpen, "This round isn't open for actions yet."),
+            MatchCommandOutcome.RoundClosed => (StatusCodes.Status409Conflict, ErrorCodes.RoundClosed, "This round's time has run out."),
+            MatchCommandOutcome.ActionLocked => (
+                StatusCodes.Status409Conflict, ErrorCodes.ActionLocked, "You've locked your action for this round."),
             MatchCommandOutcome.Rejected => (
                 StatusCodes.Status409Conflict, ErrorCodes.CommandRejected, "This command isn't allowed right now."),
             _ => throw new ArgumentOutOfRangeException(nameof(result), result.Outcome, "Not a failure."),

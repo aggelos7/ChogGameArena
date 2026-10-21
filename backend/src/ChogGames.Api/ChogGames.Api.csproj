@@ -10,6 +10,7 @@
     <ProjectReference Include="..\ChogGames.Infrastructure\ChogGames.Infrastructure.csproj" />
     <ProjectReference Include="..\ChogGames.Games.ChogLife\ChogGames.Games.ChogLife.csproj" />
     <ProjectReference Include="..\ChogGames.Games.ChogRace\ChogGames.Games.ChogRace.csproj" />
+    <ProjectReference Include="..\ChogGames.Games.ChogRoyale\ChogGames.Games.ChogRoyale.csproj" />
   </ItemGroup>
 
 </Project>

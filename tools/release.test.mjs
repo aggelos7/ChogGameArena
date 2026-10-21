@@ -148,6 +148,7 @@ test('release:verify runs the release smoke test, and deploy:verify runs it agai
   assert.match(deploy, /CHOG_LIFE_STATUS: 'Available'/);
   assert.match(deploy, /CHOG_RACE_STATUS: 'Available'/);
   assert.match(read('infrastructure/production/docker-compose.yml'), /Games__Items__1__Status: \$\{CHOG_RACE_STATUS:-ComingSoon\}/);
+  assert.match(read('infrastructure/production/docker-compose.yml'), /Games__Items__2__Status: \$\{CHOG_ROYALE_STATUS:-ComingSoon\}/);
 });
 
 test('the release checklist covers every area the story names and the rollback drill', () => {

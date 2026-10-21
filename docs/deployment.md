@@ -63,6 +63,7 @@ Encrypt allows 5 failed validations per host per hour.
 | `MONAD_RPC_URL` | `https://rpc.monad.xyz` | A dedicated endpoint may carry a key; keep it in `.env` only |
 | `CHOG_LIFE_STATUS` | `ComingSoon` | `Available` lists Chog Life as playable |
 | `CHOG_RACE_STATUS` | `ComingSoon` | `Available` lists Chog Race as playable (DEC-061) |
+| `CHOG_ROYALE_STATUS` | `ComingSoon` | `Available` lists Chog Royale as playable (DEC-082); keep it off until its game screen ships |
 | `IMAGE_PREFIX` / `IMAGE_TAG` | `chog-game-arena` / `local` | Tag each release to roll back (below) |
 
 ## HTTPS and certificates

@@ -134,6 +134,10 @@ public enum MatchRuleOutcome
 /// <param name="SkipsNextTurnOf">
 /// For <c>Accepted</c>: this player still playing skips their next turn, once, without it counting as missed (DEC-058).
 /// </param>
+/// <param name="Locks">
+/// For <c>Accepted</c> in a round mode (STORY-070, DEC-081): the submission is the player's last for the round; they can't
+/// change it any more, and once every player still playing has locked the round resolves.
+/// </param>
 public sealed record MatchRuleDecision(
     MatchRuleOutcome Outcome,
     JsonElement? State = null,
@@ -142,7 +146,8 @@ public sealed record MatchRuleDecision(
     IReadOnlyList<MatchStanding>? Standings = null,
     bool Finished = false,
     Guid? AwaitsReplyFrom = null,
-    Guid? SkipsNextTurnOf = null)
+    Guid? SkipsNextTurnOf = null,
+    bool Locks = false)
 {
     public static MatchRuleDecision Accept(
         JsonElement state, bool endsTurn = false, bool finished = false, Guid? awaitsReplyFrom = null, Guid? skipsNextTurnOf = null) =>
@@ -153,6 +158,13 @@ public sealed record MatchRuleDecision(
             Finished: finished,
             AwaitsReplyFrom: awaitsReplyFrom,
             SkipsNextTurnOf: skipsNextTurnOf);
+
+    /// <summary>
+    /// A round mode's submission (STORY-070, DEC-081): <paramref name="state"/> holds the player's choice for the round,
+    /// which only they may see, and <paramref name="locks"/> makes it final.
+    /// </summary>
+    public static MatchRuleDecision Submit(JsonElement state, bool locks = false) =>
+        new(MatchRuleOutcome.Accepted, state, Locks: locks);
 
     /// <summary>The command ended the match with <paramref name="standings"/> for the players still playing.</summary>
     public static MatchRuleDecision Finish(JsonElement state, IReadOnlyList<MatchStanding> standings) =>
