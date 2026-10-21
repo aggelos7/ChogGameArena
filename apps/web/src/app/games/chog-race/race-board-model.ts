@@ -27,6 +27,8 @@ export interface RacePawn {
   boost?: number;
   /** A raised Shield, blocking the next Rug, Liquidated or Whale played on the player (DEC-059). */
   shielded?: boolean;
+  /** How many more attacks a raised Shield blocks, from the player's Tier (STORY-090, DEC-077). */
+  blocks?: number;
 }
 
 /**
@@ -103,6 +105,10 @@ export interface RaceAbilityUse {
   ability: string;
   target?: number;
   card?: RaceCard;
+  /** Every card Card Steal took, for those two players (STORY-090, DEC-077). */
+  cards?: RaceCard[];
+  /** How many cards Card Steal took, for everyone; absent before STORY-090 (one). */
+  taken?: number;
 }
 
 /** An attack waiting for its target's reply (DEC-058): the attacker's seat, the card and the target's seat. */
@@ -155,6 +161,8 @@ export interface RaceBoard {
   skipping?: number[];
   /** The deck's top card, sent only to the player who saw it with Card Vision, until it's drawn (DEC-059). */
   next?: RaceCard;
+  /** Every top card Card Vision shows its player, top first: one, or more from a rarer Tier (STORY-090, DEC-077). */
+  seen?: RaceCard[];
   /** The latest ability used, until another player rolls or uses one (DEC-059). */
   ability?: RaceAbilityUse;
   /** How the race ended, once it's over: a pawn reached the Finish, or the 20-minute cap (STORY-056, DEC-060). */
@@ -309,7 +317,8 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       pawn['tile'] < tiles.length &&
       (pawn['cards'] === undefined || isIndex(pawn['cards'])) &&
       isOptional(pawn['boost'], isIndex) &&
-      isOptional(pawn['shielded'], (shielded) => typeof shielded === 'boolean'),
+      isOptional(pawn['shielded'], (shielded) => typeof shielded === 'boolean') &&
+      isOptional(pawn['blocks'], isIndex),
   );
   const move = state['lastMove'];
   const validMove =
@@ -335,6 +344,7 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
   const ability = state['ability'];
   const validAbility =
     isOptional(state['next'], isCard) &&
+    isOptional(state['seen'], (cards) => Array.isArray(cards) && cards.every(isCard)) &&
     isOptional(
       ability,
       (used) =>
@@ -342,7 +352,9 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
         isIndex(used['seat']) &&
         typeof used['ability'] === 'string' &&
         isOptional(used['target'], isIndex) &&
-        isOptional(used['card'], isCard),
+        isOptional(used['card'], isCard) &&
+        isOptional(used['cards'], (cards) => Array.isArray(cards) && cards.every(isCard)) &&
+        isOptional(used['taken'], isIndex),
     );
   const validCards =
     ['maxHand', 'deck', 'discard'].every((count) => state[count] === undefined || isIndex(state[count])) &&

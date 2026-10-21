@@ -70,23 +70,23 @@ Use stable `gameType` identifiers (`chog-life`, `chog-race`), versioned game con
 - **NFT-002 — Discovery:** retrieve all supported Chog NFTs owned by the connected wallet, including token IDs, images and metadata.
 - **NFT-003 — Cache:** persist normalized NFT metadata and last refresh time; tolerate RPC outages with bounded cache use, but do not treat stale ownership cache as authoritative for match admission.
 - **NFT-004 — Collection UI:** show all owned NFTs, image, token ID and traits; support selecting any eligible NFT.
-- **NFT-005 — Guest characters:** provide default characters with equivalent competitive ability access.
+- **NFT-005 — Guest characters:** provide default characters, which play with each game's standard abilities at Base values (DEC-077 ends the MVP's equal access).
 - **NFT-006 — Multiple ownership:** owning several NFTs allows character choice, not stacked abilities; exactly one character is selected per match.
 - **NFT-007 — Per-game selection:** players may choose a different NFT in each match or each game; selection locks at match start.
 - **NFT-008 — Ownership verification:** verify selected NFT ownership server-side before match start. Do not trust the browser's token list.
 - **NFT-009 — Transfer during match:** snapshot selected NFT and ability at start; an ownership transfer does not disrupt the current match; revalidate before a new match.
 - **NFT-010 — Normalized traits:** store `traitType` and `traitValue` regardless of whether traits currently affect gameplay.
-- **NFT-011 — Collector rewards:** reserve future cosmetic collection milestones, badges and victory effects; no MVP gameplay advantages for larger collections.
+- **NFT-011 — Collector rewards:** cosmetic collection milestones and badges; holding more Chogs never gives a gameplay advantage. The holder advantage (DEC-077) comes from the Chog played, not from how many are held.
 
-## 6. Ability system — approved MVP decision
-**MVP uses Option 2: every player, NFT owner or guest, sees the same ability pool for the selected game and chooses exactly one ability before marking ready.** The selected ability is locked and normally usable once per match. NFT rarity and traits have no effect on eligibility, strength or use count in MVP.
+## 6. Ability system — holder advantage (DEC-077)
+**The MVP's Option 2, one ability pool for everyone, was replaced after launch by the holder advantage (STORY-090–092, DEC-077): everyone chooses from the game's standard abilities and Chog holders from all of them, each with the strength of the Chog's Tier.** Every player still chooses exactly one ability before marking ready; it is locked at start and normally usable once per match.
 
-- **NFT-012 — Strategy abstraction:** define `IAbilityAssignmentStrategy` to resolve eligible ability IDs. Implement `SharedAbilityPoolStrategy` now; reserve `TraitBasedAbilityStrategy` for later.
-- **NFT-013 — Selection:** require exactly one valid game-specific ability before Ready; persist selection in lobby and match snapshot.
+- **NFT-012 — Strategy abstraction:** `IAbilityAssignmentStrategy` resolves the abilities a character may choose and their values. `HolderAbilityStrategy` is the registered one (DEC-077); `SharedAbilityPoolStrategy` (the MVP pool) and the configured `TraitBasedAbilityStrategy` (DEC-066, off) remain.
+- **NFT-013 — Selection:** require exactly one valid game-specific ability from the player's pool before Ready; persist selection in lobby and match snapshot. A non-holder choosing a holder-only ability is refused (`ability_unavailable`).
 - **NFT-014 — Execution:** game-specific ability implementations validate state, target, phase, remaining uses and effect; all effects execute on server.
-- **NFT-015 — Snapshot:** store ability ID, configuration version, parameters, max uses and used count at match start; later configuration edits must not change active matches.
-- **NFT-016 — No stacking:** only the selected ability may be used; other NFTs and traits do not contribute additional effects.
-- **NFT-017 — Future traits:** future resolver may map normalized traits to eligible abilities, choose deterministic fallback, and allow one selected ability; do not implement trait assignment in MVP.
+- **NFT-015 — Snapshot:** store ability ID, configuration version, parameters (the Tier's values), max uses and used count at match start; later catalog or configuration edits must not change active matches.
+- **NFT-016 — No stacking:** only the selected ability may be used; other NFTs and traits do not contribute additional effects. Only the match character's Tier sets its values.
+- **NFT-017 — Holders and Tiers:** a holder is a player whose match character is a Chog they own, checked live at start. Each game has 2 standard abilities, which everyone may choose, and holder-only ones. The Chog's `Tier` trait (Common, Uncommon, Rare, Epic, Legendary) sets the values of whichever ability it chooses; guests, standard Chogs, Common holders and Chogs without a readable Tier play with Base values. The split and the Tier values are configuration (`Abilities:Holder`), checked at startup. Traits never come from a request, and game modules never read them.
 
 **Chog Life MVP ability pool:**
 
@@ -105,6 +105,8 @@ Use stable `gameType` identifiers (`chog-life`, `chog-race`), versioned game con
 | `attack_block` | Shield | Block one eligible incoming attack. |
 | `card_preview` | Card Vision | Privately view the next card in the deck. |
 | `card_steal` | Card Steal | Take one server-random card from an eligible opponent. |
+
+Since DEC-077 these effects are the Base values. Reward Boost, Loss Protection, Shield and Card Vision are standard; Event Preview, Lucky Reroll, Speed Boost and Card Steal are holder-only, and rarer Tiers strengthen every ability (DEC-077's table).
 
 Ability values, activation windows, and per-match limits are configuration-driven. Preview information is private to the player; other players receive only appropriate public state changes.
 
@@ -215,7 +217,7 @@ Persist match results and game-config version; avoid storing full raw event hist
 
 **Multiple NFTs:** Given a verified wallet with several eligible Chogs, when the player opens My Chogs, then all owned NFTs appear and exactly one may be selected for the upcoming match.
 
-**Equal abilities:** Given an NFT owner and a guest in the same Chog Life lobby, when they choose abilities, then both receive the same four available options regardless of NFT traits.
+**Holder abilities:** Given an Epic Chog holder and a guest in the same Chog Life lobby, when they choose abilities, then the guest receives the 2 standard abilities with Base values, the holder all four with the Epic Tier's values, and the guest choosing a holder-only ability is refused (DEC-077; this replaces the MVP's "Equal abilities").
 
 **Ability lock:** Given a player selected Reward Boost and marked Ready, when the match starts, then the chosen ability and versioned parameters are snapshotted and cannot be changed mid-match.
 

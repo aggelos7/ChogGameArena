@@ -550,7 +550,7 @@ export class LifeBoardView {
         : move.saved !== undefined
           ? ` ${yours} Loss Protection saved ${move.saved} MON.`
           : move.rerolled !== undefined
-            ? ` ${yours} Lucky Reroll drew the event twice: it kept ${signedMon(move.change ?? 0)} over ${signedMon(move.rerolled)}.`
+            ? ` ${yours} Lucky Reroll drew the event ${timesDrawn(move.draws ?? 2)}: it kept ${signedMon(move.change ?? 0)} over ${signedMon(move.rerolled)}.`
             : '';
     if (move.change === undefined) {
       return `${who} rolled ${move.roll} and moved to ${where}.${matured}${route}`;
@@ -603,4 +603,9 @@ export class LifeBoardView {
     return what.join(', ');
   }
 
+}
+
+/** How often Lucky Reroll drew: "twice", or "3 times" from a rarer Tier (STORY-090, DEC-077). */
+function timesDrawn(draws: number): string {
+  return draws === 2 ? 'twice' : `${draws} times`;
 }

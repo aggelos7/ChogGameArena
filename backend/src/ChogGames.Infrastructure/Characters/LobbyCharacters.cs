@@ -1,7 +1,6 @@
 using System.Numerics;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Players;
-using ChogGames.Infrastructure.Abilities;
 using ChogGames.Infrastructure.Nfts;
 using ChogGames.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -11,13 +10,12 @@ namespace ChogGames.Infrastructure.Characters;
 
 /// <summary>
 /// The player's selected Chog as stored, for showing and checking their ability pool in the lobby (STORY-033, DEC-035).
-/// Nothing is read from the chain. Traits are included only when trait-based abilities are on (STORY-061, DEC-066):
-/// those the metadata cache stored for the token while the player's wallet held it, or the fixtures' under the mock
-/// provider. At start the pool is checked again with the live snapshot (STORY-018), which is what the match keeps.
+/// Nothing is read from the chain. Its traits, for the holder's Tier (STORY-090, DEC-077), are those the metadata cache
+/// stored for the token while the player's wallet held it, or the fixtures' under the mock provider. At start the pool
+/// is checked again with the live snapshot (STORY-018), which is what the match keeps.
 /// </summary>
 public sealed class LobbyCharacters(
     ChogGamesDbContext db,
-    IOptions<TraitAbilityOptions> traitOptions,
     IOptions<NftOptions> nftOptions,
     TimeProvider timeProvider)
 {
@@ -29,9 +27,7 @@ public sealed class LobbyCharacters(
         IReadOnlyCollection<Player> players, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        var traits = traitOptions.Value.Enabled
-            ? await StoredTraitsAsync([.. players.Where(p => p.SelectedCharacterKind == CharacterKind.Nft)], cancellationToken)
-            : [];
+        var traits = await StoredTraitsAsync([.. players.Where(p => p.SelectedCharacterKind == CharacterKind.Nft)], cancellationToken);
         return players.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => For(p, traits.GetValueOrDefault(p.Id, []), now));
     }
 

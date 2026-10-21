@@ -798,6 +798,7 @@ describe('Chog Race board abilities (STORY-055)', () => {
     description: '',
     target: (id === 'card_steal' ? 'Opponent' : 'None') as RoomAbility['target'],
     maxUses: 1,
+    values: {},
     usesLeft,
   });
   const players = (yours: RoomAbility, yourTurn = true) => [
@@ -908,6 +909,43 @@ describe('Chog Race board abilities (STORY-055)', () => {
     expect(page.querySelector('[data-next-card]')).toBeNull();
     render({ phase: 'Move', ability: { seat: 2, ability: 'attack_block' } }, players(ability('card_preview', 'Card Vision', 0)));
     expect(text('[data-last-ability]')).toBe('Bob used Shield.');
+  });
+
+  it('reads and shows a holder Tier’s stronger abilities (STORY-090)', () => {
+    const tiered = (id: string, name: string, values: Record<string, number>) => ({ ...ability(id, name), values });
+    const board = {
+      ...RACE_BOARD,
+      pawns: [{ seat: 1, tile: 0, cards: 1, shielded: true, blocks: 2 }],
+      seen: ['Whale', 'Pump'],
+      ability: { seat: 1, ability: 'card_steal', target: 2, card: 'Hodl', cards: ['Hodl', 'Rug'], taken: 2 },
+    };
+    expect(toRaceBoard(board)).toBe(board);
+    expect(toRaceBoard({ ...board, seen: ['Joker'] })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, blocks: -1 }] })).toBeNull();
+    expect(toRaceBoard({ ...board, ability: { ...board.ability, taken: 'two' } })).toBeNull();
+
+    render({ phase: 'Move' }, players(tiered('movement_boost', 'Speed Boost', { tiles: 4 })));
+    expect(labels()).toEqual(['Use Speed Boost: +4 to your roll']);
+    render({ phase: 'Move' }, players(tiered('card_preview', 'Card Vision', { cards: 3 })));
+    expect(labels()).toEqual(['Use Card Vision: see the next 3 cards']);
+
+    render(
+      {
+        phase: 'Move',
+        pawns: [{ seat: 1, tile: 5, cards: 1, shielded: true, blocks: 2 }, pawns[1], pawns[2]],
+        seen: ['Whale', 'Pump'],
+        next: 'Whale',
+        ability: { seat: 3, ability: 'card_steal', target: 1, card: 'Hodl', cards: ['Hodl', 'Rug'], taken: 2 },
+      },
+      players(tiered('attack_block', 'Shield', { blocks: 2 }), false),
+    );
+    expect(text('[data-seat="1"] [data-shielded]')).toBe('Shielded ×2');
+    expect(text('[data-ability-status]')).toBe('Raised: it blocks the next 2 Rugs, Liquidateds or Whales played on you.');
+    expect(text('[data-next-card]')).toBe('Next 2 cards in the deck: Whale, then Pump. Only you can see this.');
+    expect(text('[data-last-ability]')).toBe('Carol used Card Steal and took HODL and Rug from you.');
+
+    render({ phase: 'Move', ability: { seat: 3, ability: 'card_steal', target: 2, taken: 2 } }, players(ability('card_preview', 'Card Vision', 0)));
+    expect(text('[data-last-ability]')).toBe('Carol used Card Steal and took 2 cards from Bob.');
   });
 
   it('always shows your ability, its uses left and why it can’t be used now', () => {

@@ -87,6 +87,11 @@ public sealed class AbilityCatalog
             {
                 throw new ArgumentException($"The {gameType} catalog has two handlers for {handler.AbilityId}.", nameof(handlers));
             }
+
+            if (handler.Parameters.FirstOrDefault(p => p.Default is { } value && (value < p.Min || value > p.Max)) is { } parameter)
+            {
+                throw new ArgumentException($"The {gameType} handler for {handler.AbilityId} has a default {parameter.Name} outside its range.", nameof(handlers));
+            }
         }
 
         var abilities = new Dictionary<string, (AbilityDefinition, IAbilityHandler)>(StringComparer.Ordinal);
@@ -114,11 +119,46 @@ public sealed class AbilityCatalog
     }
 
     /// <summary>
+    /// Whether <paramref name="ability"/> is one of this catalog's abilities, as defined here or with other values within
+    /// its handler's ranges, such as a holder Tier's (STORY-090, DEC-077): the same id, name, description, target and
+    /// windows. What <see cref="AbilityPool"/> offers and <see cref="AbilitySnapshot.Lock"/> locks.
+    /// </summary>
+    public bool Allows(AbilityDefinition ability) =>
+        ability is not null
+        && TryFind(ability.Id, out var defined, out var handler)
+        && (defined.Name, defined.DescriptionTemplate, defined.Target) == (ability.Name, ability.DescriptionTemplate, ability.Target)
+        && defined.Windows.SequenceEqual(ability.Windows)
+        && Fits(ability, handler);
+
+    /// <summary>
     /// Whether <paramref name="definition"/> configures exactly the parameters <paramref name="handler"/> declares, each
     /// within range; how the engine checks a locked ability against the handler running it now (DEC-036).
     /// </summary>
     internal static bool Fits(AbilityDefinition definition, IAbilityHandler handler) =>
         ParameterProblem(definition, handler) is null;
+
+    /// <summary>
+    /// <paramref name="locked"/> with the default of each parameter its handler declares now and it doesn't configure: how
+    /// an ability locked before a parameter existed keeps working after the deploy that adds it (STORY-090).
+    /// </summary>
+    internal static AbilityDefinition WithDefaults(AbilityDefinition locked, IAbilityHandler handler)
+    {
+        var missing = handler.Parameters
+            .Where(p => p.Default is not null && !locked.Parameters.ContainsKey(p.Name))
+            .ToList();
+        if (missing.Count == 0)
+        {
+            return locked;
+        }
+
+        var values = locked.Parameters.ToDictionary(StringComparer.Ordinal);
+        foreach (var parameter in missing)
+        {
+            values[parameter.Name] = parameter.Default!.Value;
+        }
+
+        return locked.WithValues(values, locked.MaxUses);
+    }
 
     private static void CheckParameters(string gameType, AbilityDefinition definition, IAbilityHandler handler)
     {

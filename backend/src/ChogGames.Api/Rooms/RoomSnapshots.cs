@@ -86,7 +86,7 @@ public sealed class RoomSnapshots(
             .Select(m =>
             {
                 var player = players[m.PlayerId];
-                var ability = AbilityOf(room, m);
+                var ability = AbilityOf(room, m, lobby);
                 var photo = player.AvatarImageId is { } imageId && (m.PlayerId == viewerId || !hiddenImages.Contains(imageId))
                     ? imageId
                     : (Guid?)null;
@@ -143,22 +143,30 @@ public sealed class RoomSnapshots(
     }
 
     /// <summary>
-    /// The member's ability: the one locked at start, or their choice while waiting if the game still defines it. Who
-    /// may see it is decided by the caller.
+    /// The member's ability: the one locked at start, with its locked values, or their choice while waiting if the game
+    /// still defines it, with the values their pool gives it when they are a viewer (DEC-077). Who may see it is decided
+    /// by the caller.
     /// </summary>
-    private RoomAbilityResponse? AbilityOf(GameRoom room, RoomMember member)
+    private RoomAbilityResponse? AbilityOf(GameRoom room, RoomMember member, IReadOnlyDictionary<Guid, CharacterSnapshot> lobby)
     {
         if (member.Ability is { } locked)
         {
-            return new RoomAbilityResponse(locked.Id, locked.Name, locked.Description, locked.Target, locked.MaxUses, member.AbilityUsesLeft);
+            return new RoomAbilityResponse(
+                locked.Id, locked.Name, locked.Description, locked.Target, locked.MaxUses, locked.Parameters, member.AbilityUsesLeft);
         }
 
-        return room.Status == RoomStatus.Waiting
-            && member.AbilityId is { } chosen
-            && abilityEngine.CatalogFor(room.GameType) is { } catalog
-            && catalog.TryFind(chosen, out var definition, out _)
-                ? ToAbility(definition)
-                : null;
+        if (room.Status != RoomStatus.Waiting
+            || member.AbilityId is not { } chosen
+            || abilityEngine.CatalogFor(room.GameType) is not { } catalog
+            || !catalog.TryFind(chosen, out var definition, out _))
+        {
+            return null;
+        }
+
+        var offered = lobby.TryGetValue(member.PlayerId, out var character)
+            ? abilityPool.For(room.GameType, character).FirstOrDefault(a => a.Id == chosen)
+            : null;
+        return ToAbility(offered ?? definition);
     }
 
     /// <summary>What the viewer may choose from while the room waits: their pool for the Chog they have selected.</summary>
@@ -173,7 +181,7 @@ public sealed class RoomSnapshots(
     }
 
     private static RoomAbilityResponse ToAbility(AbilityDefinition ability) =>
-        new(ability.Id, ability.Name, ability.Description, ability.Target, ability.MaxUses);
+        new(ability.Id, ability.Name, ability.Description, ability.Target, ability.MaxUses, ability.Parameters);
 
     /// <summary>
     /// The selected Chog as stored; ownership is checked when the host starts, not here. A retired standard Chog

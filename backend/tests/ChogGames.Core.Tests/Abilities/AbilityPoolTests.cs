@@ -114,18 +114,36 @@ public class AbilityPoolTests
     [Fact]
     public void The_pool_never_offers_more_than_the_catalog_whatever_the_strategy_returns()
     {
-        var forged = AbilityDefinition.Create(
-            "boost", "Boost", "Raise the pending reward.", AbilityTargetKind.None, ["before_reward"],
-            new Dictionary<string, decimal> { ["percent"] = 100 }, maxUses: 10);
+        var outOfRange = Boost(percent: 51);
+        var retargeted = AbilityDefinition.Create(
+            "steal", "Steal", "Take a random card from an opponent.", AbilityTargetKind.None, ["own_turn", "before_reward"]);
         var foreign = AbilityDefinition.Create("shield", "Shield", "Block one attack.", AbilityTargetKind.None, ["incoming_attack"]);
-        var pool = new AbilityPool(new AbilityEngine([Catalog()]), new FixedStrategy([foreign, Steal(), forged, Steal(), null!]));
+        var catalog = Catalog(new BoostHandler(maxPercent: 50));
+        var pool = new AbilityPool(new AbilityEngine([catalog]), new FixedStrategy([foreign, outOfRange, retargeted, Steal(), Steal(maxUses: 3), null!]));
 
         var offered = pool.For(GameType, Guest());
 
-        Assert.Equal(["boost", "steal"], Ids(offered));
-        Assert.Equal(25, offered[0].Parameters["percent"]);
+        Assert.Equal(["steal"], Ids(offered));
         Assert.Equal(1, offered[0].MaxUses);
+        Assert.Equal(AbilityTargetKind.Opponent, offered[0].Target);
         Assert.False(pool.Offers(GameType, Guest(), "shield"));
+        Assert.False(pool.Offers(GameType, Guest(), "boost"));
+    }
+
+    [Fact]
+    public void The_pool_keeps_a_strategys_values_within_the_handlers_ranges()
+    {
+        var stronger = Boost(percent: 40).WithValues(new Dictionary<string, decimal> { ["percent"] = 40 }, maxUses: 2);
+        var pool = new AbilityPool(new AbilityEngine([Catalog()]), new FixedStrategy([stronger]));
+
+        var offered = Assert.Single(pool.For(GameType, Guest()));
+        var locked = pool.Lock(GameType, Guest(), "boost")!;
+
+        Assert.Equal(40, offered.Parameters["percent"]);
+        Assert.Equal(2, offered.MaxUses);
+        Assert.Equal(40, locked.Parameters["percent"]);
+        Assert.Equal(2, locked.MaxUses);
+        Assert.Equal(1, locked.CatalogVersion);
     }
 
     [Fact]

@@ -14,7 +14,8 @@ namespace ChogGames.Games.ChogRace.Tests;
 /// Boost adds 2 tiles to that turn's roll. Shield stays up, for all to see, until it blocks the next Rug, Liquidated or
 /// Whale aimed at its player, at once and with their HODL kept. Card Vision shows only its player the deck's top card
 /// until a draw. Card Steal moves a random card from an opponent's hand into the player's, which needs room; only the two
-/// of them see which card.
+/// of them see which card. STORY-090, DEC-077: with a holder Tier's locked values, Speed Boost adds more tiles, Shield
+/// blocks more attacks, Card Vision shows more cards and Card Steal takes more.
 /// </summary>
 public class ChogRaceAbilityTests
 {
@@ -46,8 +47,20 @@ public class ChogRaceAbilityTests
     }
 
     /// <summary>A started match of <paramref name="abilities"/>.Length players, seat n having locked abilities[n - 1].</summary>
-    private static (GameRoom Room, Player[] Players) Started(params string[] abilities)
+    private static (GameRoom Room, Player[] Players) Started(params string[] abilities) =>
+        StartedWith([.. abilities.Select(id => Catalog.Definitions.Single(d => d.Id == id))]);
+
+    /// <summary>The catalog's ability with a holder Tier's <paramref name="values"/> (STORY-090, DEC-077).</summary>
+    private static AbilityDefinition Tiered(string id, string name, decimal value)
     {
+        var defined = Catalog.Definitions.Single(d => d.Id == id);
+        return defined.WithValues(new Dictionary<string, decimal> { [name] = value }, defined.MaxUses);
+    }
+
+    /// <summary>A started match where seat n locked <paramref name="definitions"/>[n - 1], with its values.</summary>
+    private static (GameRoom Room, Player[] Players) StartedWith(params AbilityDefinition[] definitions)
+    {
+        var abilities = definitions.Select(d => d.Id).ToArray();
         var players = abilities.Select((_, i) =>
         {
             Assert.True(PlayerDisplayName.TryCreate($"Player {i + 1}", out var name));
@@ -74,13 +87,10 @@ public class ChogRaceAbilityTests
             TimeSpan.FromSeconds(20),
             random,
             Now.AddMinutes(1),
-            players.Select((p, i) => (p.Id, Snapshot: Locked(abilities[i]))).ToDictionary(p => p.Id, p => p.Snapshot),
+            players.Select((p, i) => (p.Id, Snapshot: AbilitySnapshot.Lock(Catalog, definitions[i]))).ToDictionary(p => p.Id, p => p.Snapshot),
             started => Rules.StartState(new MatchStartContext(started, random))?.GetRawText());
         return (room, players);
     }
-
-    private static AbilitySnapshot Locked(string id) =>
-        AbilitySnapshot.Lock(Catalog, Catalog.Definitions.Single(d => d.Id == id));
 
     private static AbilityResult Use(GameRoom room, Player player, string state, int? target = null, IRandomSource? random = null)
     {
@@ -145,7 +155,7 @@ public class ChogRaceAbilityTests
     [Fact]
     public void The_catalog_offers_the_four_race_abilities_with_their_windows()
     {
-        Assert.Equal((GameDefinition.ChogRace, 1), (Catalog.GameType, Catalog.Version));
+        Assert.Equal((GameDefinition.ChogRace, 2), (Catalog.GameType, Catalog.Version));
         Assert.Equal(
             [
                 ("movement_boost", "Speed Boost", AbilityTargetKind.None, "before_roll"),
@@ -155,7 +165,9 @@ public class ChogRaceAbilityTests
             ],
             Catalog.Definitions.Select(d => (d.Id, d.Name, d.Target, string.Join(",", d.Windows))));
         Assert.All(Catalog.Definitions, d => Assert.Equal(1, d.MaxUses));
-        Assert.Equal(2m, Catalog.Definitions[0].Parameters[RaceAbilities.Tiles]);
+        Assert.Equal(
+            ["tiles=2", "blocks=1", "cards=1", "cards=1"],
+            Catalog.Definitions.Select(d => string.Join(",", d.Parameters.Select(p => $"{p.Key}={p.Value}"))));
     }
 
     [Fact]
@@ -287,6 +299,114 @@ public class ChogRaceAbilityTests
     }
 
     [Fact]
+    public void An_epic_speed_boost_moves_its_locked_tiles()
+    {
+        var (room, players) = StartedWith(Tiered(RaceAbilities.MovementBoost, RaceAbilities.Tiles, 4), Catalog.Definitions[1]);
+        var boosted = Used(room, players[0], State([0, 0]));
+
+        Assert.Equal(4, PawnView(room, players[1], boosted, 1).GetProperty("boost").GetInt32());
+        var rolled = Apply(room, players[0], ChogRaceMatchRules.Roll, boosted, new Dice(1));
+
+        // 1 + 4 lands on tile 5.
+        Assert.Equal(
+            """{"seat":1,"roll":1,"from":0,"landed":5,"to":5,"boost":4}""",
+            rolled.State!.Value.GetProperty("lastMove").GetRawText());
+    }
+
+    [Fact]
+    public void A_rare_shield_blocks_two_attacks_then_is_spent()
+    {
+        var (room, players) = StartedWith(Tiered(RaceAbilities.AttackBlock, RaceAbilities.Blocks, 2), Catalog.Definitions[3]);
+        var shielded = Used(room, players[0], State([8, 3], [["Hodl"], ["Rug", "Rug"]], playPhase: 1));
+        Assert.Equal(2, Pawn(shielded, 1).GetProperty("blocks").GetInt32());
+        Assert.Equal(2, PawnView(room, players[1], shielded, 1).GetProperty("blocks").GetInt32());
+
+        // Seat 2 rolled onto tile 5 and plays Rug on seat 1, twice over two turns.
+        var first = Apply(
+            room, players[1], ChogRaceMatchRules.PlayCard,
+            State([8, 5], [["Hodl"], ["Rug", "Rug"]], playPhase: 2, pawnExtra: ",\"shielded\":true,\"blocks\":2"),
+            new Dice(), """{"card":"Rug","target":1}""").State!.Value.GetRawText();
+        Assert.Equal((8, true, 1), (Pawn(first, 1).GetProperty("tile").GetInt32(), Pawn(first, 1).GetProperty("shielded").GetBoolean(), Pawn(first, 1).GetProperty("blocks").GetInt32()));
+        Assert.Equal(1, PawnView(room, players[0], first, 1).GetProperty("blocks").GetInt32());
+
+        var second = Apply(
+            room, players[1], ChogRaceMatchRules.PlayCard,
+            State([8, 5], [["Hodl"], ["Rug"]], playPhase: 2, pawnExtra: ",\"shielded\":true,\"blocks\":1"),
+            new Dice(), """{"card":"Rug","target":1}""").State!.Value.GetRawText();
+        Assert.Equal(8, Pawn(second, 1).GetProperty("tile").GetInt32());
+        Assert.False(Pawn(second, 1).TryGetProperty("shielded", out _));
+        Assert.False(Pawn(second, 1).TryGetProperty("blocks", out _));
+        Assert.Equal("Shielded", JsonDocument.Parse(second).RootElement.GetProperty("lastMove").GetProperty("play").GetProperty("reply").GetString());
+    }
+
+    [Fact]
+    public void A_shield_raised_before_tier_values_blocks_once()
+    {
+        var (room, players) = Started(RaceAbilities.CardSteal, RaceAbilities.AttackBlock);
+        var state = State([5, 9], [["Rug"], []], playPhase: 1).Replace("{\"seat\":2,\"tile\":9}", "{\"seat\":2,\"tile\":9,\"shielded\":true}");
+
+        var after = Apply(room, players[0], ChogRaceMatchRules.PlayCard, state, new Dice(), """{"card":"Rug","target":2}""").State!.Value.GetRawText();
+
+        Assert.False(Pawn(after, 2).TryGetProperty("shielded", out _));
+    }
+
+    [Fact]
+    public void A_legendary_card_vision_shows_the_top_three_cards_until_a_draw()
+    {
+        var (room, players) = StartedWith(Tiered(RaceAbilities.CardPreview, RaceAbilities.Cards, 3), Catalog.Definitions[1]);
+        var seen = Used(room, players[0], State([0, 1], deck: ["Whale", "Pump", "Rug", "Hodl"]));
+
+        Assert.Equal("Whale", View(room, players[0], seen).GetProperty("next").GetString());
+        Assert.Equal(["Whale", "Pump", "Rug"], Cards(View(room, players[0], seen).GetProperty("seen")));
+        Assert.False(View(room, players[1], seen).TryGetProperty("seen", out _));
+
+        var drawn = Apply(room, players[1], ChogRaceMatchRules.Roll, seen, new Dice(1)).State!.Value.GetRawText();
+        Assert.False(View(room, players[0], drawn).TryGetProperty("seen", out _));
+        Assert.False(Pawn(drawn, 1).TryGetProperty("seesCards", out _));
+    }
+
+    [Fact]
+    public void A_short_deck_shows_only_the_cards_it_has()
+    {
+        var (room, players) = StartedWith(Tiered(RaceAbilities.CardPreview, RaceAbilities.Cards, 3), Catalog.Definitions[1]);
+        var seen = Used(room, players[0], State([0, 0], deck: ["Pump"]));
+
+        Assert.Equal(["Pump"], Cards(View(room, players[0], seen).GetProperty("seen")));
+    }
+
+    [Fact]
+    public void An_epic_card_steal_takes_two_cards_seen_only_by_the_two_players()
+    {
+        var (room, players) = StartedWith(Tiered(RaceAbilities.CardSteal, RaceAbilities.Cards, 2), Catalog.Definitions[1], Catalog.Definitions[2]);
+        var dice = new Dice(1, 0);
+        var stolen = Used(room, players[0], State([0, 0, 0], [[], ["Rug", "Hodl", "Fomo"], []]), target: 2, random: dice);
+
+        Assert.Equal([(0, 3), (0, 2)], dice.Draws);
+        Assert.Equal(["Hodl", "Rug"], HandOf(stolen, 1));
+        Assert.Equal(["Fomo"], HandOf(stolen, 2));
+        Assert.Equal(
+            """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl","cards":["Hodl","Rug"],"taken":2}""",
+            View(room, players[1], stolen).GetProperty("ability").GetRawText());
+        Assert.Equal(
+            """{"seat":1,"ability":"card_steal","target":2,"taken":2}""",
+            View(room, players[2], stolen).GetProperty("ability").GetRawText());
+    }
+
+    [Fact]
+    public void Card_steal_takes_no_more_than_the_target_holds_or_the_hand_has_room_for()
+    {
+        var (room, players) = StartedWith(Tiered(RaceAbilities.CardSteal, RaceAbilities.Cards, 2), Catalog.Definitions[1]);
+
+        var fromOne = Used(room, players[0], State([0, 0], [[], ["Rug"]]), target: 2, random: new Dice(0));
+        Assert.Equal(["Rug"], HandOf(fromOne, 1));
+
+        // A hand of 3 holds 2 already: room for one more.
+        var roomForOne = Used(room, players[0], State([0, 0], [["Pump", "Fomo"], ["Rug", "Hodl"]]), target: 2, random: new Dice(1));
+        Assert.Equal(["Pump", "Fomo", "Hodl"], HandOf(roomForOne, 1));
+        Assert.Equal(["Rug"], HandOf(roomForOne, 2));
+    }
+
+    [Fact]
     public void Card_vision_needs_a_card_in_the_deck()
     {
         var (room, players) = Started(RaceAbilities.CardPreview, RaceAbilities.AttackBlock);
@@ -306,13 +426,13 @@ public class ChogRaceAbilityTests
         Assert.Equal(["Pump", "Hodl"], HandOf(stolen, 1));
         Assert.Equal(["Rug", "Fomo"], HandOf(stolen, 2));
         Assert.Equal(
-            """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl"}""",
+            """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl","cards":["Hodl"],"taken":1}""",
             View(room, players[0], stolen).GetProperty("ability").GetRawText());
         Assert.Equal(
-            """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl"}""",
+            """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl","cards":["Hodl"],"taken":1}""",
             View(room, players[1], stolen).GetProperty("ability").GetRawText());
         Assert.Equal(
-            """{"seat":1,"ability":"card_steal","target":2}""",
+            """{"seat":1,"ability":"card_steal","target":2,"taken":1}""",
             View(room, players[2], stolen).GetProperty("ability").GetRawText());
         Assert.Equal([2, 2, 0], View(room, players[2], stolen).GetProperty("pawns").EnumerateArray().Select(p => p.GetProperty("cards").GetInt32()));
     }

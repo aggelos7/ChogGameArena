@@ -400,3 +400,31 @@ Record every decision with: ID, date, status, question, decision, rationale, imp
   - **What each move did:** once a move's die and hops are over, the board tells it three ways: a banner over the board for 2.6 s (who did what, and what came of it: "Alice rolled 4" / "Airdrop! +25 MON", green for good, red for bad), a popup floating up from the tile it stopped on ("+25 MON", "−2 tiles", "Card!", "Winner!"), and a "Recent moves" list in the side panel with the last 5 moves seen on the page (kept in the browser only, so it starts with the current move after a reload). The last-move line now waits for the die and hops too, so it no longer gives the roll away, and is a live region for screen readers. The first board shows no banner; with reduced motion a move is told at once. A banner, a log or a popup alone were offered; the product owner chose all three.
   - **Last move before the results:** when a match you're playing ends, the live board stays until it has shown the last move (the die, then the pawn or car hopping onto the finish) before the results and final board take its place; the ending line and the Leave button wait too, and the match music crossfades back to the theme after. At most 10 s, and at once when the last snapshot has no move to show (time up).
   - **Control:** one speaker toggle in the header (`aria-pressed`, labelled "Sound") for all music and sounds, remembered on the device (`localStorage` `chogKingdom.musicMuted`). A volume slider was offered and not chosen.
+- DEC-077 (2026-10-21, STORY-090–092 — confirmed by product owner): Holder abilities and Tier strength.
+  - **Why:** owning a Chog should mean something in a match. This ends ability parity between holders and everyone else (it supersedes the MVP parity of DEC-008, NFT-011–017 and the "Equal abilities" acceptance test, and replaces `SharedAbilityPoolStrategy` as the registered strategy of DEC-033). DEC-066's configured trait rules stay in the code, off, and are not used.
+  - **Holder:** a player whose match character is a Chog NFT they own, checked live on chain at match start as today (NFT-003, DEC-035). The Tier comes from that Chog's `Tier` trait. A holder who picks a standard Chog, a guest and a Chog without a readable Tier play as non-holders (Base values). Owning other Chogs doesn't count; any-wallet holding was offered and not chosen.
+  - **Pools:** each game has 6 abilities. Everyone may choose from the 2 standard ones; holders choose from all 6 (the 2 standard plus 4 holder-only). One ability per match, as before.
+    - **Chog Life:** standard Reward Boost and Loss Protection; holder-only Event Preview, Lucky Reroll, Double Dice and Tax the Rich (new, STORY-091).
+    - **Chog Race:** standard Shield and Card Vision; holder-only Speed Boost, Card Steal, Double Dice and Freeze (new, STORY-092).
+    - Chog Royale's split is decided with its abilities (STORY-080); ROYALE-037 is revisited then.
+  - **Tier strength:** rarer Tiers get stronger effects of whichever ability they choose, standard ones included. Collection facts (sample of 300 of 1969 tokens, 2026-10-21): Common 68%, Uncommon 27%, Rare 3%, Epic 1%, Legendary rare (1:1s). Defaults, where Base is guests, standard Chogs and Common holders:
+
+    | Ability | Value | Base | Uncommon | Rare | Epic | Legendary |
+    |---|---|---|---|---|---|---|
+    | Reward Boost | gain added | 25% | 30% | 35% | 40% | 50% |
+    | Loss Protection | loss kept | 50% | 45% | 40% | 35% | 25% |
+    | Event Preview | uses | 1 | 1 | 1 | 2 | 2 |
+    | Lucky Reroll | draws, best kept | 2 | 2 | 3 | 3 | 3 |
+    | Double Dice (Life) | dice, one kept | 2 | 2 | 3 | 3 | 3 |
+    | Tax the Rich | of the richest opponent's MON | 10% | 12% | 15% | 18% | 20% |
+    | Shield | attacks blocked | 1 | 1 | 2 | 2 | 2 |
+    | Card Vision | top cards seen | 1 | 1 | 2 | 2 | 3 |
+    | Speed Boost | extra tiles | 2 | 3 | 3 | 4 | 4 |
+    | Card Steal | cards taken | 1 | 1 | 1 | 2 | 2 |
+    | Double Dice (Race) | dice, one kept | 2 | 2 | 3 | 3 | 3 |
+    | Freeze | uses | 1 | 1 | 1 | 2 | 2 |
+
+  - **Configuration:** the split and the Tier values live in config (`Abilities:Holder`), checked at API startup against each catalog's parameter ranges (a bad value stops the API), so they can be retuned without a release; versioned code was offered and not chosen. The values are locked into the ability snapshot at match start (DEC-035), so a change never alters a running match.
+  - **Visibility:** in the match only: the ability panel shows the locked ability with its values and uses. The lobby lists the abilities the selected character may choose, as today; My Chogs and the character picker show no perk. Showing it everywhere was offered and not chosen.
+  - **Boundary:** traits still never come from a request, and game modules and the shared engine folders still never read them: the strategy reads the Tier and hands the games definitions with values, as DEC-034 requires.
+  - **Alternatives offered:** extra uses for every holder, holder-only abilities alone, a head start; Tier unlocking more abilities, more uses by Tier; Tier-free holder advantage, operator trait maps. The product owner chose 2 standard abilities, 4 holder abilities (2 existing, 2 new) and Tier-scaled effects.

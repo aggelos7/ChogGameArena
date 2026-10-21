@@ -68,8 +68,14 @@ public enum RoomOutcome
     /// <summary>The member chose an ability (or already had that one); a different choice made them not ready (DEC-035).</summary>
     AbilitySelected,
 
-    /// <summary>The ability isn't one the player's pool offers for this game, or the game has no abilities; nothing changed.</summary>
+    /// <summary>The game has no ability with this id, or no abilities at all; nothing changed.</summary>
     UnknownAbility,
+
+    /// <summary>
+    /// The game has the ability, but the player's pool doesn't offer it, such as a holder-only one for a guest (STORY-090,
+    /// DEC-077); nothing changed.
+    /// </summary>
+    AbilityNotOffered,
 
     /// <summary>The game has abilities and the member hasn't chosen one their pool offers, so they can't be ready.</summary>
     AbilityRequired,

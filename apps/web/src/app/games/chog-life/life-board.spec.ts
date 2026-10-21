@@ -724,6 +724,7 @@ describe('Chog Life board', () => {
       description: `${name} does its thing.`,
       target: 'None' as const,
       maxUses: 1,
+      values: {},
       usesLeft,
     });
     const boost = ability('reward_boost', 'Reward Boost');
@@ -855,6 +856,7 @@ describe('Chog Life board', () => {
       [{ change: -8, saved: 7 }, 'You rolled 1, landed on tile 1 (+20 MON) and lost 8 MON. Your Loss Protection saved 7 MON.'],
       [{ change: 10, rerolled: -10 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 10 MON. Your Lucky Reroll drew the event twice: it kept +10 MON over −10 MON.'],
       [{ change: 25, rerolled: 10 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 25 MON. Your Lucky Reroll drew the event twice: it kept +25 MON over +10 MON.'],
+      [{ change: 10, rerolled: -10, draws: 3 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 10 MON. Your Lucky Reroll drew the event 3 times: it kept +10 MON over −10 MON.'],
     ])('says what an ability did to the move', (effect, text) => {
       render({ ...FORK_BOARD, lastMove: { seat: 1, roll: 1, from: 0, to: 1, path: [1], ...effect } }, [
         member('Alice', 1, { isYou: true }),
