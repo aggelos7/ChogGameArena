@@ -1103,7 +1103,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-070 — Simultaneous rounds in the shared engine
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Add a round mode to the shared match engine next to turns, chosen by a game's rules: every player still playing may act in the same round until its deadline; a player's submission is private, can be revised, and can be locked; the round resolves once, at the deadline or as soon as every player has locked, with the rules' default for anyone who didn't submit. Submissions must not make other players' commands stale; the room shows only who has submitted. Timers, missed rounds and the time cap run on the server whether clients are connected or not (ROYALE-004–008, 026, 031, 052, 061). Chog Life and Chog Race keep their turns unchanged.
@@ -1116,7 +1116,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-071 — Royale configuration, match state and rounds
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Add the Chog Royale game module with versioned rules checked at API startup: 2–6 players, five rounds, round phases (event announcement, decisions, reveal) with their durations, 100 fictional MON each, integer balances that never go below zero, and the match's time cap (ROYALE-001–004, 010–012, 053–056, 059). A match records its rules version. Every action is HODL for now, so a match plays its five rounds to the end. Catalogue status comes from `CHOG_ROYALE_STATUS` (default `ComingSoon`). The lobby, Chog choice and ability choice are the suite's own.
@@ -1129,7 +1129,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-072 — Hidden actions, HODL and timeouts
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Add the round's actions: play a card from your hand (with a target for targeted cards), or HODL, revisable until you lock or the deadline passes; a player without an action at the deadline HODLs (ROYALE-005–008, 016–018, 048, 057, 060–061). HODL plays no card, uses no ability and keeps the hand. Each player's view shows their own pending action; others see only who has submitted until the reveal.
@@ -1142,7 +1142,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-073 — Royale deck and hands
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** A versioned, weighted deck in the rules; each player is dealt three cards with match-unique card ids from server randomness, a played card is replaced after the round except after round five, and HODL keeps the hand (ROYALE-015–020, 062).
@@ -1155,7 +1155,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-074 — Round resolution and ledger
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Resolve a locked round in the documented phase order (snapshot, Chaos, defenses, gains, Rugs, swaps, market effects, clamp), with seat priority rotated each round, against a snapshot taken before any effect (ROYALE-026–032). Each round adds a ledger entry per player (card, target, defense, market effect, change, resulting balance) to the match state and the reveal. Card effects are placeholders until STORY-075.

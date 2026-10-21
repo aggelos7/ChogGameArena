@@ -4,12 +4,14 @@ using System.Text.Json;
 using System.Threading.Channels;
 using ChogGames.Api.ChogLife;
 using ChogGames.Api.ChogRace;
+using ChogGames.Api.ChogRoyale;
 using ChogGames.Api.Matches;
 using ChogGames.Api.Realtime;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Matches;
 using ChogGames.Games.ChogLife;
 using ChogGames.Games.ChogRace;
+using ChogGames.Games.ChogRoyale;
 using ChogGames.Infrastructure.Matches;
 using ChogGames.Infrastructure.Rooms;
 using Microsoft.AspNetCore.Authentication;
@@ -490,18 +492,29 @@ public sealed class CrossGameTests(MigratedPostgresDatabase database) : IClassFi
         }
 
         Assert.Equal(
-            ["chog-life", "chog-race"],
+            ["chog-life", "chog-race", "chog-royale"],
             factory.Services.GetServices<IMatchRules>().Select(rules => rules.GameType).Order());
     }
 
     [Theory]
     [InlineData("chog-life")]
     [InlineData("chog-race")]
+    [InlineData("chog-royale")]
     public void A_game_module_adds_only_its_rules_and_ability_catalog(string game)
     {
         var services = new ServiceCollection();
-        var module = game == "chog-life" ? typeof(ChogLifeMatchRules).Assembly : typeof(ChogRaceMatchRules).Assembly;
-        _ = game == "chog-life" ? services.AddChogLife() : services.AddChogRace();
+        var module = game switch
+        {
+            "chog-life" => typeof(ChogLifeMatchRules).Assembly,
+            "chog-race" => typeof(ChogRaceMatchRules).Assembly,
+            _ => typeof(ChogRoyaleMatchRules).Assembly,
+        };
+        _ = game switch
+        {
+            "chog-life" => services.AddChogLife(),
+            "chog-race" => services.AddChogRace(),
+            _ => services.AddChogRoyale(),
+        };
 
         Assert.NotEmpty(services);
         Assert.All(services, d => Assert.True(

@@ -52,6 +52,15 @@ public enum MatchCommandOutcome
 
     /// <summary>The game's rules refused the command now; see <see cref="MatchCommandResult.Reason"/>.</summary>
     Rejected,
+
+    /// <summary>The round hasn't opened for submissions yet (STORY-070, DEC-081).</summary>
+    RoundNotOpen,
+
+    /// <summary>The round's deadline passed; it is about to resolve (DEC-081).</summary>
+    RoundClosed,
+
+    /// <summary>The player locked their submission for this round (DEC-081).</summary>
+    ActionLocked,
 }
 
 /// <param name="Action">For <c>Applied</c> and <c>Replayed</c>: the recorded action, with the version it produced.</param>
@@ -73,7 +82,9 @@ public sealed record MatchCommandResult(
 /// and updates the players' stats in the same transaction, so results are recorded exactly once (STORY-028, DEC-030).
 /// The rules draw every outcome from the server's <see cref="IRandomSource"/>, never from the payload (STORY-029, DEC-031).
 /// <c>USE_ABILITY</c> goes to the shared <see cref="AbilityEngine"/> instead of the rules: under the same lock and checks,
-/// a use is applied and counted once, and a refused one changes nothing (STORY-034, DEC-036).
+/// a use is applied and counted once, and a refused one changes nothing (STORY-034, DEC-036). In a match played in rounds
+/// (STORY-070, DEC-081) every player still playing submits while the round is open, and the submission that locks the
+/// round last resolves it in the same transaction.
 /// </summary>
 public sealed class MatchCommandService(
     ChogGamesDbContext db,
@@ -129,6 +140,12 @@ public sealed class MatchCommandService(
                 return new MatchCommandResult(MatchCommandOutcome.TurnExpired);
             case MatchCommandProblem.TimeUp:
                 return new MatchCommandResult(MatchCommandOutcome.TimeUp);
+            case MatchCommandProblem.RoundNotOpen:
+                return new MatchCommandResult(MatchCommandOutcome.RoundNotOpen);
+            case MatchCommandProblem.RoundClosed:
+                return new MatchCommandResult(MatchCommandOutcome.RoundClosed);
+            case MatchCommandProblem.ActionLocked:
+                return new MatchCommandResult(MatchCommandOutcome.ActionLocked);
         }
 
         using var state = room.State is null ? null : JsonDocument.Parse(room.State);
@@ -156,6 +173,11 @@ public sealed class MatchCommandService(
             throw new InvalidOperationException($"The {room.GameType} rules accepted {command.Type} without a JSON object state.");
         }
 
+        if (room.Play == MatchPlay.Rounds)
+        {
+            return await SubmitAsync(room, player, command, decision, newState, gameRules, now, transaction, cancellationToken);
+        }
+
         var action = room.ApplyCommand(
             player.Id,
             command,
@@ -172,6 +194,34 @@ public sealed class MatchCommandService(
             await db.RecordStatsAsync(room, progression.Value.Xp.ToRules(), cancellationToken);
         }
 
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new MatchCommandResult(MatchCommandOutcome.Applied, action, room.Version);
+    }
+
+    /// <summary>
+    /// Stores a round mode's submission (DEC-081); when it was the last lock the round resolves now, in the same
+    /// transaction, instead of waiting for its deadline.
+    /// </summary>
+    private async Task<MatchCommandResult> SubmitAsync(
+        GameRoom room,
+        Player player,
+        MatchCommand command,
+        MatchRuleDecision decision,
+        JsonElement newState,
+        IMatchRules gameRules,
+        DateTimeOffset now,
+        IDbContextTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (decision.EndsTurn || decision.Standings is not null || decision.AwaitsReplyFrom is not null || decision.SkipsNextTurnOf is not null)
+        {
+            throw new InvalidOperationException($"The {room.GameType} rules answered a round's {command.Type} with a turn's decision.");
+        }
+
+        var action = room.ApplySubmission(player.Id, command, newState.GetRawText(), decision.Locks, now);
+        db.MatchActions.Add(action);
+        await MatchRounds.ResolveIfDueAsync(db, room, gameRules, random, now, progression.Value, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new MatchCommandResult(MatchCommandOutcome.Applied, action, room.Version);

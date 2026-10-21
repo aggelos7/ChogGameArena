@@ -23,6 +23,8 @@ public sealed record TimedOutTurn(string Code, Guid? ForfeitedPlayerId);
 /// the first sweep after it starts, and the next turn gets a full timeout from then. The same sweep ends matches whose time
 /// is up or whose players have all finished (STORY-041, ENG-011), with the standings their rules give, and records the
 /// results in the same transaction, once; a match past its time limit is ended rather than having its turn timed out.
+/// A match played in rounds (STORY-070, DEC-081) has its round resolved at the deadline instead, with the rules' default
+/// for anyone who didn't submit, whether its players are connected or not.
 /// </summary>
 public sealed class TurnTimeoutService(
     ChogGamesDbContext db,
@@ -86,6 +88,20 @@ public sealed class TurnTimeoutService(
         if (room is not null && room.IsDueToEnd(now))
         {
             await EndAsync(room, now, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return new TimedOutTurn(room.Code, null);
+        }
+
+        if (room is { Play: MatchPlay.Rounds })
+        {
+            // Another sweep or the last lock may have resolved it first.
+            if (!await MatchRounds.ResolveIfDueAsync(
+                    db, room, _rulesByGame.GetValueOrDefault(room.GameType), random, now, progression.Value, cancellationToken))
+            {
+                return null;
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return new TimedOutTurn(room.Code, null);
         }

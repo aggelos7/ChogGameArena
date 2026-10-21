@@ -3,6 +3,7 @@ using ChogGames.Api.Catalog;
 using ChogGames.Api.Characters;
 using ChogGames.Api.ChogLife;
 using ChogGames.Api.ChogRace;
+using ChogGames.Api.ChogRoyale;
 using ChogGames.Api.Health;
 using ChogGames.Api.Identity;
 using ChogGames.Api.Leaderboards;
@@ -32,6 +33,7 @@ builder.Services.AddRealtime();
 builder.Services.AddMatchTurns();
 builder.Services.AddChogLife();
 builder.Services.AddChogRace();
+builder.Services.AddChogRoyale();
 builder.Services.AddMonitoring();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

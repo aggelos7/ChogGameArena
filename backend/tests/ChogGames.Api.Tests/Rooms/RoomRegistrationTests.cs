@@ -21,7 +21,7 @@ public class RoomRegistrationTests
             .Select(row => (string)row[nameof(GameDefinition.Id)]!)
             .ToList();
 
-        Assert.Equal([GameDefinition.ChogLife, GameDefinition.ChogRace], seeded.Order());
+        Assert.Equal([GameDefinition.ChogLife, GameDefinition.ChogRace, GameDefinition.ChogRoyale], seeded.Order());
         Assert.All(seeded, id => Assert.NotNull(catalog.Find(id)));
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<RoomService>());
     }

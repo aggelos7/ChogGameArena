@@ -84,14 +84,14 @@ public class RoomServiceTests(MigratedPostgresDatabase database) : IClassFixture
     }
 
     [PostgresFact]
-    public async Task Both_supported_games_are_registered()
+    public async Task Every_supported_game_is_registered()
     {
         await using var db = database.CreateDbContext();
 
         var games = await db.GameDefinitions.AsNoTracking().OrderBy(g => g.Id).ToListAsync();
 
         Assert.Equal(
-            [(GameDefinition.ChogLife, 2, 6), (GameDefinition.ChogRace, 2, 6)],
+            [(GameDefinition.ChogLife, 2, 6), (GameDefinition.ChogRace, 2, 6), (GameDefinition.ChogRoyale, 2, 6)],
             games.Select(g => (g.Id, g.MinPlayers, g.MaxPlayers)));
     }
 
