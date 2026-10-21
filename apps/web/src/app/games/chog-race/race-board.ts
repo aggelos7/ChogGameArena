@@ -15,12 +15,14 @@ import {
 } from '@angular/core';
 import { RoomMember } from '../../rooms/rooms-api';
 import { HOP_MS, SIDE_BY_SIDE, reducedMotion } from '../chog-life/life-board';
-import { timeLeft } from '../chog-life/life-board-model';
+import { diceList, timeLeft } from '../chog-life/life-board-model';
 import { seatColor } from '../seats';
 import {
   RACE_CARD_NAMES,
   RACE_CARD_STEAL,
   RACE_CARD_VISION,
+  RACE_DOUBLE_DICE,
+  RACE_FREEZE,
   RACE_SHIELD,
   RACE_SPEED_BOOST,
   RaceBoard,
@@ -49,7 +51,7 @@ export interface RaceCardPlay {
   target?: number;
 }
 
-/** Your locked ability used now, and for Card Steal the opponent it's used on (STORY-055, DEC-059). */
+/** Your locked ability used now, and for Card Steal and Freeze the opponent it's used on (STORY-055, DEC-059; STORY-092). */
 export interface RaceAbilityPlay {
   abilityId: string;
   target?: number;
@@ -124,6 +126,9 @@ export class RaceBoardView {
   readonly pass = output<void>();
   /** Uses your locked ability (DEC-059). */
   readonly useAbility = output<RaceAbilityPlay>();
+
+  /** Rolls keeping one of the dice Double Dice rolled for you (STORY-092, DEC-080). */
+  readonly keepDie = output<number>();
 
   protected readonly label = raceTileLabel;
 
@@ -337,6 +342,17 @@ export class RaceBoardView {
         return board.pawns
           .filter((other) => other.seat !== you.seat && (other.cards ?? 0) > 0)
           .map((other) => ({ abilityId: ability.id, target: other.seat, label: `${ability.name}: from ${this.nameOf(other.seat, false)}` }));
+      case RACE_DOUBLE_DICE:
+        return phase === 'Move' && !pawn?.dice
+          ? [{ abilityId: ability.id, label: `Use ${ability.name}: roll ${ability.values['dice'] ?? 2}, keep 1` }]
+          : [];
+      case RACE_FREEZE:
+        if (pawn?.froze) {
+          return [];
+        }
+        return board.pawns
+          .filter((other) => other.seat !== you.seat && !this.skipping().has(other.seat))
+          .map((other) => ({ abilityId: ability.id, target: other.seat, label: `${ability.name}: ${this.nameOf(other.seat, false)}` }));
       default:
         return [{ abilityId: ability.id, label: `Use ${ability.name}` }];
     }
@@ -367,6 +383,31 @@ export class RaceBoardView {
     return `${seen.length === 1 ? 'Next card' : `Next ${seen.length} cards`} in the deck: ${names}`;
   });
 
+  /** The dice Double Dice rolled for you to keep one of, distinct and in order, while it's your turn; empty otherwise. */
+  protected readonly yourDice = computed(() => {
+    const you = this.turnOf();
+    const pawn = you?.isYou && this.yourPhase() === 'Move' ? this.armed().get(you.seat) : undefined;
+    return pawn?.dice && pawn.kept === undefined ? [...new Set(pawn.dice)].sort((a, b) => a - b) : [];
+  });
+
+  /**
+   * Double Dice's dice waiting for a roll, in words, for everyone (STORY-092, DEC-080): "Your Double Dice rolled 1 and 3:
+   * keep one to move by it." or "Alice’s Double Dice rolled 1 and 3." With a die kept when time ran out, which one the
+   * next roll moves by.
+   */
+  protected readonly diceNote = computed(() => {
+    const pawn = this.board().pawns.find((each) => each.dice);
+    if (!pawn?.dice || !this.board().phase) {
+      return null;
+    }
+    const isYou = !!this.members().find((member) => member.seat === pawn.seat)?.isYou;
+    const rolled = `${isYou ? 'Your' : this.possessive(pawn.seat)} Double Dice rolled ${diceList(pawn.dice)}`;
+    if (pawn.kept !== undefined) {
+      return `${rolled}. Time ran out, so ${isYou ? 'your' : 'their'} next roll moves by ${pawn.kept}.`;
+    }
+    return isYou ? `${rolled}: keep one to move by it.` : `${rolled}.`;
+  });
+
   /** A raised Shield's tag: "Shielded", with the attacks it still blocks when more than one (DEC-077). */
   protected shieldLabel(seat: number): string {
     const blocks = this.armed().get(seat)?.blocks ?? 1;
@@ -389,6 +430,10 @@ export class RaceBoardView {
     if (used.target === undefined) {
       return `${action}.`;
     }
+    if (used.ability === RACE_FREEZE) {
+      const target = this.nameOf(used.target, false);
+      return `${action} on ${target}: ${target === 'you' ? 'you skip your' : 'they skip their'} next turn.`;
+    }
     const cards = used.cards ?? (used.card ? [used.card] : []);
     const taken = used.taken ?? 1;
     const took = cards.length > 0
@@ -401,7 +446,7 @@ export class RaceBoardView {
   protected readonly lastMove = computed(() => {
     const move = this.revealed();
     const boost = move?.boost ? ` (+${move.boost} Speed Boost)` : '';
-    return move ? this.landed(`${this.nameOf(move.seat)} rolled ${move.roll}${boost}`, move, move.seat) : null;
+    return move ? this.landed(`${this.nameOf(move.seat)} ${this.rolled(move)}${boost}`, move, move.seat) : null;
   });
 
   /** What the card played after the latest roll did, in words (DEC-057). */
@@ -566,7 +611,7 @@ export class RaceBoardView {
     const news: MoveNews[] = [];
     if (fresh.roll) {
       const boost = move.boost ? ` (+${move.boost})` : '';
-      news.push({ id: ++this.news, title: `${this.nameOf(move.seat)} rolled ${move.roll}${boost}`, ...this.landing(move, move.seat) });
+      news.push({ id: ++this.news, title: `${this.nameOf(move.seat)} ${this.rolled(move)}${boost}`, ...this.landing(move, move.seat) });
     }
     const play = move.play;
     if (fresh.play && play) {
@@ -636,6 +681,9 @@ export class RaceBoardView {
     if (pawn?.boost) {
       return `Armed: your next roll moves ${pawn.boost} more.`;
     }
+    if (pawn?.dice) {
+      return pawn.kept === undefined ? 'Rolled: move by the die you keep.' : `Your next roll moves by ${pawn.kept}.`;
+    }
     if (pawn?.shielded) {
       const blocks = pawn.blocks ?? 1;
       return blocks === 1
@@ -653,7 +701,10 @@ export class RaceBoardView {
     }
     switch (ability.id) {
       case RACE_SPEED_BOOST:
+      case RACE_DOUBLE_DICE:
         return 'Only before you roll.';
+      case RACE_FREEZE:
+        return pawn?.froze ? 'Used this turn: one Freeze a turn.' : 'Every opponent already skips a turn.';
       case RACE_CARD_VISION:
         return 'The deck is empty.';
       case RACE_CARD_STEAL:
@@ -661,6 +712,11 @@ export class RaceBoardView {
       default:
         return 'Not now.';
     }
+  }
+
+  /** A roll in words: "rolled 3", or after Double Dice "rolled 1 and 3 with Double Dice and kept 3" (STORY-092, DEC-080). */
+  private rolled(move: RaceMove): string {
+    return move.dice ? `rolled ${diceList(move.dice)} with Double Dice and kept ${move.roll}` : `rolled ${move.roll}`;
   }
 
   /** A seat's player: "You" (or "you" mid-sentence) for yours, otherwise their name. */

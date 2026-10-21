@@ -29,6 +29,12 @@ export interface RacePawn {
   shielded?: boolean;
   /** How many more attacks a raised Shield blocks, from the player's Tier (STORY-090, DEC-077). */
   blocks?: number;
+  /** The dice Double Dice rolled for the player's next roll, which moves by the one they keep (STORY-092, DEC-080). */
+  dice?: number[];
+  /** The die kept of `dice` when the player's turn ran out: the highest, which their next roll moves by. */
+  kept?: number;
+  /** The player used Freeze this turn; it's used once a turn (STORY-092, DEC-080). */
+  froze?: boolean;
 }
 
 /**
@@ -51,6 +57,8 @@ export interface RaceMove {
   play?: RacePlay;
   /** The tiles Speed Boost added to the roll (STORY-055, DEC-059). */
   boost?: number;
+  /** Every die Double Dice rolled for this move; `roll` is the one kept (STORY-092, DEC-080). */
+  dice?: number[];
 }
 
 /**
@@ -157,7 +165,7 @@ export interface RaceBoard {
   cardValues?: RaceCardValues;
   /** The attack waiting for its target's reply, in the `Reply` phase (DEC-058). */
   reply?: RaceAttack;
-  /** The seats due to skip their next turn after a Liquidated (DEC-058). */
+  /** The seats due to skip their next turn after a Liquidated (DEC-058) or a Freeze (STORY-092, DEC-080). */
   skipping?: number[];
   /** The deck's top card, sent only to the player who saw it with Card Vision, until it's drawn (DEC-059). */
   next?: RaceCard;
@@ -189,6 +197,10 @@ export const RACE_SPEED_BOOST = 'movement_boost';
 export const RACE_SHIELD = 'attack_block';
 export const RACE_CARD_VISION = 'card_preview';
 export const RACE_CARD_STEAL = 'card_steal';
+
+/** Chog Race's holder abilities from STORY-092 (DEC-080): Double Dice before the roll; Freeze takes a target. */
+export const RACE_DOUBLE_DICE = 'double_dice';
+export const RACE_FREEZE = 'freeze';
 
 /** What a card does, in a short sentence, with the match's values when the server sent them (DEC-057). */
 export function raceCardDescription(card: RaceCard, values?: RaceCardValues): string {
@@ -292,6 +304,8 @@ function isPlay(play: unknown, tiles: number): boolean {
   );
 }
 
+const isDice = (dice: unknown): boolean => Array.isArray(dice) && dice.length > 0 && dice.every((die) => isIndex(die) && die > 0);
+
 const isCardValues = (values: unknown): boolean =>
   isRecord(values) && ['pump', 'fomoForward', 'fomoBack', 'fomoForwardChance', 'reverse', 'rug'].every((key) => isIndex(values[key]));
 
@@ -318,7 +332,10 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       (pawn['cards'] === undefined || isIndex(pawn['cards'])) &&
       isOptional(pawn['boost'], isIndex) &&
       isOptional(pawn['shielded'], (shielded) => typeof shielded === 'boolean') &&
-      isOptional(pawn['blocks'], isIndex),
+      isOptional(pawn['blocks'], isIndex) &&
+      isOptional(pawn['dice'], isDice) &&
+      isOptional(pawn['kept'], isIndex) &&
+      isOptional(pawn['froze'], (froze) => typeof froze === 'boolean'),
   );
   const move = state['lastMove'];
   const validMove =
@@ -332,6 +349,7 @@ export function toRaceBoard(state: unknown): RaceBoard | null {
       (move['card'] === undefined || isCard(move['card'])) &&
       (move['reshuffled'] === undefined || typeof move['reshuffled'] === 'boolean') &&
       isOptional(move['boost'], isIndex) &&
+      isOptional(move['dice'], isDice) &&
       isOptional(move['play'], (play) => isPlay(play, tiles.length)));
   const validPhase = state['phase'] === undefined || ['Move', 'Play', 'Reply'].includes(state['phase'] as string);
   const reply = state['reply'];

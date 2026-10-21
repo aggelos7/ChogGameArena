@@ -107,8 +107,10 @@ Use stable `gameType` identifiers (`chog-life`, `chog-race`), versioned game con
 | `attack_block` | Shield | Block one eligible incoming attack. |
 | `card_preview` | Card Vision | Privately view the next card in the deck. |
 | `card_steal` | Card Steal | Take one server-random card from an eligible opponent. |
+| `double_dice` | Double Dice | Before the roll, roll 2 dice and move by the one kept; a turn that runs out keeps the highest for the next roll (STORY-092, DEC-080). |
+| `freeze` | Freeze | On your turn, once a turn, make an opponent still racing skip their next turn; HODL and Shield don't stop it, and one already skipping can't be frozen (STORY-092, DEC-080). |
 
-Since DEC-077 these effects are the Base values. Reward Boost, Loss Protection, Shield and Card Vision are standard; Event Preview, Lucky Reroll, Double Dice, Tax the Rich, Speed Boost and Card Steal are holder-only, and rarer Tiers strengthen every ability (DEC-077's table).
+Since DEC-077 these effects are the Base values. Reward Boost, Loss Protection, Shield and Card Vision are standard; Event Preview, Lucky Reroll, Double Dice and Tax the Rich (Chog Life) and Speed Boost, Card Steal, Double Dice and Freeze (Chog Race) are holder-only, and rarer Tiers strengthen every ability (DEC-077's table).
 
 Ability values, activation windows, and per-match limits are configuration-driven. Preview information is private to the player; other players receive only appropriate public state changes.
 

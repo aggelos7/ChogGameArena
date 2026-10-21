@@ -1025,6 +1025,127 @@ describe('Chog Race board abilities (STORY-055)', () => {
   });
 });
 
+describe('Chog Race board holder abilities (STORY-092)', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+  let uses: unknown[];
+  let kept: number[];
+
+  const pawns = [
+    { seat: 1, tile: 5, cards: 0 },
+    { seat: 2, tile: 0, cards: 0 },
+    { seat: 3, tile: 12, cards: 2 },
+  ];
+  const ability = (id: string, name: string, usesLeft = 1, values: Record<string, number> = {}) => ({
+    id,
+    name,
+    description: '',
+    target: (id === 'freeze' ? 'Opponent' : 'None') as RoomAbility['target'],
+    maxUses: Math.max(usesLeft, 1),
+    values,
+    usesLeft,
+    holderOnly: true,
+  });
+  const players = (yours: RoomAbility, yourTurn = true) => [
+    member('Alice', 1, { isYou: true, isTurn: yourTurn, ability: yours, hasAbility: true }),
+    member('Bob', 2, { isTurn: !yourTurn, ability: ability('attack_block', 'Shield'), hasAbility: true }),
+    member('Carol', 3, { ability: ability('card_preview', 'Card Vision'), hasAbility: true }),
+  ];
+
+  function render(board: Partial<RaceBoard>, members: RoomMember[]): void {
+    fixture.componentRef.setInput('board', { ...RACE_BOARD, pawns, deck: 5, maxHand: 3, hand: [], ...board });
+    fixture.componentRef.setInput('members', members);
+    fixture.detectChanges();
+  }
+
+  const text = (selector: string) => page.querySelector(selector)?.textContent?.trim();
+  const labels = () => Array.from(page.querySelectorAll('[data-ability]')).map((button) => button.textContent?.trim());
+  const withPawn = (extra: object) => [{ ...pawns[0], ...extra }, ...pawns.slice(1)];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+    uses = [];
+    kept = [];
+    fixture.componentInstance.useAbility.subscribe((use) => uses.push(use));
+    fixture.componentInstance.keepDie.subscribe((die) => kept.push(die));
+  });
+
+  it('reads Double Dice’s dice, the die kept and a Freeze this turn', () => {
+    const board = { ...RACE_BOARD, pawns: [{ seat: 1, tile: 0, dice: [1, 3], kept: 3, froze: true }], lastMove: { seat: 1, roll: 3, from: 0, landed: 3, to: 3, dice: [1, 3] } };
+    expect(toRaceBoard(board)).toBe(board);
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, dice: [] }] })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, dice: [0, 2] }] })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, froze: 'yes' }] })).toBeNull();
+    expect(toRaceBoard({ ...board, lastMove: { ...board.lastMove, dice: '1,3' } })).toBeNull();
+  });
+
+  it('offers Double Dice before the roll, then a Move button per die instead of Roll', () => {
+    const dice = ability('double_dice', 'Double Dice', 1, { dice: 3 });
+    render({ phase: 'Move' }, players(dice));
+    expect(labels()).toEqual(['Use Double Dice: roll 3, keep 1']);
+    page.querySelector<HTMLButtonElement>('[data-ability]')?.click();
+    expect(uses).toEqual([{ abilityId: 'double_dice', target: undefined }]);
+    render({ phase: 'Play', playable: ['Pump'], hand: ['Pump'] }, players(dice));
+    expect(labels()).toEqual([]);
+    expect(text('[data-ability-status]')).toBe('Only before you roll.');
+
+    render({ phase: 'Move', pawns: withPawn({ dice: [3, 1, 3] }) }, players(ability('double_dice', 'Double Dice', 0)));
+    expect(page.querySelector('[data-roll]')).toBeNull();
+    expect(Array.from(page.querySelectorAll('[data-keep-die]')).map((button) => button.textContent?.trim())).toEqual(['Move 1', 'Move 3']);
+    page.querySelector<HTMLButtonElement>('[data-keep-die="3"]')?.click();
+    expect(kept).toEqual([3]);
+    expect(text('[data-dice-note]')).toBe('Your Double Dice rolled 3, 1 and 3: keep one to move by it.');
+    expect(text('[data-ability-status]')).toBe('Rolled: move by the die you keep.');
+
+    // Others see the dice; once time ran out, the die kept and a plain Roll.
+    render({ phase: 'Move', pawns: [pawns[0], pawns[1], { ...pawns[2], dice: [1, 3] }] }, players(ability('double_dice', 'Double Dice', 0), false));
+    expect(text('[data-dice-note]')).toBe('Carol’s Double Dice rolled 1 and 3.');
+    expect(page.querySelector('[data-keep-die]')).toBeNull();
+    render({ phase: 'Move', pawns: withPawn({ dice: [1, 3], kept: 3 }) }, players(ability('double_dice', 'Double Dice', 0)));
+    expect(page.querySelector('[data-keep-die]')).toBeNull();
+    expect(page.querySelector('[data-roll]')).not.toBeNull();
+    expect(text('[data-dice-note]')).toBe('Your Double Dice rolled 1 and 3. Time ran out, so your next roll moves by 3.');
+  });
+
+  it('says which dice a roll had and which it kept', () => {
+    render({ phase: 'Move', lastMove: { seat: 1, roll: 3, from: 0, landed: 3, to: 3, dice: [1, 3] } }, players(ability('double_dice', 'Double Dice', 0), false));
+
+    expect(text('[data-last-move]')).toBe('You rolled 1 and 3 with Double Dice and kept 3 and moved to tile 3.');
+  });
+
+  it('offers Freeze on every opponent not already skipping, once a turn', () => {
+    const freeze = ability('freeze', 'Freeze', 2);
+    render({ phase: 'Move' }, players(freeze));
+    expect(labels()).toEqual(['Freeze: Bob', 'Freeze: Carol']);
+    page.querySelector<HTMLButtonElement>('[data-ability]')?.click();
+    expect(uses).toEqual([{ abilityId: 'freeze', target: 2 }]);
+
+    render({ phase: 'Play', playable: ['Pump'], hand: ['Pump'], skipping: [2] }, players(freeze));
+    expect(labels()).toEqual(['Freeze: Carol']);
+    render({ phase: 'Move', skipping: [2, 3] }, players(freeze));
+    expect(labels()).toEqual([]);
+    expect(text('[data-ability-status]')).toBe('Every opponent already skips a turn.');
+    render({ phase: 'Move', pawns: withPawn({ froze: true }), skipping: [2] }, players(ability('freeze', 'Freeze', 1)));
+    expect(labels()).toEqual([]);
+    expect(text('[data-ability-status]')).toBe('Used this turn: one Freeze a turn.');
+  });
+
+  it('tags a Frozen player and says who froze whom', () => {
+    render({ phase: 'Move', skipping: [2], ability: { seat: 1, ability: 'freeze', target: 2 } }, players(ability('freeze', 'Freeze', 0)));
+    expect(text('[data-seat="2"] [data-skipping]')).toBe('Skips a turn');
+    expect(text('[data-last-ability]')).toBe('You used Freeze on Bob: they skip their next turn.');
+
+    const bobsView = [
+      member('Alice', 1, { isTurn: true, ability: ability('freeze', 'Freeze', 0), hasAbility: true }),
+      member('Bob', 2, { isYou: true, ability: ability('attack_block', 'Shield'), hasAbility: true }),
+    ];
+    render({ phase: 'Move', skipping: [2], ability: { seat: 1, ability: 'freeze', target: 2 } }, bobsView);
+    expect(text('[data-last-ability]')).toBe('Alice used Freeze on you: you skip your next turn.');
+  });
+});
+
 /** How the DOM reports a `#rrggbb` colour set as a style. */
 function hexToRgb(hex: string): string {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));

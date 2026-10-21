@@ -37,7 +37,7 @@ public class HolderAbilityOptionsTests
         new HolderAbilityOptionsValidator(Engine, [Life, Race]).Validate(null, options);
 
     [Fact]
-    public void The_shipped_table_passes_and_holds_dec_077_and_dec_078()
+    public void The_shipped_table_passes_and_holds_dec_077_dec_078_and_dec_080()
     {
         var shipped = Shipped();
 
@@ -58,6 +58,8 @@ public class HolderAbilityOptionsTests
         Assert.Equal("1 1 2 2 3", Row(GameDefinition.ChogRace, "card_preview", "cards"));
         Assert.Equal("2 3 3 4 4", Row(GameDefinition.ChogRace, "movement_boost", "tiles"));
         Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogRace, "card_steal", "cards"));
+        Assert.Equal("2 2 3 3 3", Row(GameDefinition.ChogRace, "double_dice", "dice"));
+        Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogRace, "freeze", "uses"));
         Assert.Equal("Tier", shipped.TraitType);
     }
 
@@ -86,6 +88,7 @@ public class HolderAbilityOptionsTests
         { "'Abilities:Holder:Games:chog-life:Standard' names an ability twice.", o => o.Games["chog-life"].Standard.Add("reward_boost") },
         { "'Abilities:Holder:Games:chog-race:Tiers:Rare:movement_boost:tiles' must be 1 to 6.", o => o.Games["chog-race"].Tiers["Rare"]["movement_boost"]["tiles"] = 7 },
         { "'Abilities:Holder:Games:chog-race:Tiers:Rare:card_steal:cards' must be 1 to 5.", o => o.Games["chog-race"].Tiers["Rare"]["card_steal"]["cards"] = 0 },
+        { "'Abilities:Holder:Games:chog-race:Tiers:Rare:double_dice:dice' must be 2 to 4.", o => o.Games["chog-race"].Tiers["Rare"]["double_dice"]["dice"] = 5 },
         { "'Abilities:Holder:Games:chog-life:Tiers:Epic:reward_boost:percent' must be a whole number.", o => o.Games["chog-life"].Tiers["Epic"]["reward_boost"]["percent"] = 40.5m },
         { "'Abilities:Holder:Games:chog-life:Tiers:Epic:event_preview:uses' must be 1 to 10.", o => o.Games["chog-life"].Tiers["Epic"]["event_preview"]["uses"] = 11 },
         { "'Abilities:Holder:Games:chog-life:Tiers:Epic:event_preview:range' is not a value of event_preview.", o => o.Games["chog-life"].Tiers["Epic"]["event_preview"]["range"] = 2 },

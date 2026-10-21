@@ -15,7 +15,9 @@ namespace ChogGames.Games.ChogRace.Tests;
 /// Whale aimed at its player, at once and with their HODL kept. Card Vision shows only its player the deck's top card
 /// until a draw. Card Steal moves a random card from an opponent's hand into the player's, which needs room; only the two
 /// of them see which card. STORY-090, DEC-077: with a holder Tier's locked values, Speed Boost adds more tiles, Shield
-/// blocks more attacks, Card Vision shows more cards and Card Steal takes more.
+/// blocks more attacks, Card Vision shows more cards and Card Steal takes more. STORY-092, DEC-080: Double Dice rolls its
+/// dice before the roll, which moves by the one kept (the highest when a turn runs out first); Freeze makes an opponent
+/// skip their next turn, once a turn, past HODL and Shield.
 /// </summary>
 public class ChogRaceAbilityTests
 {
@@ -153,20 +155,22 @@ public class ChogRaceAbilityTests
     }
 
     [Fact]
-    public void The_catalog_offers_the_four_race_abilities_with_their_windows()
+    public void The_catalog_offers_the_six_race_abilities_with_their_windows()
     {
-        Assert.Equal((GameDefinition.ChogRace, 2), (Catalog.GameType, Catalog.Version));
+        Assert.Equal((GameDefinition.ChogRace, 3), (Catalog.GameType, Catalog.Version));
         Assert.Equal(
             [
                 ("movement_boost", "Speed Boost", AbilityTargetKind.None, "before_roll"),
                 ("attack_block", "Shield", AbilityTargetKind.None, "before_roll,after_roll"),
                 ("card_preview", "Card Vision", AbilityTargetKind.None, "before_roll,after_roll"),
                 ("card_steal", "Card Steal", AbilityTargetKind.Opponent, "before_roll,after_roll"),
+                ("double_dice", "Double Dice", AbilityTargetKind.None, "before_roll"),
+                ("freeze", "Freeze", AbilityTargetKind.Opponent, "before_roll,after_roll"),
             ],
             Catalog.Definitions.Select(d => (d.Id, d.Name, d.Target, string.Join(",", d.Windows))));
         Assert.All(Catalog.Definitions, d => Assert.Equal(1, d.MaxUses));
         Assert.Equal(
-            ["tiles=2", "blocks=1", "cards=1", "cards=1"],
+            ["tiles=2", "blocks=1", "cards=1", "cards=1", "dice=2", ""],
             Catalog.Definitions.Select(d => string.Join(",", d.Parameters.Select(p => $"{p.Key}={p.Value}"))));
     }
 
@@ -506,5 +510,199 @@ public class ChogRaceAbilityTests
         var decision = Apply(room, players[0], ChogRaceMatchRules.Roll, State([0, 0], pawnExtra: ",\"boost\":7"), new Dice());
 
         Assert.Equal((MatchRuleOutcome.Rejected, "game_state_unavailable"), (decision.Outcome, decision.Reason));
+    }
+
+    private static MatchCommand Command(GameRoom room, string type) =>
+        new(Guid.NewGuid(), room.Id, room.Version, type, JsonSerializer.SerializeToElement(new { }));
+
+    /// <summary>Uses the player's ability and applies it to the room as the engine does; returns the new state.</summary>
+    private static string Applied(GameRoom room, Player player, string state, int? target = null, IRandomSource? random = null)
+    {
+        var result = Use(room, player, state, target, random);
+        Assert.True(result.Used, result.Reason);
+        var used = result.State!.Value.GetRawText();
+        room.ApplyAbility(player.Id, Command(room, MatchCommand.UseAbility), result.Ability!.Id, used, Now, result.SkipsNextTurnOf);
+        return used;
+    }
+
+    /// <summary>Ends the current player's turn in the room with <paramref name="state"/>.</summary>
+    private static void EndTurn(GameRoom room, Player player, string state) =>
+        room.ApplyCommand(player.Id, Command(room, ChogRaceMatchRules.EndTurn), state, endsTurn: true, Now);
+
+    private static int CurrentSeat(GameRoom room) => room.Members.Single(m => m.PlayerId == room.CurrentPlayerId).Seat!.Value;
+
+    [Fact]
+    public void Double_dice_rolls_its_dice_on_the_server_for_everyone_to_see_and_the_roll_moves_by_the_one_kept()
+    {
+        var (room, players) = Started(RaceAbilities.DoubleDice, RaceAbilities.AttackBlock);
+        var dice = new Dice(1, 3);
+        var rolled = Used(room, players[0], State([0, 0]), random: dice);
+
+        Assert.Equal([(1, 4), (1, 4)], dice.Draws);
+        Assert.Equal("[1,3]", Pawn(rolled, 1).GetProperty("dice").GetRawText());
+        Assert.Equal("[1,3]", PawnView(room, players[1], rolled, 1).GetProperty("dice").GetRawText());
+        Assert.Equal("""{"seat":1,"ability":"double_dice"}""", View(room, players[1], rolled).GetProperty("ability").GetRawText());
+
+        // The roll names the die kept and draws none.
+        var moved = Apply(room, players[0], ChogRaceMatchRules.Roll, rolled, new Dice(), """{"die":3}""");
+
+        Assert.Equal(MatchRuleOutcome.Accepted, moved.Outcome);
+        var state = moved.State!.Value.GetRawText();
+        Assert.Equal(3, Pawn(state, 1).GetProperty("tile").GetInt32());
+        Assert.False(Pawn(state, 1).TryGetProperty("dice", out _));
+        var move = View(room, players[1], state).GetProperty("lastMove");
+        Assert.Equal((3, "[1,3]"), (move.GetProperty("roll").GetInt32(), move.GetProperty("dice").GetRawText()));
+    }
+
+    [Theory]
+    [InlineData("{}", "choose_die")]
+    [InlineData("""{"die":"3"}""", "choose_die")]
+    [InlineData("""{"die":2}""", "invalid_die")]
+    [InlineData("""{"die":4}""", "invalid_die")]
+    public void A_roll_after_double_dice_must_keep_one_of_the_dice(string payload, string reason)
+    {
+        var (room, players) = Started(RaceAbilities.DoubleDice, RaceAbilities.AttackBlock);
+        var rolled = Used(room, players[0], State([0, 0]), random: new Dice(1, 3));
+
+        var decision = Apply(room, players[0], ChogRaceMatchRules.Roll, rolled, new Dice(), payload);
+
+        Assert.Equal((MatchRuleOutcome.Rejected, reason), (decision.Outcome, decision.Reason));
+    }
+
+    [Fact]
+    public void Double_dice_is_used_once_before_the_roll()
+    {
+        var (room, players) = Started(RaceAbilities.DoubleDice, RaceAbilities.AttackBlock);
+        var rolled = Used(room, players[0], State([0, 0]), random: new Dice(2, 2));
+
+        Assert.Equal("dice_rolled", Use(room, players[0], rolled, random: new Dice(1, 1)).Reason);
+        Assert.Equal(AbilityRefusal.NotNow, Use(room, players[0], State([3, 0], [["Pump"], []], playPhase: 1)).Reason);
+    }
+
+    [Fact]
+    public void A_rare_holders_double_dice_rolls_three()
+    {
+        var (room, players) = StartedWith(
+            Tiered(RaceAbilities.DoubleDice, RaceAbilities.Dice, 3), Catalog.Definitions.Single(d => d.Id == RaceAbilities.AttackBlock));
+
+        var rolled = Used(room, players[0], State([0, 0]), random: new Dice(2, 1, 3));
+
+        Assert.Equal("[2,1,3]", Pawn(rolled, 1).GetProperty("dice").GetRawText());
+    }
+
+    [Fact]
+    public void A_turn_that_runs_out_after_double_dice_keeps_the_highest_for_the_next_roll()
+    {
+        var (room, players) = Started(RaceAbilities.DoubleDice, RaceAbilities.AttackBlock);
+        var rolled = Used(room, players[0], State([0, 0]), random: new Dice(2, 1));
+
+        using var stored = JsonDocument.Parse(rolled);
+        var timedOut = Rules.TimeOutTurn(new MatchTurnContext(room, stored.RootElement, new Dice()))!.Value.GetRawText();
+
+        Assert.Equal(2, Pawn(timedOut, 1).GetProperty("kept").GetInt32());
+        Assert.Equal(2, PawnView(room, players[1], timedOut, 1).GetProperty("kept").GetInt32());
+
+        // The next roll moves by it whatever it names, and draws no die.
+        var moved = Apply(room, players[0], ChogRaceMatchRules.Roll, timedOut, new Dice(), """{"die":1}""");
+        var state = moved.State!.Value.GetRawText();
+        Assert.Equal(2, Pawn(state, 1).GetProperty("tile").GetInt32());
+        Assert.False(Pawn(state, 1).TryGetProperty("kept", out _));
+
+        // A turn that runs out again keeps what it kept: nothing changes.
+        using var kept = JsonDocument.Parse(timedOut);
+        Assert.Null(Rules.TimeOutTurn(new MatchTurnContext(room, kept.RootElement, new Dice())));
+    }
+
+    [Theory]
+    [InlineData(",\"dice\":[1]")]
+    [InlineData(",\"dice\":[1,4]")]
+    [InlineData(",\"dice\":[1,2],\"kept\":3")]
+    [InlineData(",\"kept\":2")]
+    public void A_roll_with_malformed_dice_is_refused(string extra)
+    {
+        var (room, players) = Started(RaceAbilities.DoubleDice, RaceAbilities.AttackBlock);
+
+        var decision = Apply(room, players[0], ChogRaceMatchRules.Roll, State([0, 0], pawnExtra: extra), new Dice(), """{"die":1}""");
+
+        Assert.Equal((MatchRuleOutcome.Rejected, "game_state_unavailable"), (decision.Outcome, decision.Reason));
+    }
+
+    [Fact]
+    public void Freeze_makes_the_opponent_skip_their_next_turn_for_everyone_to_see()
+    {
+        var (room, players) = Started(RaceAbilities.Freeze, RaceAbilities.AttackBlock, RaceAbilities.CardPreview);
+        var result = Use(room, players[0], State([0, 0, 0]), target: 2);
+
+        Assert.True(result.Used, result.Reason);
+        Assert.Equal(players[1].Id, result.SkipsNextTurnOf);
+        var frozen = Applied(room, players[0], State([0, 0, 0]), target: 2);
+        Assert.Equal("""{"seat":1,"ability":"freeze","target":2}""", View(room, players[2], frozen).GetProperty("ability").GetRawText());
+        Assert.Equal("[2]", View(room, players[2], frozen).GetProperty("skipping").GetRawText());
+
+        // Seat 2 is passed over once, then plays again.
+        EndTurn(room, players[0], frozen);
+        Assert.Equal(3, CurrentSeat(room));
+        EndTurn(room, players[2], frozen);
+        Assert.Equal(1, CurrentSeat(room));
+        EndTurn(room, players[0], frozen);
+        Assert.Equal(2, CurrentSeat(room));
+    }
+
+    [Fact]
+    public void Freeze_passes_hodl_and_a_shield_and_in_two_player_games_gives_the_turn_back()
+    {
+        var (room, players) = Started(RaceAbilities.Freeze, RaceAbilities.AttackBlock);
+        var state = State([0, 5], [[], ["Hodl"]]).Replace("""{"seat":2,"tile":5""", """{"seat":2,"tile":5,"shielded":true,"blocks":1""");
+
+        var frozen = Applied(room, players[0], state, target: 2);
+
+        Assert.Equal(["Hodl"], HandOf(frozen, 2));
+        Assert.True(Pawn(frozen, 2).GetProperty("shielded").GetBoolean());
+        Assert.Null(room.ReplyingPlayerId);
+        EndTurn(room, players[0], frozen);
+        Assert.Equal(1, CurrentSeat(room));
+        Assert.False(room.Members.Single(m => m.PlayerId == players[1].Id).SkipsNextTurn);
+    }
+
+    [Fact]
+    public void Freeze_is_refused_on_an_opponent_already_skipping_and_more_than_once_a_turn()
+    {
+        var twice = Catalog.Definitions.Single(d => d.Id == RaceAbilities.Freeze);
+        twice = twice.WithValues(twice.Parameters, 2);
+        var (room, players) = StartedWith(
+            twice,
+            Catalog.Definitions.Single(d => d.Id == RaceAbilities.AttackBlock),
+            Catalog.Definitions.Single(d => d.Id == RaceAbilities.CardPreview));
+        var frozen = Applied(room, players[0], State([0, 0, 0]), target: 2);
+
+        Assert.Equal("already_skipping", Use(room, players[0], frozen, target: 2).Reason);
+        Assert.Equal("froze_this_turn", Use(room, players[0], frozen, target: 3).Reason);
+        Assert.True(PawnView(room, players[2], frozen, 1).GetProperty("froze").GetBoolean());
+
+        // On a later turn the second use is allowed.
+        EndTurn(room, players[0], frozen);
+        EndTurn(room, players[2], frozen);
+        Assert.Equal(1, CurrentSeat(room));
+        Assert.False(PawnView(room, players[2], frozen, 1).TryGetProperty("froze", out _));
+        Assert.True(Use(room, players[0], frozen, target: 3).Used);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1)]
+    [InlineData(3)]
+    public void Freeze_needs_an_opponent_still_playing(int? target)
+    {
+        var (room, players) = Started(RaceAbilities.Freeze, RaceAbilities.AttackBlock);
+
+        Assert.Equal(AbilityRefusal.InvalidTarget, Use(room, players[0], State([0, 0]), target).Reason);
+    }
+
+    [Fact]
+    public void Freeze_is_used_before_or_after_the_roll()
+    {
+        var (room, players) = Started(RaceAbilities.Freeze, RaceAbilities.AttackBlock);
+
+        Assert.True(Use(room, players[0], State([3, 0], [["Pump"], []], playPhase: 1), target: 2).Used);
     }
 }

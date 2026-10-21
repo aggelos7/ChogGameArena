@@ -19,18 +19,26 @@ namespace ChogGames.Games.ChogRace.Abilities;
 /// <item>Card Steal is used before or after the roll on an opponent holding a card: up to <c>cards</c> of their cards (1
 /// at Base), each drawn at random by the server, move to the player's hand while it has room. Neither HODL nor Shield
 /// blocks it; only the two of them see which cards moved.</item>
+/// <item>Double Dice is used before the roll: the server rolls <c>dice</c> dice (2 at Base) of the rules' move range at
+/// once, which every player sees, and the player's roll moves by the one they keep. A turn that runs out first keeps the
+/// highest, for their next roll (STORY-092, DEC-080).</item>
+/// <item>Freeze is used before or after the roll, at most once a turn, on an opponent still racing who isn't already due
+/// to skip: they skip their next turn, as after Liquidated. Neither HODL nor Shield blocks it (STORY-092, DEC-080).</item>
 /// </list>
 /// The values here are the Base Tier's; holders of rarer Tiers lock stronger ones from <c>Abilities:Holder</c> (STORY-090,
-/// DEC-077). Version 2 added <c>blocks</c> and both <c>cards</c>.
+/// DEC-077). Version 2 added <c>blocks</c> and both <c>cards</c>; version 3 Double Dice and Freeze, which only holders may
+/// choose.
 /// </summary>
 public static class RaceAbilities
 {
-    public const int Version = 2;
+    public const int Version = 3;
 
     public const string MovementBoost = "movement_boost";
     public const string AttackBlock = "attack_block";
     public const string CardPreview = "card_preview";
     public const string CardSteal = "card_steal";
+    public const string DoubleDice = "double_dice";
+    public const string Freeze = "freeze";
 
     /// <summary>The player's turn, in the Move phase, before they roll.</summary>
     public const string BeforeRoll = "before_roll";
@@ -51,7 +59,12 @@ public static class RaceAbilities
 
     public const int MaxCards = 5;
 
-    /// <summary>The catalog, version 2, whose handlers act on <paramref name="game"/>'s match states.</summary>
+    /// <summary>How many dice Double Dice rolls, one kept; 2 to <see cref="MaxDice"/>.</summary>
+    public const string Dice = "dice";
+
+    public const int MaxDice = 4;
+
+    /// <summary>The catalog, version 3, whose handlers act on <paramref name="game"/>'s match states.</summary>
     public static AbilityCatalog Catalog(ChogRaceMatchRules game)
     {
         ArgumentNullException.ThrowIfNull(game);
@@ -64,6 +77,8 @@ public static class RaceAbilities
                 new Handler(game, AttackBlock, [new AbilityParameter(Blocks, 1, MaxBlocks, Default: 1)]),
                 new Handler(game, CardPreview, [new AbilityParameter(Cards, 1, MaxCards, Default: 1)]),
                 new Handler(game, CardSteal, [new AbilityParameter(Cards, 1, MaxCards, Default: 1)]),
+                new Handler(game, DoubleDice, [new AbilityParameter(Dice, 2, MaxDice)]),
+                new Handler(game, Freeze, []),
             ],
             new Timing(game));
     }
@@ -98,6 +113,19 @@ public static class RaceAbilities
             AbilityTargetKind.Opponent,
             [BeforeRoll, AfterRoll],
             new Dictionary<string, decimal> { [Cards] = 1 }),
+        AbilityDefinition.Create(
+            DoubleDice,
+            "Double Dice",
+            "Use before you roll. {dice} dice are rolled for you and you move by the one you keep.",
+            AbilityTargetKind.None,
+            [BeforeRoll],
+            new Dictionary<string, decimal> { [Dice] = 2 }),
+        AbilityDefinition.Create(
+            Freeze,
+            "Freeze",
+            "Use on your turn. An opponent skips their next turn; HODL and Shield can't stop it. {uses|1 use|# uses} per game, one a turn.",
+            AbilityTargetKind.Opponent,
+            [BeforeRoll, AfterRoll]),
     ];
 
     private sealed class Handler(ChogRaceMatchRules game, string abilityId, IReadOnlyList<AbilityParameter> parameters) : IAbilityHandler
@@ -109,6 +137,9 @@ public static class RaceAbilities
         public string? CanExecute(AbilityContext context) => game.CanUse(context);
 
         public JsonElement Execute(AbilityContext context) => game.Use(context);
+
+        public AbilityEffect Apply(AbilityContext context) =>
+            new(game.Use(context), abilityId == Freeze ? context.Target!.PlayerId : null);
     }
 
     private sealed class Timing(ChogRaceMatchRules game) : IAbilityTiming
