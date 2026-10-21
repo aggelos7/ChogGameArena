@@ -113,6 +113,7 @@ public sealed class RoomSnapshots(
         // Cloned: the view may point into the parsed document, which is disposed once every snapshot is built.
         var view = state is null ? null : _rulesByGame[room.GameType].ViewFor(new MatchViewContext(room, viewerId, state.RootElement))?.Clone();
 
+        var options = AbilityOptions(room, lobby, viewerId);
         return new RoomResponse(
             room.Code,
             room.Id,
@@ -127,8 +128,9 @@ public sealed class RoomSnapshots(
             room.MatchEndsAt,
             members,
             view,
-            AbilityOptions(room, lobby, viewerId),
-            [.. Achievement.All.Where(a => unlocked.Contains(a.Id)).Select(a => new RoomAchievementResponse(a.Id, a.Name, a.Description))]);
+            options,
+            [.. Achievement.All.Where(a => unlocked.Contains(a.Id)).Select(a => new RoomAchievementResponse(a.Id, a.Name, a.Description))],
+            UnavailableAbilities(room, options));
     }
 
     private static JsonElement? ResultOf(RoomMember member)
@@ -152,7 +154,8 @@ public sealed class RoomSnapshots(
         if (member.Ability is { } locked)
         {
             return new RoomAbilityResponse(
-                locked.Id, locked.Name, locked.Description, locked.Target, locked.MaxUses, locked.Parameters, member.AbilityUsesLeft);
+                locked.Id, locked.Name, locked.Description, locked.Target, locked.MaxUses, locked.Parameters, member.AbilityUsesLeft,
+                abilityPool.IsHolderOnly(room.GameType, locked.Id));
         }
 
         if (room.Status != RoomStatus.Waiting
@@ -166,7 +169,7 @@ public sealed class RoomSnapshots(
         var offered = lobby.TryGetValue(member.PlayerId, out var character)
             ? abilityPool.For(room.GameType, character).FirstOrDefault(a => a.Id == chosen)
             : null;
-        return ToAbility(offered ?? definition);
+        return ToAbility(room.GameType, offered ?? definition);
     }
 
     /// <summary>What the viewer may choose from while the room waits: their pool for the Chog they have selected.</summary>
@@ -177,11 +180,31 @@ public sealed class RoomSnapshots(
             return [];
         }
 
-        return [.. abilityPool.For(room.GameType, character).Select(ToAbility)];
+        return [.. abilityPool.For(room.GameType, character).Select(ability => ToAbility(room.GameType, ability))];
     }
 
-    private static RoomAbilityResponse ToAbility(AbilityDefinition ability) =>
-        new(ability.Id, ability.Name, ability.Description, ability.Target, ability.MaxUses, ability.Parameters);
+    /// <summary>
+    /// The holder-only abilities missing from the viewer's <paramref name="options"/> while they choose, as the catalog
+    /// defines them (the Base Tier's values), so the lobby shows them locked (STORY-091, DEC-078).
+    /// </summary>
+    private RoomAbilityResponse[] UnavailableAbilities(GameRoom room, RoomAbilityResponse[] options)
+    {
+        if (options.Length == 0 || abilityEngine.CatalogFor(room.GameType) is not { } catalog)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. catalog.Definitions
+                .Where(ability => options.All(option => option.Id != ability.Id) && abilityPool.IsHolderOnly(room.GameType, ability.Id))
+                .Select(ability => ToAbility(room.GameType, ability)),
+        ];
+    }
+
+    private RoomAbilityResponse ToAbility(string gameType, AbilityDefinition ability) =>
+        new(ability.Id, ability.Name, ability.Description, ability.Target, ability.MaxUses, ability.Parameters,
+            HolderOnly: abilityPool.IsHolderOnly(gameType, ability.Id));
 
     /// <summary>
     /// The selected Chog as stored; ownership is checked when the host starts, not here. A retired standard Chog

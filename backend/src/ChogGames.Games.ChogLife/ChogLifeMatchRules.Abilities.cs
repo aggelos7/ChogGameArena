@@ -53,6 +53,108 @@ public sealed partial class ChogLifeMatchRules
         return JsonSerializer.SerializeToElement(state with { Pawns = Replace(state, armed) }, Json);
     }
 
+    /// <summary>Double Dice rolls once: the dice already rolled for this pawn can't be rolled again.</summary>
+    internal string? CanRollDice(AbilityContext context) => AbilityPawn(context) switch
+    {
+        null => "game_state_unavailable",
+        { Pawn.Dice: not null } => "dice_rolled",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Double Dice (STORY-091, DEC-078): the server rolls the locked number of dice now, from its own source, and the pawn
+    /// holds them until its roll, which moves by the one its player keeps.
+    /// </summary>
+    internal JsonElement RollDice(AbilityContext context)
+    {
+        var (state, pawn, rules) = AbilityPawn(context)!.Value;
+        var count = (int)context.Ability.Parameters[LifeAbilities.Dice];
+        var dice = Enumerable.Range(0, count).Select(_ => context.Random.Next(1, rules.DieFaces + 1)).ToArray();
+        return JsonSerializer.SerializeToElement(state with { Pawns = Replace(state, pawn with { Dice = dice }) }, Json);
+    }
+
+    /// <summary>
+    /// Tax the Rich needs an opponent richer than the player, by total portfolio, with liquid MON to take: otherwise
+    /// <c>already_richest</c> or <c>nothing_to_tax</c>.
+    /// </summary>
+    internal string? CanTax(AbilityContext context)
+    {
+        if (AbilityPawn(context) is not var (state, pawn, _))
+        {
+            return "game_state_unavailable";
+        }
+
+        return Taxed(context, state, pawn) switch
+        {
+            null => "already_richest",
+            { Amount: 0 } => "nothing_to_tax",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Tax the Rich (STORY-091, DEC-078): the richest opponent's liquid MON pays the player's; the state remembers the tax
+    /// until the player's roll, whose move then tells it.
+    /// </summary>
+    internal JsonElement Tax(AbilityContext context)
+    {
+        var (state, pawn, _) = AbilityPawn(context)!.Value;
+        var tax = Taxed(context, state, pawn)!;
+        var pawns = state.Pawns
+            .Select(p => p.Seat == pawn.Seat ? p with { Mon = p.Mon + tax.Amount }
+                : p.Seat == tax.From ? p with { Mon = p.Mon - tax.Amount }
+                : p)
+            .ToArray();
+        return JsonSerializer.SerializeToElement(state with { Pawns = pawns, Tax = tax }, Json);
+    }
+
+    /// <summary>
+    /// What Tax the Rich takes and from whom: the opponent still in the match (finished or not) with the highest total
+    /// portfolio, the first by seat on a tie, pays the locked percent of their liquid MON, rounded down, at most the cap and
+    /// no more than the player can hold. Null when no opponent's total is higher than the player's.
+    /// </summary>
+    private static LifeTax? Taxed(AbilityContext context, LifeMatchState state, LifePawn pawn)
+    {
+        var playing = context.Players.Where(player => player.IsPlaying).Select(player => player.Seat).ToHashSet();
+        var richest = state.Pawns
+            .Where(other => other.Seat != pawn.Seat && playing.Contains(other.Seat))
+            .OrderByDescending(other => PortfolioOf(other).Total)
+            .ThenBy(other => other.Seat)
+            .FirstOrDefault();
+        if (richest is null || PortfolioOf(richest).Total <= PortfolioOf(pawn).Total)
+        {
+            return null;
+        }
+
+        var parameters = context.Ability.Parameters;
+        var share = (int)(richest.Mon!.Value * parameters[LifeAbilities.Percent] / 100);
+        var amount = Math.Min(Math.Min(share, (int)parameters[LifeAbilities.Cap]), LifeRules.MaxMon - pawn.Mon!.Value);
+        return new LifeTax(pawn.Seat, richest.Seat, amount);
+    }
+
+    /// <summary>Double Dice's dice in range, and the die kept when a turn ran out one of them (STORY-091, DEC-078).</summary>
+    private static bool AreDiceValid(LifePawn pawn, LifeRules rules) =>
+        pawn.Dice is null
+            ? pawn.Kept is null
+            : pawn.Dice.Count is >= 2 and <= LifeAbilities.MaxDice
+                && pawn.Dice.All(die => die >= 1 && die <= rules.DieFaces)
+                && (pawn.Kept is null || pawn.Dice.Contains(pawn.Kept.Value));
+
+    /// <summary>The die a <c>ROLL</c> keeps of Double Dice's, <c>{"die": 5}</c>; null when the payload names none.</summary>
+    private static int? DieIn(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object
+        && payload.TryGetProperty("die", out var die)
+        && die.ValueKind == JsonValueKind.Number
+        && die.TryGetInt32(out var value)
+            ? value
+            : null;
+
+    /// <summary>
+    /// Tax the Rich: <paramref name="Seat"/> took <paramref name="Amount"/> MON from <paramref name="From"/>'s liquid MON
+    /// (STORY-091, DEC-078).
+    /// </summary>
+    private sealed record LifeTax(int Seat, int From, int Amount);
+
     /// <summary>
     /// The lane just chosen with Event Preview armed: the pawn's next move on it is drawn now, from the server's source and
     /// in the order the roll uses them (the die, then two 0–99 draws for a stake's payout and the tile's event), and the

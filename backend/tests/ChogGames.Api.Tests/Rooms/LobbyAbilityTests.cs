@@ -740,13 +740,32 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
                 ["reward_boost: percent=25 x1", "loss_protection: percent=50 x1"],
                 Described((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray()));
             Assert.Equal(
-                ["reward_boost: percent=40 x1", "loss_protection: percent=35 x1", "event_preview:  x2", "event_reroll: draws=3 x1"],
+                [
+                    "reward_boost: percent=40 x1", "loss_protection: percent=35 x1", "event_preview:  x2", "event_reroll: draws=3 x1",
+                    "double_dice: dice=3 x1", "tax_the_rich: cap=50,percent=18 x1",
+                ],
                 Described((await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray()));
             Assert.Contains("earns 40% more", (await RawAsync(bob, code)).GetProperty("abilities")[0].GetProperty("description").GetString());
+            // Holder-only abilities are marked (STORY-091, DEC-078).
+            Assert.Equal(
+                [false, false, true, true, true, true],
+                (await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray().Select(a => a.GetProperty("holderOnly").GetBoolean()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray(), a => Assert.False(a.GetProperty("holderOnly").GetBoolean()));
+
+            // The guest sees the holder-only abilities locked, with Base values; the holder has none locked.
+            Assert.Equal(
+                [
+                    "event_preview:  x1", "event_reroll: draws=2 x1", "double_dice: dice=2 x1", "tax_the_rich: cap=50,percent=10 x1",
+                ],
+                Described((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray(), a => Assert.True(a.GetProperty("holderOnly").GetBoolean()));
+            Assert.Empty((await RawAsync(bob, code)).GetProperty("unavailableAbilities").EnumerateArray());
 
             // A holder-only ability is refused to the guest, and nothing changes.
             var before = await ViewAsync(alice, code);
             await ProblemAsync(await ChooseAsync(alice, code, "event_preview"), HttpStatusCode.BadRequest, "ability_unavailable");
+            await ProblemAsync(await ChooseAsync(alice, code, "double_dice"), HttpStatusCode.BadRequest, "ability_unavailable");
+            await ProblemAsync(await ChooseAsync(alice, code, "tax_the_rich"), HttpStatusCode.BadRequest, "ability_unavailable");
             await ProblemAsync(await ChooseAsync(alice, code, "fireball"), HttpStatusCode.BadRequest, "unknown_ability");
             var after = await ViewAsync(alice, code);
             Assert.Equal((before.Version, false), (after.Version, after.Member("Alice").HasAbility));
@@ -770,6 +789,8 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
             Assert.Equal(["reward_boost: percent=25 x1"], Described([MemberAbility(room, "Alice")]));
             Assert.Equal(["event_preview:  x2"], Described([MemberAbility(room, "Bob")]));
             Assert.Equal(2, MemberAbility(room, "Bob").GetProperty("usesLeft").GetInt32());
+            Assert.Equal((false, true), (MemberAbility(room, "Alice").GetProperty("holderOnly").GetBoolean(), MemberAbility(room, "Bob").GetProperty("holderOnly").GetBoolean()));
+            Assert.Empty(room.GetProperty("unavailableAbilities").EnumerateArray());
             Assert.EndsWith("2 uses per game.", MemberAbility(room, "Bob").GetProperty("description").GetString());
             var stored = await StoredAbilityAsync(code, "Bob");
             Assert.Equal((LifeAbilities.Version, 2), (stored.CatalogVersion, stored.MaxUses));
@@ -785,7 +806,10 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
         using (bob)
         {
             Assert.Equal(
-                ["reward_boost: percent=25 x1", "loss_protection: percent=50 x1", "event_preview:  x1", "event_reroll: draws=2 x1"],
+                [
+                    "reward_boost: percent=25 x1", "loss_protection: percent=50 x1", "event_preview:  x1", "event_reroll: draws=2 x1",
+                    "double_dice: dice=2 x1", "tax_the_rich: cap=50,percent=10 x1",
+                ],
                 Described((await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray()));
         }
     }

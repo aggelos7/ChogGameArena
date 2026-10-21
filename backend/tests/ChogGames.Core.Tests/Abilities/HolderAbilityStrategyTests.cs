@@ -89,6 +89,17 @@ public class HolderAbilityStrategyTests
     }
 
     [Fact]
+    public void Only_the_abilities_a_standard_chog_is_not_offered_are_holder_only()
+    {
+        Assert.True(_pool.IsHolderOnly(GameType, "boost"));
+        Assert.False(_pool.IsHolderOnly(GameType, "steal"));
+        Assert.False(_pool.IsHolderOnly(GameType, "fireball"));
+        Assert.False(_pool.IsHolderOnly("other-game", "boost"));
+        var open = new AbilityPool(new AbilityEngine([Catalog()]), new HolderAbilityStrategy(new HolderAbilityRules("Tier", new Dictionary<string, HolderGameRules>())));
+        Assert.False(open.IsHolderOnly(GameType, "boost"));
+    }
+
+    [Fact]
     public void A_game_without_rules_is_offered_whole_as_defined()
     {
         var pool = new AbilityPool(new AbilityEngine([Catalog()]), new HolderAbilityStrategy(new HolderAbilityRules("Tier", new Dictionary<string, HolderGameRules>())));

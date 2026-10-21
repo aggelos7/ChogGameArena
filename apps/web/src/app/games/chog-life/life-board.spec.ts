@@ -19,6 +19,7 @@ import {
   previewSummary,
   seatColor,
   stakeSummary,
+  takesMon,
   timeLeft,
   toLifeBoard,
 } from './life-board-model';
@@ -187,6 +188,24 @@ describe('Chog Life board model', () => {
     expect(toLifeBoard({ ...withAbilities, preview: { ...withAbilities.preview, lane: 'Main' } })).toBeNull();
     expect(toLifeBoard({ ...withAbilities, preview: { ...withAbilities.preview, outcome: { effect: 'Moon' } } })).toBeNull();
     expect(toLifeBoard({ ...withAbilities, confirming: -1 })).toBeNull();
+  });
+
+  it('reads Double Dice and Tax the Rich, and refuses bad ones (STORY-091)', () => {
+    const move = { seat: 1, roll: 5, from: 0, to: 2, path: [1, 2], dice: [2, 5], taxed: { seat: 1, from: 2, amount: 30 } };
+    const board = { ...FORK_BOARD, pawns: [lifePawn(1, 0, 100, { dice: [2, 5], kept: 5 }), lifePawn(2, 0)], lastMove: move, tax: move.taxed };
+    expect(toLifeBoard(board)).toEqual(board);
+    expect(toLifeBoard({ ...board, pawns: [lifePawn(1, 0, 100, { dice: [0, 5] })] })).toBeNull();
+    expect(toLifeBoard({ ...board, pawns: [lifePawn(1, 0, 100, { dice: [] })] })).toBeNull();
+    expect(toLifeBoard({ ...board, pawns: [lifePawn(1, 0, 100, { kept: 1.5 })] })).toBeNull();
+    expect(toLifeBoard({ ...board, lastMove: { ...move, dice: '2,5' } })).toBeNull();
+    expect(toLifeBoard({ ...board, lastMove: { ...move, taxed: { seat: 1, from: 2, amount: -3 } } })).toBeNull();
+    expect(toLifeBoard({ ...board, tax: { seat: 1 } })).toBeNull();
+  });
+
+  it('counts Loss tiles, Rug pulls and Liquidations as taking MON, not Markets or Airdrops (STORY-091)', () => {
+    const tile = (type: LifeTile['type'], event?: LifeTile['event']): LifeTile => ({ index: 0, type, lane: 'Main', event });
+    expect([tile('Loss'), tile('Event', 'Rug'), tile('Event', 'Liquidation')].every(takesMon)).toBe(true);
+    expect([tile('Event', 'Market'), tile('Event', 'Airdrop'), tile('Reward'), tile('Event'), tile('Normal')].some(takesMon)).toBe(false);
   });
 
   it('sums up a previewed move, with an event outcome as its rule', () => {
@@ -743,6 +762,7 @@ describe('Chog Life board', () => {
       const button = page.querySelector<HTMLButtonElement>('[data-use-ability]');
       expect(button?.textContent).toContain('Use Reward Boost');
       expect(button?.textContent).toContain('Reward Boost does its thing.');
+      expect(button?.querySelector('[data-holder-badge]')).toBeNull();
       button?.click();
       expect(ids).toEqual(['reward_boost']);
       expect(page.querySelector('[data-roll]')).not.toBeNull();
@@ -840,6 +860,58 @@ describe('Chog Life board', () => {
       );
     });
 
+    const dice = ability('double_dice', 'Double Dice', 0);
+
+    it('marks a holder-only ability on its Use button (STORY-091)', () => {
+      render(FORK_BOARD, [member('Alice', 1, { isYou: true, isTurn: true, ability: { ...ability('tax_the_rich', 'Tax the Rich'), holderOnly: true } }), member('Bob', 2)]);
+
+      expect(page.querySelector('[data-use-ability] [data-holder-badge]')?.textContent?.trim()).toBe('♛ Holder');
+    });
+
+    it('lets you move by one of your Double Dice instead of rolling, and tells the page which', () => {
+      const kept: number[] = [];
+      fixture.componentInstance.keepDie.subscribe((die) => kept.push(die));
+      render({ ...FORK_BOARD, pawns: [lifePawn(1, 0, 100, { dice: [5, 2, 5] }), lifePawn(2, 0)] }, [
+        member('Alice', 1, { isYou: true, isTurn: true, ability: dice }),
+        member('Bob', 2),
+      ]);
+
+      expect(page.querySelector('[data-roll]')).toBeNull();
+      expect(page.querySelector('[data-dice-note]')?.textContent?.trim()).toBe('Your Double Dice rolled 5, 2 and 5: keep one to move by it.');
+      const buttons = Array.from(page.querySelectorAll<HTMLButtonElement>('[data-keep-die]'));
+      expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Move 2', 'Move 5']);
+      buttons[1].click();
+      expect(kept).toEqual([5]);
+
+      fixture.componentRef.setInput('rolling', true);
+      fixture.detectChanges();
+      expect(page.querySelector<HTMLButtonElement>('[data-keep-die]')?.disabled).toBe(true);
+    });
+
+    it('tells everyone else what Double Dice rolled, and which die a turn that ran out kept', () => {
+      const board: LifeBoard = { ...FORK_BOARD, pawns: [lifePawn(1, 0, 100, { dice: [2, 5] }), lifePawn(2, 0)] };
+      render(board, [member('Alice', 1, { isTurn: true, ability: dice }), member('Bob', 2, { isYou: true })]);
+      expect(page.querySelector('[data-dice-note]')?.textContent?.trim()).toBe('Alice’s Double Dice rolled 2 and 5.');
+      expect(page.querySelector('[data-keep-die]')).toBeNull();
+
+      render({ ...board, pawns: [lifePawn(1, 0, 100, { dice: [2, 5], kept: 5 }), lifePawn(2, 0)] }, [
+        member('Alice', 1, { isYou: true, isTurn: true, ability: dice }),
+        member('Bob', 2),
+      ]);
+      expect(page.querySelector('[data-dice-note]')?.textContent?.trim()).toBe('Your Double Dice rolled 2 and 5. Time ran out, so your next roll moves by 5.');
+      expect(page.querySelector('[data-keep-die]')).toBeNull();
+      expect(page.querySelector('[data-roll]')).not.toBeNull();
+    });
+
+    it('tells everyone what Tax the Rich took until its player rolls', () => {
+      const taxed: LifeBoard = { ...FORK_BOARD, pawns: [lifePawn(1, 0, 130), lifePawn(2, 0, 270)], tax: { seat: 1, from: 2, amount: 30 } };
+      render(taxed, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+      expect(page.querySelector('[data-tax-note]')?.textContent?.trim()).toBe('Alice took 30 MON from you with Tax the Rich.');
+
+      render({ ...taxed, tax: undefined }, [member('Alice', 1, { isTurn: true }), member('Bob', 2, { isYou: true })]);
+      expect(page.querySelector('[data-tax-note]')).toBeNull();
+    });
+
     it('marks an armed ability in the legend for everyone', () => {
       render({ ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0, 100, { armed: 'loss_protection' })] }, [
         member('Alice', 1, { isYou: true, isTurn: true }),
@@ -857,6 +929,9 @@ describe('Chog Life board', () => {
       [{ change: 10, rerolled: -10 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 10 MON. Your Lucky Reroll drew the event twice: it kept +10 MON over −10 MON.'],
       [{ change: 25, rerolled: 10 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 25 MON. Your Lucky Reroll drew the event twice: it kept +25 MON over +10 MON.'],
       [{ change: 10, rerolled: -10, draws: 3 }, 'You rolled 1, landed on tile 1 (+20 MON) and won 10 MON. Your Lucky Reroll drew the event 3 times: it kept +10 MON over −10 MON.'],
+      [{ change: 20, roll: 5, dice: [2, 5] }, 'You rolled 2 and 5 with Double Dice and kept 5, landed on tile 1 (+20 MON) and won 20 MON.'],
+      [{ roll: 3, dice: [1, 6, 3] }, 'You rolled 1, 6 and 3 with Double Dice and kept 3 and moved to tile 1 (+20 MON).'],
+      [{ change: 20, taxed: { seat: 1, from: 2, amount: 30 } }, 'You took 30 MON from Bob with Tax the Rich. You rolled 1, landed on tile 1 (+20 MON) and won 20 MON.'],
     ])('says what an ability did to the move', (effect, text) => {
       render({ ...FORK_BOARD, lastMove: { seat: 1, roll: 1, from: 0, to: 1, path: [1], ...effect } }, [
         member('Alice', 1, { isYou: true }),
@@ -956,6 +1031,9 @@ describe('Chog Life board', () => {
       expect(spots[1].textContent).toContain('+20 MON');
       expect(spots[2].textContent).toContain('Fork');
       expect(spots[5].textContent).toContain('Rug pull');
+      // Every tile that always takes MON is red: the Loss tile, the Rug pull and the Liquidation (STORY-091).
+      expect(spots.filter((s) => s.classList.contains('takes-mon')).map((s) => Number(s.dataset['spot']))).toEqual([5, 7, 8]);
+      expect(Array.from(page.querySelectorAll<HTMLElement>('[data-tile].takes-mon')).map((t) => Number(t.dataset['tile']))).toEqual([5, 7, 8]);
       expect(Array.from(page.querySelectorAll('[data-road]')).map((r) => r.getAttribute('data-road'))).toContain('7-8');
       expect(Array.from(drawing?.querySelectorAll('.lane-title') ?? []).map((n) => n.textContent?.trim())).toEqual(['Safe', 'Degen']);
       // Each type and event kind has its own icon.

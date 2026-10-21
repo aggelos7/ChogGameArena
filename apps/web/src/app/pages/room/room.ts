@@ -22,6 +22,7 @@ import { ThemeMusic } from '../../shell/theme-music';
 import { LifeBoardView } from '../../games/chog-life/life-board';
 import { LifeResultsView, toLifeResult } from '../../games/chog-life/life-results';
 import { RaceResultsView, toRaceResult } from '../../games/chog-race/race-results';
+import { HolderBadge } from '../../games/holder-badge';
 import { LIFE_CHOOSE_LANE, LIFE_ROLL, LifeRoute, USE_ABILITY, ordinal, toLifeBoard } from '../../games/chog-life/life-board-model';
 import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
@@ -45,7 +46,7 @@ export const FINALE_MOST_MS = 10_000;
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, CollectorChip, LifeBoardView, LifeResultsView, RaceBoardView, RaceResultsView, TurnTimer],
+  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, CollectorChip, LifeBoardView, LifeResultsView, RaceBoardView, RaceResultsView, TurnTimer, HolderBadge],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })
@@ -233,6 +234,20 @@ export class RoomPage implements OnInit {
     }
   }
 
+  /**
+   * The lobby's abilities in two groups (STORY-091, DEC-078): the standard ones everyone may choose, then the holder
+   * abilities, those the player may choose and those shown locked because only Chog holders may choose them.
+   */
+  protected readonly abilityGroups = computed(() => {
+    const room = this.room();
+    const abilities = room?.abilities ?? [];
+    return {
+      standard: abilities.filter((ability) => !ability.holderOnly),
+      holder: abilities.filter((ability) => ability.holderOnly),
+      locked: room?.unavailableAbilities ?? [],
+    };
+  });
+
   protected chooseAbility(ability: RoomAbility): void {
     const room = this.room();
     if (room && this.you()?.ability?.id !== ability.id) {
@@ -282,6 +297,11 @@ export class RoomPage implements OnInit {
   /** Chooses the route to leave a fork by, after a roll stopped there (STORY-039, DEC-041); refusals as for a roll. */
   protected chooseLane(lane: LifeRoute): void {
     this.command(LIFE_CHOOSE_LANE, { lane });
+  }
+
+  /** Rolls keeping one of the dice Double Dice rolled (STORY-091, DEC-078); refusals as for a roll. */
+  protected keepDie(die: number): void {
+    this.command(LIFE_ROLL, { die });
   }
 
   /** Uses the player's locked ability on their turn (STORY-042, DEC-044); refusals as for a roll. */

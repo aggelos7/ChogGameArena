@@ -91,7 +91,11 @@
     @if (yourAbility(); as ability) {
       <section class="hand ability" aria-labelledby="race-ability-title" data-your-ability>
         <h3 id="race-ability-title">
-          Your ability: {{ ability.name }} <span class="count" data-uses-left>{{ ability.usesLeft }}/{{ ability.maxUses }} left</span>
+          Your ability: {{ ability.name }}
+          @if (ability.holderOnly) {
+            <app-holder-badge />
+          }
+          <span class="count" data-uses-left>{{ ability.usesLeft }}/{{ ability.maxUses }} left</span>
         </h3>
         <p class="card-text">{{ ability.description }}</p>
         @if (abilityPlays().length > 0) {

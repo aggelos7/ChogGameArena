@@ -12,6 +12,9 @@ namespace ChogGames.Core.Abilities;
 /// </summary>
 public sealed class AbilityPool(AbilityEngine engine, IAbilityAssignmentStrategy strategy)
 {
+    /// <summary>A guest's or a standard Chog's character, which every pool's standard abilities are offered to.</summary>
+    private static readonly CharacterSnapshot StandardChog = CharacterSnapshot.Standard(DefaultAvatar.Classic, DateTimeOffset.UnixEpoch);
+
     /// <summary>The abilities <paramref name="character"/> may select in <paramref name="gameType"/>, in catalog order.</summary>
     public IReadOnlyList<AbilityDefinition> For(string gameType, CharacterSnapshot character)
     {
@@ -36,6 +39,13 @@ public sealed class AbilityPool(AbilityEngine engine, IAbilityAssignmentStrategy
     /// <summary>Whether <paramref name="abilityId"/> is one <paramref name="character"/> may select in <paramref name="gameType"/>.</summary>
     public bool Offers(string gameType, CharacterSnapshot character, string? abilityId) =>
         AbilityDefinition.IsValidId(abilityId) && For(gameType, character).Any(a => a.Id == abilityId);
+
+    /// <summary>
+    /// Whether only holders may select <paramref name="abilityId"/> in <paramref name="gameType"/>: the game has it, but a
+    /// standard Chog's pool leaves it out (STORY-091, DEC-077, DEC-078). Shown so holder abilities stand out.
+    /// </summary>
+    public bool IsHolderOnly(string gameType, string abilityId) =>
+        Defines(gameType, abilityId) && !Offers(gameType, StandardChog, abilityId);
 
     /// <summary>
     /// Locks <paramref name="abilityId"/> for a match that starts with <paramref name="character"/> (STORY-033, NFT-015,

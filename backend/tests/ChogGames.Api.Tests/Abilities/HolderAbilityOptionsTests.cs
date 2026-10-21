@@ -37,7 +37,7 @@ public class HolderAbilityOptionsTests
         new HolderAbilityOptionsValidator(Engine, [Life, Race]).Validate(null, options);
 
     [Fact]
-    public void The_shipped_table_passes_and_holds_dec_077()
+    public void The_shipped_table_passes_and_holds_dec_077_and_dec_078()
     {
         var shipped = Shipped();
 
@@ -51,6 +51,9 @@ public class HolderAbilityOptionsTests
         Assert.Equal("50 45 40 35 25", Row(GameDefinition.ChogLife, "loss_protection", "percent"));
         Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogLife, "event_preview", "uses"));
         Assert.Equal("2 2 3 3 3", Row(GameDefinition.ChogLife, "event_reroll", "draws"));
+        Assert.Equal("2 2 3 3 3", Row(GameDefinition.ChogLife, "double_dice", "dice"));
+        Assert.Equal("10 12 15 18 20", Row(GameDefinition.ChogLife, "tax_the_rich", "percent"));
+        Assert.Equal("50 50 50 50 50", Row(GameDefinition.ChogLife, "tax_the_rich", "cap"));
         Assert.Equal("1 1 2 2 2", Row(GameDefinition.ChogRace, "attack_block", "blocks"));
         Assert.Equal("1 1 2 2 3", Row(GameDefinition.ChogRace, "card_preview", "cards"));
         Assert.Equal("2 3 3 4 4", Row(GameDefinition.ChogRace, "movement_boost", "tiles"));

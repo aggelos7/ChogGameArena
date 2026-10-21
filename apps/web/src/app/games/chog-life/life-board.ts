@@ -22,7 +22,9 @@ import {
   LifeMove,
   LifePawn,
   LifeRoute,
+  LifeTax,
   LifeTile,
+  diceList,
   laneSummary,
   laneTiles,
   fittedLayout,
@@ -34,9 +36,11 @@ import {
   seatColor,
   signedMon,
   stakeSummary,
+  takesMon,
   tileLabel,
   timeLeft,
 } from './life-board-model';
+import { HolderBadge } from '../holder-badge';
 import { ReportPhoto } from '../../moderation/report-photo';
 import { DIE_MS, DieRoll, RollingDie } from '../rolling-die';
 import { BANNER_MS, MoveBanner, MoveNews, RECENT_MOVES, RecentMoves, signedMonText } from '../move-news';
@@ -121,7 +125,7 @@ export function reducedMotion(): boolean {
  */
 @Component({
   selector: 'app-life-board',
-  imports: [LifeDrawing, NgTemplateOutlet, ReportPhoto, RollingDie, MoveBanner, RecentMoves],
+  imports: [LifeDrawing, NgTemplateOutlet, ReportPhoto, RollingDie, MoveBanner, RecentMoves, HolderBadge],
   templateUrl: './life-board.html',
   styleUrl: './life-board.scss',
 })
@@ -138,8 +142,11 @@ export class LifeBoardView {
   readonly chooseLane = output<LifeRoute>();
   /** Uses your locked ability, by id. */
   readonly useAbility = output<string>();
+  /** Rolls keeping one of the dice Double Dice rolled for you (STORY-091, DEC-078). */
+  readonly keepDie = output<number>();
 
   protected readonly label = tileLabel;
+  protected readonly takesMon = takesMon;
   protected readonly ordinal = ordinal;
 
   /** The time now, ticking every second for the clock. */
@@ -493,6 +500,46 @@ export class LifeBoardView {
     return { keep: preview.lane, keepName: ROUTE_NAMES[preview.lane], other, otherName: ROUTE_NAMES[other] };
   });
 
+  /** The dice Double Dice rolled for you to keep one of, distinct and in order, while it's your turn; empty otherwise. */
+  protected readonly yourDice = computed(() => {
+    const you = this.players().find((member) => member.isYou);
+    const pawn = you?.isTurn ? this.pawnBySeat().get(you.seat) : undefined;
+    return pawn?.dice && pawn.kept === undefined && !this.board().ended ? [...new Set(pawn.dice)].sort((a, b) => a - b) : [];
+  });
+
+  /**
+   * Double Dice's dice waiting for a roll, in words, for everyone: "Your Double Dice rolled 2 and 5: keep one to move
+   * by it." or "Alice’s Double Dice rolled 2 and 5." With a die kept when time ran out, which one the next roll moves by.
+   */
+  protected readonly diceNote = computed(() => {
+    const pawn = this.board().pawns.find((each) => each.dice);
+    if (!pawn?.dice || this.board().ended) {
+      return null;
+    }
+    const member = this.players().find((player) => player.seat === pawn.seat);
+    const whose = member?.isYou ? 'Your' : `${member?.displayName ?? `Seat ${pawn.seat}`}’s`;
+    const rolled = `${whose} Double Dice rolled ${diceList(pawn.dice)}`;
+    if (pawn.kept !== undefined) {
+      return `${rolled}. Time ran out, so ${member?.isYou ? 'your' : 'their'} next roll moves by ${pawn.kept}.`;
+    }
+    return member?.isYou ? `${rolled}: keep one to move by it.` : `${rolled}.`;
+  });
+
+  /** A Tax the Rich used this turn, in words: "You took 30 MON from Bob with Tax the Rich." */
+  protected readonly taxNote = computed(() => {
+    const tax = this.board().tax;
+    return tax ? `${this.taxed(tax)}.` : null;
+  });
+
+  /** Who took how much from whom with Tax the Rich: "Alice took 30 MON from you with Tax the Rich". */
+  private taxed(tax: LifeTax): string {
+    const name = (seat: number, you: string): string => {
+      const member = this.players().find((player) => player.seat === seat);
+      return member?.isYou ? you : (member?.displayName ?? `Seat ${seat}`);
+    };
+    return `${name(tax.seat, 'You')} took ${tax.amount} MON from ${name(tax.from, 'you')} with Tax the Rich`;
+  }
+
   /** The name of the ability the player on `seat` has armed; null when none is. */
   protected armedName(seat: number): string | null {
     const armed = this.pawnBySeat().get(seat)?.armed;
@@ -528,9 +575,13 @@ export class LifeBoardView {
     if (move.roll === undefined) {
       return `${who} passed at the finish.`;
     }
+    // Abilities used before the roll come first: "Alice took 30 MON from you with Tax the Rich. Alice rolled 2 and 5
+    // with Double Dice and kept 2, landed on…" (STORY-091, DEC-078).
+    const taxed = move.taxed ? `${this.taxed(move.taxed)}. ` : '';
+    const rolled = move.dice ? `rolled ${diceList(move.dice)} with Double Dice and kept ${move.roll}` : `rolled ${move.roll}`;
     if (move.place !== undefined) {
       const bonus = move.bonus ? `, winning the ${move.bonus} MON bonus` : '';
-      return `${who} rolled ${move.roll} and reached the finish in ${ordinal(move.place)} place${bonus}.`;
+      return `${taxed}${who} ${rolled} and reached the finish in ${ordinal(move.place)} place${bonus}.`;
     }
     const staked = move.staked ? ` and ${member?.isYou ? 'stake' : 'stakes'} ${move.staked} MON` : '';
     const route = !move.lane
@@ -553,7 +604,7 @@ export class LifeBoardView {
             ? ` ${yours} Lucky Reroll drew the event ${timesDrawn(move.draws ?? 2)}: it kept ${signedMon(move.change ?? 0)} over ${signedMon(move.rerolled)}.`
             : '';
     if (move.change === undefined) {
-      return `${who} rolled ${move.roll} and moved to ${where}.${matured}${route}`;
+      return `${taxed}${who} ${rolled} and moved to ${where}.${matured}${route}`;
     }
     const outcome =
       move.change > 0
@@ -561,7 +612,7 @@ export class LifeBoardView {
         : move.change < 0
           ? `lost ${-move.change} MON`
           : `${member?.isYou ? 'your' : 'their'} MON didn’t change`;
-    return `${who} rolled ${move.roll}, landed on ${where} and ${outcome}.${ability}${matured}${route}`;
+    return `${taxed}${who} ${rolled}, landed on ${where} and ${outcome}.${ability}${matured}${route}`;
   });
 
   protected isChoice(tile: LifeTile): boolean {

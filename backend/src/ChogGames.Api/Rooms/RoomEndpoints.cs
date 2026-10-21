@@ -41,6 +41,7 @@ public static class RoomEndpoints
     /// The values its effect uses, by name, such as <c>percent</c>: the player's Tier's in the lobby and as locked at start
     /// (STORY-090, DEC-077).
     /// </param>
+    /// <param name="HolderOnly">Only Chog holders may choose it, so it is marked as theirs (STORY-091, DEC-078).</param>
     public sealed record RoomAbilityResponse(
         string Id,
         string Name,
@@ -48,7 +49,8 @@ public static class RoomEndpoints
         AbilityTargetKind Target,
         int MaxUses,
         IReadOnlyDictionary<string, decimal> Values,
-        int? UsesLeft = null);
+        int? UsesLeft = null,
+        bool HolderOnly = false);
 
     /// <summary>The member's selected Chog. <c>Color</c> is set for standard Chogs; NFTs show their token id.</summary>
     public sealed record RoomCharacterResponse(CharacterKind Kind, string Id, string Name, string? Color);
@@ -115,6 +117,10 @@ public static class RoomEndpoints
     /// The abilities this member may choose from while the room waits, in catalog order (DEC-035); empty for a game
     /// without abilities and once the room has started.
     /// </param>
+    /// <param name="UnavailableAbilities">
+    /// The holder-only abilities this member can't choose while the room waits, with the Base Tier's values, in catalog
+    /// order, so the lobby shows them locked (STORY-091, DEC-078); empty for a holder and once the room has started.
+    /// </param>
     public sealed record RoomResponse(
         string Code,
         Guid MatchId,
@@ -130,7 +136,8 @@ public static class RoomEndpoints
         RoomMemberResponse[] Members,
         JsonElement? State,
         RoomAbilityResponse[] Abilities,
-        RoomAchievementResponse[] Achievements);
+        RoomAchievementResponse[] Achievements,
+        RoomAbilityResponse[] UnavailableAbilities);
 
     /// <summary>An achievement the viewer unlocked with this completed match (STORY-058, DEC-063).</summary>
     public sealed record RoomAchievementResponse(string Id, string Name, string Description);

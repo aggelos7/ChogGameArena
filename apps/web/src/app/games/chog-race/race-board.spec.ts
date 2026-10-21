@@ -954,6 +954,9 @@ describe('Chog Race board abilities (STORY-055)', () => {
 
     render({ phase: 'Move' }, players(steal, false));
     expect(text('[data-your-ability] h3')).toContain('Your ability: Card Steal');
+    expect(page.querySelector('[data-your-ability] [data-holder-badge]')).toBeNull();
+    render({ phase: 'Move' }, players({ ...steal, holderOnly: true }, false));
+    expect(text('[data-your-ability] [data-holder-badge]')).toBe('♛ Holder');
     expect(text('[data-uses-left]')).toBe('1/1 left');
     expect(status()).toBe('Use it on your turn.');
     render({ phase: 'Move' }, players(steal));
