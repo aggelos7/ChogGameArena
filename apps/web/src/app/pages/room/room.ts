@@ -299,9 +299,9 @@ export class RoomPage implements OnInit {
     this.command(LIFE_CHOOSE_LANE, { lane });
   }
 
-  /** Rolls keeping one of the dice Double Dice rolled (STORY-091, DEC-078); refusals as for a roll. */
+  /** Rolls keeping one of the dice Double Dice rolled, in either game (STORY-091, STORY-092); refusals as for a roll. */
   protected keepDie(die: number): void {
-    this.command(LIFE_ROLL, { die });
+    this.command(this.raceBoard() ? RACE_ROLL : LIFE_ROLL, { die });
   }
 
   /** Uses the player's locked ability on their turn (STORY-042, DEC-044); refusals as for a roll. */
@@ -309,7 +309,7 @@ export class RoomPage implements OnInit {
     this.command(USE_ABILITY, { abilityId });
   }
 
-  /** Uses the player's locked Chog Race ability, on an opponent for Card Steal (STORY-055, DEC-059); refusals as for a roll. */
+  /** Uses the player's locked Chog Race ability, on an opponent for Card Steal and Freeze (STORY-055, STORY-092); refusals as for a roll. */
   protected useRaceAbility(use: RaceAbilityPlay): void {
     this.command(USE_ABILITY, use.target === undefined ? { abilityId: use.abilityId } : { abilityId: use.abilityId, target: use.target });
   }

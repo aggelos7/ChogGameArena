@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ChogGames.Api.ChogLife;
+using ChogGames.Api.ChogRace;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Wallets;
@@ -687,22 +688,69 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
         }
     }
 
-    /// <summary>The shipped holder rules (DEC-077) with Chog Life's real catalog, version 2.</summary>
-    private async Task UseHolderRulesAsync(IReadOnlyDictionary<string, string?>? settings = null)
+    /// <summary>The shipped holder rules (DEC-077) with Chog Life's real catalog, or with <paramref name="race"/> Chog Race's.</summary>
+    private async Task UseHolderRulesAsync(IReadOnlyDictionary<string, string?>? settings = null, bool race = false)
     {
         await _factory.DisposeAsync();
         _factory = new ApiFactory(
             database.ConnectionString,
             new Dictionary<string, string?>(settings ?? new Dictionary<string, string?>())
             {
-                ["Games:Items:0:Status"] = "Available",
+                [race ? "Games:Items:1:Status" : "Games:Items:0:Status"] = "Available",
             },
             services =>
             {
                 services.AddScoped<INftProvider>(_ => _chain);
-                services.AddChogLifeAbilities();
+                if (race)
+                {
+                    services.AddChogRaceAbilities();
+                }
+                else
+                {
+                    services.AddChogLifeAbilities();
+                }
             },
             holderAbilities: true);
+    }
+
+    [PostgresFact]
+    public async Task A_chog_race_guest_cant_choose_double_dice_or_freeze_and_an_epic_holder_gets_them_with_epic_values()
+    {
+        await UseHolderRulesAsync(race: true);
+        var (code, alice, bob) = await PairAsync("chog-race", await TierHolderAsync("Bob", "Epic"));
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(
+                ["attack_block: blocks=1 x1", "card_preview: cards=1 x1"],
+                Described((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Equal(
+                [
+                    "movement_boost: tiles=4 x1", "attack_block: blocks=2 x1", "card_preview: cards=2 x1", "card_steal: cards=2 x1",
+                    "double_dice: dice=3 x1", "freeze:  x2",
+                ],
+                Described((await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Equal(
+                ["movement_boost: tiles=2 x1", "card_steal: cards=1 x1", "double_dice: dice=2 x1", "freeze:  x1"],
+                Described((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray(), a => Assert.True(a.GetProperty("holderOnly").GetBoolean()));
+
+            var before = await ViewAsync(alice, code);
+            await ProblemAsync(await ChooseAsync(alice, code, "double_dice"), HttpStatusCode.BadRequest, "ability_unavailable");
+            await ProblemAsync(await ChooseAsync(alice, code, "freeze"), HttpStatusCode.BadRequest, "ability_unavailable");
+            Assert.Equal(before.Version, (await ViewAsync(alice, code)).Version);
+
+            await ChosenAsync(alice, code, "attack_block");
+            await ChosenAsync(bob, code, "freeze");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+            var room = await RawAsync(alice, code);
+            Assert.Equal(["freeze:  x2"], Described([MemberAbility(room, "Bob")]));
+            Assert.EndsWith("2 uses per game, one a turn.", MemberAbility(room, "Bob").GetProperty("description").GetString());
+            Assert.True(MemberAbility(room, "Bob").GetProperty("holderOnly").GetBoolean());
+        }
     }
 
     /// <summary>A holder of token 7 with <paramref name="tier"/> on chain and, when given, <paramref name="cached"/> in the cache.</summary>

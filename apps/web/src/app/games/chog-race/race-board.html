@@ -56,6 +56,9 @@
         <p class="last-move" data-last-play>{{ play }}</p>
       }
     </div>
+    @if (diceNote(); as note) {
+      <p class="last-move" data-dice-note>{{ note }}</p>
+    }
     @if (lastAbility(); as used) {
       <p class="last-move" data-last-ability>{{ used }}</p>
     }
@@ -125,7 +128,15 @@
         <button type="button" class="action" [disabled]="rolling()" (click)="pass.emit()" data-pass>Take it</button>
       </div>
     } @else if (yourPhase() === 'Move') {
-      <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
+      @if (yourDice().length > 0) {
+        <div class="plays" role="group" aria-label="Keep one of your dice" data-keep-dice>
+          @for (die of yourDice(); track die) {
+            <button type="button" class="action" [disabled]="rolling()" (click)="keepDie.emit(die)" [attr.data-keep-die]="die">Move {{ die }}</button>
+          }
+        </div>
+      } @else {
+        <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
+      }
     } @else if (yourPhase() === 'Play') {
       @if (plays().length > 0) {
         <div class="plays" role="group" aria-label="Play a card, which ends your turn" data-plays>

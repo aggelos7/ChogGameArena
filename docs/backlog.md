@@ -1082,7 +1082,7 @@
 
 #### STORY-092 — Chog Race holder abilities: Double Dice and Freeze
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E09
 - **Implementation:** Two new holder-only Chog Race abilities (DEC-077), added to the catalog with their Tier values in `Abilities:Holder`. **Double Dice:** used before the roll; the server rolls `dice` dice (2, or 3 from Rare) and the player keeps one of them for that move; a turn that runs out keeps the highest. **Freeze:** used on the player's turn on an opponent still racing; that opponent skips their next turn, using the engine's existing skip-turn support (DEC-058), with `uses` 1, or 2 from Epic. Both show in the "Your ability" panel and the latest ability line like the other abilities.
