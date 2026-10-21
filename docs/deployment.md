@@ -88,9 +88,20 @@ forwards IPv6 visitors to nginx with their own address, as it does IPv4 ones. Th
 access log see each visitor's address. Without IPv6 on that network, Docker's proxy would forward every IPv6
 visitor from one gateway address, and they would all share one rate limit.
 
-**Upgrading to this release** (`v1.0.1` and earlier have an IPv4-only `backend` network): `up -d --wait`
-recreates the network, so every container stops and starts once (about a minute; volumes are kept and matches
-resume, DEC-030).
+**Upgrading to this release** (`v1.0.1` and earlier have an IPv4-only `backend` network): take the stack
+**down first, then up**. A plain `up -d --wait` recreates the network in place, and Docker's DNS then fails on it
+(the release drill for `v1.1.0` reproduced it every time on Docker 29.1): `migrate` can't resolve `postgres` and
+exits 1, and the API and web stay down. With `C="docker compose -f infrastructure/production/docker-compose.yml"`:
+
+```bash
+$C down                                            # never -v: that deletes the database
+IMAGE_TAG=<release> $C up -d --build --wait        # every service healthy, migrate exited (0)
+```
+
+Every container stops and starts once (about a minute; volumes are kept and matches resume, DEC-030). Rolling
+back across this change is the same: check out the previous release so its Compose file is used, `$C down`, then
+`IMAGE_TAG=<previous release> $C up -d --wait`. Rolling back the images alone, under this Compose file, works over
+IPv4 but refuses IPv6 connections, since earlier nginx images listen on IPv4 only.
 
 Add the domain's `AAAA` record (the VM's IPv6 address, **DNS only** in Cloudflare) **only after** both of these
 answer from a machine with IPv6, against the VM's address directly:
@@ -359,6 +370,7 @@ Done once, from `chogarena.xyz` to `chogkingdom.xyz` (STORY-088, DEC-074):
 - `docker compose ... restart`, `down` and `up` keep all data: it lives in the `postgres-data`, `redis-data`
   and `backups` volumes. **Never** run `down -v` on the VM; it deletes the database.
 - Upgrade: check out the new release, then `IMAGE_TAG=<release> docker compose ... up -d --build --wait`.
+  A release that changes the Compose networks (such as the first with IPv6, see [IPv6](#ipv6)) needs `down` first.
   Migrations run before the new API starts; if they fail, Compose stops with an error before replacing the API.
 - Roll back: `IMAGE_TAG=<previous release> docker compose ... up -d --wait`. Migrations aren't rolled back
   automatically, so a release that changes the schema needs its own rollback note.
