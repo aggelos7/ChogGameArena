@@ -515,7 +515,7 @@ Allowed project references (enforced by `ChogGames.Architecture.Tests`): `Core` 
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and push to `develop` and `master` (and manually via *Run workflow*). All jobs always run; there are no path filters or Nx affected shortcuts, and no Nx Cloud token is needed.
+`.github/workflows/ci.yml` runs on every pull request into `develop` and `master`, on every push to `master` (and manually via *Run workflow*). To save Actions minutes (DEC-079), a merge into `develop` isn't checked again, since its pull request already was, and a change to Markdown alone runs nothing, except to the docs the workspace checks read (`README.md`, `AGENTS.md` and those under `docs/` that `tools/` reads). Every job of a run always runs: there are no Nx affected shortcuts, and no Nx Cloud token is needed.
 
 | Job | Checks |
 |---|---|

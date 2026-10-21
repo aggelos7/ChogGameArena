@@ -1,23 +1,47 @@
-// STORY-007 guards for the CI workflow: full checks on every PR, backend never skipped,
-// no Nx Cloud, pinned actions and toolchains taken from the repository's version files.
+// STORY-007 guards for the CI workflow: full checks on every PR (but Markdown-only changes, DEC-079), backend
+// never skipped, no Nx Cloud, pinned actions and toolchains taken from the repository's version files.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const workflow = readFileSync(join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
 
-test('runs on pull requests and pushes to develop and master', () => {
+test('runs on pull requests into develop and master and on pushes to master (DEC-079)', () => {
   assert.match(workflow, /pull_request:\s*\n\s*branches: \[develop, master\]/);
-  assert.match(workflow, /push:\s*\n\s*branches: \[develop, master\]/);
+  // A merge into develop was already checked as its pull request.
+  assert.match(workflow, /push:\s*\n\s*branches: \[master\]/);
 });
 
-test('never filters by path or uses Nx affected, so backend checks always run', () => {
-  assert.doesNotMatch(workflow, /paths(-ignore)?:/);
+test('skips only Markdown-only changes, never code, and never uses Nx affected, so backend checks always run', () => {
+  assert.doesNotMatch(workflow, /paths-ignore:/);
   assert.doesNotMatch(workflow, /\baffected\b/);
   assert.doesNotMatch(workflow, /^\s*if:(?!\s*always\(\))/m, 'only always() conditions are allowed');
+  const lists = [...workflow.matchAll(/^(\s*)paths:\s*\n((?:\1\s+- .*\n)+)/gm)].map((match) =>
+    match[2].split('\n').filter((line) => line.trim()).map((line) => line.trim().replace(/^- "(.*)"$/, '$1')),
+  );
+  assert.equal(lists.length, 2, 'pull requests and pushes each filter by path');
+  // Markdown the workspace checks read, which a change must still be checked for: found in their sources, as
+  // 'docs/name.md' or join(root, 'docs', 'name.md').
+  const checkedDocs = [
+    ...new Set(
+      readdirSync(join(root, 'tools'))
+        .filter((file) => file.endsWith('.mjs') && file !== 'ci.test.mjs')
+        .flatMap((file) =>
+          [...readFileSync(join(root, 'tools', file), 'utf8').matchAll(/'((?:docs\/)?[\w.-]+\.md)'|'docs', '([\w.-]+\.md)'/g)].map(
+            (match) => match[1] ?? `docs/${match[2]}`,
+          ),
+        ),
+    ),
+  ];
+  assert.ok(checkedDocs.includes('docs/release-checklist.md'));
+  for (const paths of lists) {
+    assert.deepEqual(paths.slice(0, 2), ['**', '!**/*.md'], 'everything but Markdown runs the checks');
+    assert.deepEqual(paths.filter((path) => path.startsWith('!')), ['!**/*.md'], 'nothing else is skipped');
+    assert.deepEqual(paths.slice(2).sort(), [...checkedDocs].sort());
+  }
 });
 
 test('does not use Nx Cloud', () => {

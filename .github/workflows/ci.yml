@@ -1,12 +1,37 @@
-# CI baseline (STORY-007): full frontend, backend and Compose checks on every PR and push to
-# develop/master. Nx Cloud is not used. Every job always runs (no path filters or partial runs).
+# CI baseline (STORY-007): full frontend, backend and Compose checks on every PR into develop/master and
+# every push to master. Nx Cloud is not used. Every job of a run always runs (no partial runs).
+# To save Actions minutes (DEC-079): a merge into develop isn't checked again, since its PR already was,
+# and changes to Markdown alone run nothing, except the docs the workspace checks read.
 name: CI
 
 on:
   pull_request:
     branches: [develop, master]
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "README.md"
+      - "AGENTS.md"
+      - "docs/requirements.md"
+      - "docs/architecture.md"
+      - "docs/backlog.md"
+      - "docs/decisions.md"
+      - "docs/deployment.md"
+      - "docs/release-checklist.md"
   push:
-    branches: [develop, master]
+    branches: [master]
+    # The same paths as for pull requests.
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "README.md"
+      - "AGENTS.md"
+      - "docs/requirements.md"
+      - "docs/architecture.md"
+      - "docs/backlog.md"
+      - "docs/decisions.md"
+      - "docs/deployment.md"
+      - "docs/release-checklist.md"
   workflow_dispatch:
 
 permissions:
