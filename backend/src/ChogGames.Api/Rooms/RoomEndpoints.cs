@@ -37,8 +37,20 @@ public static class RoomEndpoints
 
     /// <summary>An ability of the game (DEC-032), as offered in the lobby or as locked for a member at start (DEC-035).</summary>
     /// <param name="UsesLeft">For an ability locked at start: the uses left in this match (DEC-036); null for a choice.</param>
+    /// <param name="Values">
+    /// The values its effect uses, by name, such as <c>percent</c>: the player's Tier's in the lobby and as locked at start
+    /// (STORY-090, DEC-077).
+    /// </param>
+    /// <param name="HolderOnly">Only Chog holders may choose it, so it is marked as theirs (STORY-091, DEC-078).</param>
     public sealed record RoomAbilityResponse(
-        string Id, string Name, string Description, AbilityTargetKind Target, int MaxUses, int? UsesLeft = null);
+        string Id,
+        string Name,
+        string Description,
+        AbilityTargetKind Target,
+        int MaxUses,
+        IReadOnlyDictionary<string, decimal> Values,
+        int? UsesLeft = null,
+        bool HolderOnly = false);
 
     /// <summary>The member's selected Chog. <c>Color</c> is set for standard Chogs; NFTs show their token id.</summary>
     public sealed record RoomCharacterResponse(CharacterKind Kind, string Id, string Name, string? Color);
@@ -105,6 +117,10 @@ public static class RoomEndpoints
     /// The abilities this member may choose from while the room waits, in catalog order (DEC-035); empty for a game
     /// without abilities and once the room has started.
     /// </param>
+    /// <param name="UnavailableAbilities">
+    /// The holder-only abilities this member can't choose while the room waits, with the Base Tier's values, in catalog
+    /// order, so the lobby shows them locked (STORY-091, DEC-078); empty for a holder and once the room has started.
+    /// </param>
     public sealed record RoomResponse(
         string Code,
         Guid MatchId,
@@ -120,7 +136,8 @@ public static class RoomEndpoints
         RoomMemberResponse[] Members,
         JsonElement? State,
         RoomAbilityResponse[] Abilities,
-        RoomAchievementResponse[] Achievements);
+        RoomAchievementResponse[] Achievements,
+        RoomAbilityResponse[] UnavailableAbilities);
 
     /// <summary>An achievement the viewer unlocked with this completed match (STORY-058, DEC-063).</summary>
     public sealed record RoomAchievementResponse(string Id, string Name, string Description);
@@ -423,6 +440,8 @@ public static class RoomEndpoints
             RoomOutcome.OwnershipUnavailable => (
                 StatusCodes.Status503ServiceUnavailable, ErrorCodes.OwnershipUnavailable, "Chog ownership can't be checked right now. Try again shortly."),
             RoomOutcome.UnknownAbility => (StatusCodes.Status400BadRequest, ErrorCodes.UnknownAbility, "This ability can't be chosen in this game."),
+            RoomOutcome.AbilityNotOffered => (
+                StatusCodes.Status400BadRequest, ErrorCodes.AbilityUnavailable, "Only Chog holders can choose this ability."),
             RoomOutcome.AbilityRequired => (StatusCodes.Status409Conflict, ErrorCodes.AbilityRequired, "Choose an ability before marking ready."),
             RoomOutcome.AbilityUnavailable => (
                 StatusCodes.Status409Conflict, ErrorCodes.AbilityUnavailable, "A player's chosen ability is no longer available and they must choose again."),

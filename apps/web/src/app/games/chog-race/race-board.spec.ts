@@ -5,6 +5,23 @@ import { seatColor } from '../seats';
 import { RaceBoardView } from './race-board';
 import { HOP_MS, SIDE_BY_SIDE } from '../chog-life/life-board';
 import { RaceBoard, raceColumns, raceFitColumns, raceLayout, raceTileLabel, raceWalk, toRaceBoard } from './race-board-model';
+import { DIE_MS } from '../rolling-die';
+import { BANNER_MS } from '../move-news';
+import { SoundEffects } from '../../shell/sound-effects';
+
+/** Moves show at once, without die or hops, for specs about what the board says rather than when (DEC-076). */
+const withoutMotion = () => vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+afterEach(() => vi.unstubAllGlobals());
+
+/** Sounds the boards play, recorded instead of heard. */
+const played: string[] = [];
+const quietSounds = () => {
+  played.length = 0;
+  return {
+    provide: SoundEffects,
+    useValue: { play: (effect: string) => played.push(effect), stop: (effect: string) => played.push(`stop ${effect}`) },
+  };
+};
 
 function member(displayName: string, seat: number, overrides: Partial<RoomMember> = {}): RoomMember {
   return {
@@ -186,7 +203,7 @@ describe('Chog Race board', () => {
   const pawnsOn = (index: number) => Array.from(tile(index).querySelectorAll('[data-pawn]')).map((p) => p.textContent?.trim());
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
   });
@@ -382,7 +399,7 @@ describe('Chog Race board moves (STORY-051)', () => {
   const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)];
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     events = [];
@@ -420,6 +437,7 @@ describe('Chog Race board moves (STORY-051)', () => {
   });
 
   it('says what the latest move did', () => {
+    withoutMotion();
     const moved = (lastMove: RaceBoard['lastMove'], extra: Partial<RaceBoard> = {}) => render({ ...RACE_BOARD, lastMove, ...extra }, you);
 
     moved({ seat: 2, roll: 3, from: 0, landed: 3, to: 3 });
@@ -453,7 +471,7 @@ describe('Chog Race board cards (STORY-052)', () => {
   const you = [member('Alice', 1, { isYou: true, isTurn: true }), member('Bob', 2)];
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
   });
@@ -511,6 +529,7 @@ describe('Chog Race board cards (STORY-052)', () => {
   });
 
   it('says what a Card tile drew, naming the card only to the player who drew it', () => {
+    withoutMotion();
     const drew = (lastMove: RaceBoard['lastMove']) => {
       render({ ...RACE_BOARD, lastMove });
       return text('[data-last-move]');
@@ -563,7 +582,7 @@ describe('Chog Race board card plays (STORY-053)', () => {
   const roll = { roll: 1, from: 4, landed: 5, to: 5 };
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     plays = [];
@@ -603,6 +622,7 @@ describe('Chog Race board card plays (STORY-053)', () => {
   });
 
   it('says what a card moving its player did, after the roll', () => {
+    withoutMotion();
     expect(played({ seat: 2, ...roll, play: { card: 'Pump', steps: 3, from: 5, landed: 8, to: 8 } })).toBe(
       'Bob played Pump (3 forward) and moved to tile 8.',
     );
@@ -622,6 +642,7 @@ describe('Chog Race board card plays (STORY-053)', () => {
   });
 
   it('says who Whale swapped with and who Reverse pushed back', () => {
+    withoutMotion();
     expect(played({ seat: 2, ...roll, play: { card: 'Whale', from: 5, to: 12, target: 1 } })).toBe(
       'Bob played Whale and swapped places with you (now on tile 5) and moved to tile 12.',
     );
@@ -676,7 +697,7 @@ describe('Chog Race board attacks and defense (STORY-054)', () => {
   const labels = () => Array.from(page.querySelectorAll('[data-play]')).map((button) => button.textContent?.trim());
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     plays = [];
@@ -738,6 +759,7 @@ describe('Chog Race board attacks and defense (STORY-054)', () => {
   });
 
   it('says how an attack ended and who skips a turn', () => {
+    withoutMotion();
     const played = (play: NonNullable<RaceBoard['lastMove']>['play'], members = bobsTurn, skipping?: number[]) => {
       render({ phase: 'Move', lastMove: { seat: 1, ...roll, play }, skipping }, members);
       return text('[data-last-play]');
@@ -776,6 +798,7 @@ describe('Chog Race board abilities (STORY-055)', () => {
     description: '',
     target: (id === 'card_steal' ? 'Opponent' : 'None') as RoomAbility['target'],
     maxUses: 1,
+    values: {},
     usesLeft,
   });
   const players = (yours: RoomAbility, yourTurn = true) => [
@@ -795,7 +818,7 @@ describe('Chog Race board abilities (STORY-055)', () => {
   const labels = () => Array.from(page.querySelectorAll('[data-ability]')).map((button) => button.textContent?.trim());
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
     uses = [];
@@ -888,12 +911,52 @@ describe('Chog Race board abilities (STORY-055)', () => {
     expect(text('[data-last-ability]')).toBe('Bob used Shield.');
   });
 
+  it('reads and shows a holder Tier’s stronger abilities (STORY-090)', () => {
+    const tiered = (id: string, name: string, values: Record<string, number>) => ({ ...ability(id, name), values });
+    const board = {
+      ...RACE_BOARD,
+      pawns: [{ seat: 1, tile: 0, cards: 1, shielded: true, blocks: 2 }],
+      seen: ['Whale', 'Pump'],
+      ability: { seat: 1, ability: 'card_steal', target: 2, card: 'Hodl', cards: ['Hodl', 'Rug'], taken: 2 },
+    };
+    expect(toRaceBoard(board)).toBe(board);
+    expect(toRaceBoard({ ...board, seen: ['Joker'] })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, blocks: -1 }] })).toBeNull();
+    expect(toRaceBoard({ ...board, ability: { ...board.ability, taken: 'two' } })).toBeNull();
+
+    render({ phase: 'Move' }, players(tiered('movement_boost', 'Speed Boost', { tiles: 4 })));
+    expect(labels()).toEqual(['Use Speed Boost: +4 to your roll']);
+    render({ phase: 'Move' }, players(tiered('card_preview', 'Card Vision', { cards: 3 })));
+    expect(labels()).toEqual(['Use Card Vision: see the next 3 cards']);
+
+    render(
+      {
+        phase: 'Move',
+        pawns: [{ seat: 1, tile: 5, cards: 1, shielded: true, blocks: 2 }, pawns[1], pawns[2]],
+        seen: ['Whale', 'Pump'],
+        next: 'Whale',
+        ability: { seat: 3, ability: 'card_steal', target: 1, card: 'Hodl', cards: ['Hodl', 'Rug'], taken: 2 },
+      },
+      players(tiered('attack_block', 'Shield', { blocks: 2 }), false),
+    );
+    expect(text('[data-seat="1"] [data-shielded]')).toBe('Shielded ×2');
+    expect(text('[data-ability-status]')).toBe('Raised: it blocks the next 2 Rugs, Liquidateds or Whales played on you.');
+    expect(text('[data-next-card]')).toBe('Next 2 cards in the deck: Whale, then Pump. Only you can see this.');
+    expect(text('[data-last-ability]')).toBe('Carol used Card Steal and took HODL and Rug from you.');
+
+    render({ phase: 'Move', ability: { seat: 3, ability: 'card_steal', target: 2, taken: 2 } }, players(ability('card_preview', 'Card Vision', 0)));
+    expect(text('[data-last-ability]')).toBe('Carol used Card Steal and took 2 cards from Bob.');
+  });
+
   it('always shows your ability, its uses left and why it can’t be used now', () => {
     const steal = ability('card_steal', 'Card Steal');
     const status = () => text('[data-ability-status]');
 
     render({ phase: 'Move' }, players(steal, false));
     expect(text('[data-your-ability] h3')).toContain('Your ability: Card Steal');
+    expect(page.querySelector('[data-your-ability] [data-holder-badge]')).toBeNull();
+    render({ phase: 'Move' }, players({ ...steal, holderOnly: true }, false));
+    expect(text('[data-your-ability] [data-holder-badge]')).toBe('♛ Holder');
     expect(text('[data-uses-left]')).toBe('1/1 left');
     expect(status()).toBe('Use it on your turn.');
     render({ phase: 'Move' }, players(steal));
@@ -962,6 +1025,127 @@ describe('Chog Race board abilities (STORY-055)', () => {
   });
 });
 
+describe('Chog Race board holder abilities (STORY-092)', () => {
+  let fixture: ComponentFixture<RaceBoardView>;
+  let page: HTMLElement;
+  let uses: unknown[];
+  let kept: number[];
+
+  const pawns = [
+    { seat: 1, tile: 5, cards: 0 },
+    { seat: 2, tile: 0, cards: 0 },
+    { seat: 3, tile: 12, cards: 2 },
+  ];
+  const ability = (id: string, name: string, usesLeft = 1, values: Record<string, number> = {}) => ({
+    id,
+    name,
+    description: '',
+    target: (id === 'freeze' ? 'Opponent' : 'None') as RoomAbility['target'],
+    maxUses: Math.max(usesLeft, 1),
+    values,
+    usesLeft,
+    holderOnly: true,
+  });
+  const players = (yours: RoomAbility, yourTurn = true) => [
+    member('Alice', 1, { isYou: true, isTurn: yourTurn, ability: yours, hasAbility: true }),
+    member('Bob', 2, { isTurn: !yourTurn, ability: ability('attack_block', 'Shield'), hasAbility: true }),
+    member('Carol', 3, { ability: ability('card_preview', 'Card Vision'), hasAbility: true }),
+  ];
+
+  function render(board: Partial<RaceBoard>, members: RoomMember[]): void {
+    fixture.componentRef.setInput('board', { ...RACE_BOARD, pawns, deck: 5, maxHand: 3, hand: [], ...board });
+    fixture.componentRef.setInput('members', members);
+    fixture.detectChanges();
+  }
+
+  const text = (selector: string) => page.querySelector(selector)?.textContent?.trim();
+  const labels = () => Array.from(page.querySelectorAll('[data-ability]')).map((button) => button.textContent?.trim());
+  const withPawn = (extra: object) => [{ ...pawns[0], ...extra }, ...pawns.slice(1)];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
+    fixture = TestBed.createComponent(RaceBoardView);
+    page = fixture.nativeElement as HTMLElement;
+    uses = [];
+    kept = [];
+    fixture.componentInstance.useAbility.subscribe((use) => uses.push(use));
+    fixture.componentInstance.keepDie.subscribe((die) => kept.push(die));
+  });
+
+  it('reads Double Dice’s dice, the die kept and a Freeze this turn', () => {
+    const board = { ...RACE_BOARD, pawns: [{ seat: 1, tile: 0, dice: [1, 3], kept: 3, froze: true }], lastMove: { seat: 1, roll: 3, from: 0, landed: 3, to: 3, dice: [1, 3] } };
+    expect(toRaceBoard(board)).toBe(board);
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, dice: [] }] })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, dice: [0, 2] }] })).toBeNull();
+    expect(toRaceBoard({ ...board, pawns: [{ seat: 1, tile: 0, froze: 'yes' }] })).toBeNull();
+    expect(toRaceBoard({ ...board, lastMove: { ...board.lastMove, dice: '1,3' } })).toBeNull();
+  });
+
+  it('offers Double Dice before the roll, then a Move button per die instead of Roll', () => {
+    const dice = ability('double_dice', 'Double Dice', 1, { dice: 3 });
+    render({ phase: 'Move' }, players(dice));
+    expect(labels()).toEqual(['Use Double Dice: roll 3, keep 1']);
+    page.querySelector<HTMLButtonElement>('[data-ability]')?.click();
+    expect(uses).toEqual([{ abilityId: 'double_dice', target: undefined }]);
+    render({ phase: 'Play', playable: ['Pump'], hand: ['Pump'] }, players(dice));
+    expect(labels()).toEqual([]);
+    expect(text('[data-ability-status]')).toBe('Only before you roll.');
+
+    render({ phase: 'Move', pawns: withPawn({ dice: [3, 1, 3] }) }, players(ability('double_dice', 'Double Dice', 0)));
+    expect(page.querySelector('[data-roll]')).toBeNull();
+    expect(Array.from(page.querySelectorAll('[data-keep-die]')).map((button) => button.textContent?.trim())).toEqual(['Move 1', 'Move 3']);
+    page.querySelector<HTMLButtonElement>('[data-keep-die="3"]')?.click();
+    expect(kept).toEqual([3]);
+    expect(text('[data-dice-note]')).toBe('Your Double Dice rolled 3, 1 and 3: keep one to move by it.');
+    expect(text('[data-ability-status]')).toBe('Rolled: move by the die you keep.');
+
+    // Others see the dice; once time ran out, the die kept and a plain Roll.
+    render({ phase: 'Move', pawns: [pawns[0], pawns[1], { ...pawns[2], dice: [1, 3] }] }, players(ability('double_dice', 'Double Dice', 0), false));
+    expect(text('[data-dice-note]')).toBe('Carol’s Double Dice rolled 1 and 3.');
+    expect(page.querySelector('[data-keep-die]')).toBeNull();
+    render({ phase: 'Move', pawns: withPawn({ dice: [1, 3], kept: 3 }) }, players(ability('double_dice', 'Double Dice', 0)));
+    expect(page.querySelector('[data-keep-die]')).toBeNull();
+    expect(page.querySelector('[data-roll]')).not.toBeNull();
+    expect(text('[data-dice-note]')).toBe('Your Double Dice rolled 1 and 3. Time ran out, so your next roll moves by 3.');
+  });
+
+  it('says which dice a roll had and which it kept', () => {
+    render({ phase: 'Move', lastMove: { seat: 1, roll: 3, from: 0, landed: 3, to: 3, dice: [1, 3] } }, players(ability('double_dice', 'Double Dice', 0), false));
+
+    expect(text('[data-last-move]')).toBe('You rolled 1 and 3 with Double Dice and kept 3 and moved to tile 3.');
+  });
+
+  it('offers Freeze on every opponent not already skipping, once a turn', () => {
+    const freeze = ability('freeze', 'Freeze', 2);
+    render({ phase: 'Move' }, players(freeze));
+    expect(labels()).toEqual(['Freeze: Bob', 'Freeze: Carol']);
+    page.querySelector<HTMLButtonElement>('[data-ability]')?.click();
+    expect(uses).toEqual([{ abilityId: 'freeze', target: 2 }]);
+
+    render({ phase: 'Play', playable: ['Pump'], hand: ['Pump'], skipping: [2] }, players(freeze));
+    expect(labels()).toEqual(['Freeze: Carol']);
+    render({ phase: 'Move', skipping: [2, 3] }, players(freeze));
+    expect(labels()).toEqual([]);
+    expect(text('[data-ability-status]')).toBe('Every opponent already skips a turn.');
+    render({ phase: 'Move', pawns: withPawn({ froze: true }), skipping: [2] }, players(ability('freeze', 'Freeze', 1)));
+    expect(labels()).toEqual([]);
+    expect(text('[data-ability-status]')).toBe('Used this turn: one Freeze a turn.');
+  });
+
+  it('tags a Frozen player and says who froze whom', () => {
+    render({ phase: 'Move', skipping: [2], ability: { seat: 1, ability: 'freeze', target: 2 } }, players(ability('freeze', 'Freeze', 0)));
+    expect(text('[data-seat="2"] [data-skipping]')).toBe('Skips a turn');
+    expect(text('[data-last-ability]')).toBe('You used Freeze on Bob: they skip their next turn.');
+
+    const bobsView = [
+      member('Alice', 1, { isTurn: true, ability: ability('freeze', 'Freeze', 0), hasAbility: true }),
+      member('Bob', 2, { isYou: true, ability: ability('attack_block', 'Shield'), hasAbility: true }),
+    ];
+    render({ phase: 'Move', skipping: [2], ability: { seat: 1, ability: 'freeze', target: 2 } }, bobsView);
+    expect(text('[data-last-ability]')).toBe('Alice used Freeze on you: you skip your next turn.');
+  });
+});
+
 /** How the DOM reports a `#rrggbb` colour set as a style. */
 function hexToRgb(hex: string): string {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
@@ -995,7 +1179,7 @@ describe('Chog Race board hops', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    TestBed.configureTestingModule({ imports: [RaceBoardView] });
+    TestBed.configureTestingModule({ imports: [RaceBoardView], providers: [quietSounds()] });
     fixture = TestBed.createComponent(RaceBoardView);
     page = fixture.nativeElement as HTMLElement;
   });
@@ -1012,7 +1196,16 @@ describe('Chog Race board hops', () => {
     render(moved);
     expect(page.querySelector('[data-tile="6"]')?.getAttribute('aria-label')).toContain('Alice (you)');
     expect(page.querySelector('[data-pawn="1"]')?.closest('.car')?.classList).toContain('hopping');
-    expect(hopsOf(1, 6)).toEqual([1, 2, 3, 4, 5, 6, 6]);
+    // The die rolls first, with its sound, while the pawn waits where it was; then it hops.
+    expect(page.querySelector('[data-die]')).not.toBeNull();
+    expect(played).toEqual(['diceRoll']);
+    expect(at(1)).toBe(1);
+    vi.advanceTimersByTime(DIE_MS - HOP_MS);
+    fixture.detectChanges();
+    expect(hopsOf(1, 7)).toEqual([1, 1, 2, 3, 4, 5, 6, 6]);
+    expect(page.querySelector('[data-die]')).toBeNull();
+    // The engine starts as the car sets off and is heard to its end, not cut when the car stops.
+    expect(played).toEqual(['diceRoll', 'carForward']);
     expect(page.querySelector('[data-pawn="1"]')?.closest('.car')?.classList).not.toContain('hopping');
     expect(at(2)).toBe(0);
 
@@ -1021,15 +1214,79 @@ describe('Chog Race board hops', () => {
     expect(at(1)).toBe(6);
   });
 
+  it('starts the engine as a car drives on and sounds the beeper while a Setback tile sends it back (DEC-076)', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 1 }, { seat: 2, tile: 0 }] });
+
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 3, from: 1, landed: 4, to: 2, effect: 'Setback' } });
+    vi.advanceTimersByTime(DIE_MS);
+    fixture.detectChanges();
+    const seen = [at(1)];
+    const heard = [played.slice(1)];
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(HOP_MS);
+      fixture.detectChanges();
+      seen.push(at(1));
+      heard.push(played.slice(1));
+    }
+
+    expect(seen).toEqual([1, 2, 3, 4, 3, 2, 2]);
+    // The engine as it sets off; the beeper from the hop back off the Setback tile until the car stops.
+    expect(heard[0]).toEqual(['carForward']);
+    expect(heard[2]).toEqual(['carForward']);
+    expect(heard[3]).toEqual(['carForward', 'carReverse']);
+    expect(heard[6]).toEqual(['carForward', 'carReverse', 'stop carReverse']);
+  });
+
+  it('tells what a roll did once the car stops: a banner, a popup on its tile and Recent moves (DEC-076)', () => {
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 1 }, { seat: 2, tile: 0 }] });
+
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 3, from: 1, landed: 4, to: 2, effect: 'Setback' } });
+    expect(page.querySelector('[data-banner]')).toBeNull();
+    expect(page.querySelector('[data-last-move]')).toBeNull();
+
+    vi.advanceTimersByTime(DIE_MS + HOP_MS * 6);
+    fixture.detectChanges();
+    const banner = page.querySelector('[data-banner]');
+    expect(banner?.getAttribute('data-banner')).toBe('bad');
+    expect(banner?.querySelector('[data-banner-title]')?.textContent?.trim()).toBe('You rolled 3');
+    expect(banner?.querySelector('[data-banner-detail]')?.textContent?.trim()).toBe('Setback! Back to tile 2');
+    expect(page.querySelector('[data-tile="2"] [data-popup]')?.textContent?.trim()).toBe('−2 tiles');
+    expect(page.querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 3, landed on the Setback at tile 4 and fell back to tile 2.');
+    expect(Array.from(page.querySelectorAll('[data-recent-moves] li')).map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      '▼ You rolled 3: Setback! Back to tile 2',
+    ]);
+
+    vi.advanceTimersByTime(BANNER_MS);
+    fixture.detectChanges();
+    expect(page.querySelector('[data-banner]')).toBeNull();
+  });
+
+  it('tells a card’s move after the roll, newest first, and a reduced-motion move at once', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 5 }] });
+    const roll = { seat: 1, roll: 2, from: 0, landed: 2, to: 2 };
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 5 }], lastMove: roll });
+    render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 5 }], lastMove: { ...roll, play: { card: 'Pump', steps: 2, from: 2, landed: 4, to: 4 } } });
+
+    expect(page.querySelector('[data-banner-title]')?.textContent?.trim()).toBe('You played Pump');
+    expect(page.querySelector('[data-banner-detail]')?.textContent?.trim()).toBe('+2 tiles, to tile 4');
+    expect(Array.from(page.querySelectorAll('[data-recent-moves] li')).map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      '▲ You played Pump: +2 tiles, to tile 4',
+      '• You rolled 2: Moved to tile 2',
+    ]);
+  });
+
   it('hops a card’s move after the roll, then the pawns a card pushed back', () => {
     render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 0 }, { seat: 2, tile: 5 }] });
     const roll = { seat: 1, roll: 2, from: 0, landed: 2, to: 2 };
     const rolled: RaceBoard = { ...RACE_BOARD, pawns: [{ seat: 1, tile: 2 }, { seat: 2, tile: 5 }], lastMove: roll };
     render(rolled);
+    vi.advanceTimersByTime(DIE_MS);
     hopsOf(1, 3);
 
-    // Only the new play hops: Pump moves Alice 2 on from where she rolled to.
+    // Only the new play hops, without a die: Pump moves Alice 2 on from where she rolled to.
     render({ ...rolled, pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 5 }], lastMove: { ...roll, play: { card: 'Pump', steps: 2, from: 2, landed: 4, to: 4 } } });
+    expect(page.querySelector('[data-die]')).toBeNull();
     expect(hopsOf(1, 3)).toEqual([2, 3, 4, 4]);
 
     render({
@@ -1037,7 +1294,9 @@ describe('Chog Race board hops', () => {
       pawns: [{ seat: 1, tile: 4 }, { seat: 2, tile: 3 }],
       lastMove: { seat: 1, roll: 1, from: 3, landed: 4, to: 4, play: { card: 'Reverse', pushed: [{ seat: 2, from: 5, landed: 3, to: 3 }] } },
     });
-    // Bob waits on his tile while Alice's roll hops, then is pushed back a tile at a time.
+    // Bob waits on his tile while Alice's die and roll hops, then is pushed back a tile at a time.
+    vi.advanceTimersByTime(DIE_MS);
+    fixture.detectChanges();
     const alice = [at(1)];
     const bob = [at(2)];
     for (let i = 0; i < 4; i++) {
@@ -1048,6 +1307,9 @@ describe('Chog Race board hops', () => {
     }
     expect(alice).toEqual([3, 4, 4, 4, 4]);
     expect(bob).toEqual([5, 5, 5, 4, 3]);
+    // Alice's engine starts, then Bob's beeper sounds while Reverse pushes him back, and stops when he does.
+    vi.advanceTimersByTime(HOP_MS * 2);
+    expect(played.slice(-3)).toEqual(['carForward', 'carReverse', 'stop carReverse']);
   });
 
   it('shows a move without hops when the page loads, and with reduced motion', () => {
@@ -1057,5 +1319,7 @@ describe('Chog Race board hops', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
     render({ ...RACE_BOARD, pawns: [{ seat: 1, tile: 3 }, { seat: 2, tile: 2 }], lastMove: { seat: 2, roll: 2, from: 0, landed: 2, to: 2 } });
     expect(at(2)).toBe(2);
+    expect(page.querySelector('[data-die]')).toBeNull();
+    expect(played).toEqual([]);
   });
 });

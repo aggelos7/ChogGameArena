@@ -9,27 +9,36 @@ namespace ChogGames.Games.ChogRace.Abilities;
 /// Chog Race's abilities (RACE-007, STORY-055, DEC-059), one of which each player locks for a match and uses once, on
 /// their own turn and never while it waits for an attack's target (DEC-058).
 /// <list type="bullet">
-/// <item>Speed Boost is used before the roll: that turn's roll moves 2 more tiles, stopping on the Finish, and the tile
-/// landed on resolves as usual. A turn that runs out first keeps it for the next roll.</item>
-/// <item>Shield is used before or after the roll and stays up, for everyone to see, until the next Rug, Liquidated or
-/// Whale aimed at its player, which it blocks at once, with no reply window and their HODL kept. Reverse isn't
-/// blocked.</item>
-/// <item>Card Vision is used before or after the roll on a deck with cards: only its player sees the deck's top card,
-/// for as long as it stays on top; any draw ends it.</item>
-/// <item>Card Steal is used before or after the roll on an opponent holding a card: one of their cards, drawn at random
-/// by the server, moves to the player's hand, which must have room. Neither HODL nor Shield blocks it; only the two of
-/// them see which card moved.</item>
+/// <item>Speed Boost is used before the roll: that turn's roll moves <c>tiles</c> more tiles (2 at Base), stopping on
+/// the Finish, and the tile landed on resolves as usual. A turn that runs out first keeps it for the next roll.</item>
+/// <item>Shield is used before or after the roll and stays up, for everyone to see, until it has blocked <c>blocks</c>
+/// Rug, Liquidated or Whale cards aimed at its player (1 at Base), each at once, with no reply window and their HODL
+/// kept. Reverse isn't blocked.</item>
+/// <item>Card Vision is used before or after the roll on a deck with cards: only its player sees the deck's top
+/// <c>cards</c> cards (1 at Base) until the next draw, which ends it.</item>
+/// <item>Card Steal is used before or after the roll on an opponent holding a card: up to <c>cards</c> of their cards (1
+/// at Base), each drawn at random by the server, move to the player's hand while it has room. Neither HODL nor Shield
+/// blocks it; only the two of them see which cards moved.</item>
+/// <item>Double Dice is used before the roll: the server rolls <c>dice</c> dice (2 at Base) of the rules' move range at
+/// once, which every player sees, and the player's roll moves by the one they keep. A turn that runs out first keeps the
+/// highest, for their next roll (STORY-092, DEC-080).</item>
+/// <item>Freeze is used before or after the roll, at most once a turn, on an opponent still racing who isn't already due
+/// to skip: they skip their next turn, as after Liquidated. Neither HODL nor Shield blocks it (STORY-092, DEC-080).</item>
 /// </list>
-/// These are proposed defaults to balance later (requirements §15); a change to any definition means catalog version 2.
+/// The values here are the Base Tier's; holders of rarer Tiers lock stronger ones from <c>Abilities:Holder</c> (STORY-090,
+/// DEC-077). Version 2 added <c>blocks</c> and both <c>cards</c>; version 3 Double Dice and Freeze, which only holders may
+/// choose.
 /// </summary>
 public static class RaceAbilities
 {
-    public const int Version = 1;
+    public const int Version = 3;
 
     public const string MovementBoost = "movement_boost";
     public const string AttackBlock = "attack_block";
     public const string CardPreview = "card_preview";
     public const string CardSteal = "card_steal";
+    public const string DoubleDice = "double_dice";
+    public const string Freeze = "freeze";
 
     /// <summary>The player's turn, in the Move phase, before they roll.</summary>
     public const string BeforeRoll = "before_roll";
@@ -40,7 +49,22 @@ public static class RaceAbilities
     /// <summary>The tiles Speed Boost adds to the roll; a whole number of 1 to <see cref="RaceRules.CardMoveLimit"/>.</summary>
     public const string Tiles = "tiles";
 
-    /// <summary>The catalog, version 1, whose handlers act on <paramref name="game"/>'s match states.</summary>
+    /// <summary>The attacks a Shield blocks before it is spent; 1 to <see cref="MaxBlocks"/>.</summary>
+    public const string Blocks = "blocks";
+
+    /// <summary>The top cards Card Vision shows, or the cards Card Steal takes; 1 to <see cref="MaxCards"/>.</summary>
+    public const string Cards = "cards";
+
+    public const int MaxBlocks = 5;
+
+    public const int MaxCards = 5;
+
+    /// <summary>How many dice Double Dice rolls, one kept; 2 to <see cref="MaxDice"/>.</summary>
+    public const string Dice = "dice";
+
+    public const int MaxDice = 4;
+
+    /// <summary>The catalog, version 3, whose handlers act on <paramref name="game"/>'s match states.</summary>
     public static AbilityCatalog Catalog(ChogRaceMatchRules game)
     {
         ArgumentNullException.ThrowIfNull(game);
@@ -50,9 +74,11 @@ public static class RaceAbilities
             Definitions(),
             [
                 new Handler(game, MovementBoost, [new AbilityParameter(Tiles, 1, RaceRules.CardMoveLimit)]),
-                new Handler(game, AttackBlock, []),
-                new Handler(game, CardPreview, []),
-                new Handler(game, CardSteal, []),
+                new Handler(game, AttackBlock, [new AbilityParameter(Blocks, 1, MaxBlocks, Default: 1)]),
+                new Handler(game, CardPreview, [new AbilityParameter(Cards, 1, MaxCards, Default: 1)]),
+                new Handler(game, CardSteal, [new AbilityParameter(Cards, 1, MaxCards, Default: 1)]),
+                new Handler(game, DoubleDice, [new AbilityParameter(Dice, 2, MaxDice)]),
+                new Handler(game, Freeze, []),
             ],
             new Timing(game));
     }
@@ -62,26 +88,42 @@ public static class RaceAbilities
         AbilityDefinition.Create(
             MovementBoost,
             "Speed Boost",
-            "Use before you roll. Your roll moves 2 more tiles.",
+            "Use before you roll. Your roll moves {tiles} more tiles.",
             AbilityTargetKind.None,
             [BeforeRoll],
             new Dictionary<string, decimal> { [Tiles] = 2 }),
         AbilityDefinition.Create(
             AttackBlock,
             "Shield",
-            "Use on your turn. The next Rug, Liquidated or Whale played on you is blocked, and you keep your HODL.",
+            "Use on your turn. Blocks {blocks|the next attack|the next # attacks} played on you (Rug, Liquidated or Whale), and you keep your HODL.",
             AbilityTargetKind.None,
-            [BeforeRoll, AfterRoll]),
+            [BeforeRoll, AfterRoll],
+            new Dictionary<string, decimal> { [Blocks] = 1 }),
         AbilityDefinition.Create(
             CardPreview,
             "Card Vision",
-            "Use on your turn. Only you see the next card in the deck, until someone draws it.",
+            "Use on your turn. Only you see {cards|the top card|the top # cards} of the deck, until someone draws.",
             AbilityTargetKind.None,
-            [BeforeRoll, AfterRoll]),
+            [BeforeRoll, AfterRoll],
+            new Dictionary<string, decimal> { [Cards] = 1 }),
         AbilityDefinition.Create(
             CardSteal,
             "Card Steal",
-            "Use on your turn. Take a random card from an opponent holding one, if your hand has room.",
+            "Use on your turn. Take {cards|a random card|up to # random cards} from an opponent holding one, while your hand has room.",
+            AbilityTargetKind.Opponent,
+            [BeforeRoll, AfterRoll],
+            new Dictionary<string, decimal> { [Cards] = 1 }),
+        AbilityDefinition.Create(
+            DoubleDice,
+            "Double Dice",
+            "Use before you roll. {dice} dice are rolled for you and you move by the one you keep.",
+            AbilityTargetKind.None,
+            [BeforeRoll],
+            new Dictionary<string, decimal> { [Dice] = 2 }),
+        AbilityDefinition.Create(
+            Freeze,
+            "Freeze",
+            "Use on your turn. An opponent skips their next turn; HODL and Shield can't stop it. {uses|1 use|# uses} per game, one a turn.",
             AbilityTargetKind.Opponent,
             [BeforeRoll, AfterRoll]),
     ];
@@ -95,6 +137,9 @@ public static class RaceAbilities
         public string? CanExecute(AbilityContext context) => game.CanUse(context);
 
         public JsonElement Execute(AbilityContext context) => game.Use(context);
+
+        public AbilityEffect Apply(AbilityContext context) =>
+            new(game.Use(context), abilityId == Freeze ? context.Target!.PlayerId : null);
     }
 
     private sealed class Timing(ChogRaceMatchRules game) : IAbilityTiming

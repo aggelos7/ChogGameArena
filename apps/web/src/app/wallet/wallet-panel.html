@@ -28,22 +28,25 @@
       @switch (state.status) {
         @case ('disconnected') {
           @if (!signIn.signedInAddress()) {
-            <p class="hint">
-              Optional. Connect a wallet on {{ chain.name }}, then sign a message to prove you own it. Nothing is sent
-              on-chain and no funds move.
-            </p>
+            <p class="hint" data-wallet-note>Optional · {{ chain.name }} · free, no funds move</p>
           }
           @if (discovery.wallets().length > 0) {
             <ul class="wallet-list">
               @for (option of discovery.wallets(); track option.info.uuid) {
                 <li>
-                  <button type="button" class="connect" [attr.data-wallet]="option.info.rdns" (click)="wallet.connect(option)">
+                  <button
+                    type="button"
+                    class="connect"
+                    [attr.data-wallet]="option.info.rdns"
+                    [title]="'Connect ' + option.info.name"
+                    (click)="wallet.connect(option)"
+                  >
                     @if (option.info.icon) {
-                      <img [src]="option.info.icon" alt="" width="24" height="24" />
+                      <img [src]="option.info.icon" alt="" width="28" height="28" />
                     } @else {
                       <span class="icon-fallback" aria-hidden="true">{{ option.info.name.charAt(0) }}</span>
                     }
-                    Connect {{ option.info.name }}
+                    <span class="visually-hidden">Connect {{ option.info.name }}</span>
                   </button>
                 </li>
               }

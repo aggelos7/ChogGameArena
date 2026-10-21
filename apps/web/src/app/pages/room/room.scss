@@ -269,6 +269,36 @@ h2 {
   border: 2px solid var(--brand);
 }
 
+// Holder abilities (STORY-091, DEC-078): under a gold heading, outlined in gold; locked ones for non-holders.
+.holder-heading {
+  justify-self: start;
+  margin: 0.75rem 0 0;
+  padding: 0.125rem 0.625rem;
+  border-radius: 999px;
+  color: #fff;
+  background: #a16207;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-shadow: none;
+}
+
+.ability.holder:not(.chosen) {
+  border: 1px solid #a16207;
+  box-shadow: inset 4px 0 0 #a16207;
+}
+
+.ability.locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.lock {
+  margin-left: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 .ability-name {
   font-weight: 600;
 }

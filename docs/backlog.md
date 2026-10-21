@@ -820,6 +820,18 @@
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Names and artwork only; no change to the repository, code or image names.
 
 
+#### STORY-089 — Music and general fixes
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E07
+- **Implementation:** One story for the small changes of one session (DEC-076). **Music:** play the product owner's theme track (`public/audio/chog-kingdom-theme.mp3`) as the music of the whole site. Browsers only allow sound after an interaction, so it starts on the visitor's first click, tap or key press and then loops quietly (35% volume) across pages without restarting on navigation; nothing downloads before that. While the player is in a live match the theme pauses and the game's own track plays instead (a game without one is silent); the theme resumes where it was when the match ends or they leave. **Rolling die:** each roll in Chog Life and Chog Race shows a die tumbling over the board with a rolling sound, landing on the server's number before the pawn hops. **Car sounds:** in Chog Race an engine starts while a pawn drives on and a back-up beeper sounds while one goes back. **What each move did:** after its die and hops, each move shows a banner over the board, a popup over its tile and a line in a Recent moves list; the last-move line waits for the die too. **Last move:** a match's last move (the roll and hops onto the finish) is shown on the live board before the results appear. A speaker toggle in the header mutes and unmutes all music and sounds, remembered on the device. **General fixes:** the collector badge sits centred beside a name everywhere; what's yours (unlocked achievements, your Ladder row, your chosen Chog) has a purple background with white text, and other tiles on My Chogs and the Ladder have thin dashed borders like the profile's tiers, without the white card; the profile's wallet panel moves up beside your summary as a card, with the wallets as a row of logos and a one-line note.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** the theme starts on the first interaction and loops at 35% volume across pages, pauses for the game's track during a live match and resumes after it, a roll shows the die landing on its number with the rolling sound before the pawn hops, a Chog Race car sounds while it moves (reversing when it goes back), and the header toggle mutes all of it and plays it again; the profile shows the wallet card beside the summary.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a remembered mute keeps every page silent, a refused playback is retried on the next interaction, and blocked storage only makes the choice last for the visit.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. The changes listed here as the session adds them; no volume slider and no server change. Web only.
+
 ## E08 — Chog Race
 
 
@@ -1037,6 +1049,48 @@
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** oversized, non-image, malformed or disguised files are refused without changing the avatar, and no player can change another player's avatar.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. No new storage service or container; NFT avatars are out of scope.
+
+
+### Feature: Holder advantage
+
+
+#### STORY-090 — Holder ability pool and Tier strength
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E09
+- **Implementation:** Give Chog holders an advantage in matches (DEC-077). A holder is a player whose match character is a Chog they own, checked live at start; the Tier comes from that Chog's `Tier` trait. A new holder strategy replaces `SharedAbilityPoolStrategy` as the registered `IAbilityAssignmentStrategy`: everyone may choose the game's 2 standard abilities, holders all of them. It returns each ability with the values of the character's Tier, and `AbilityPool`/`AbilitySnapshot` lock those values at start instead of requiring the catalog's own (catalog v2 for both games). The split and the Tier table live in `Abilities:Holder`, checked at startup against each handler's parameter ranges. The existing abilities get the new values they need: Chog Life Event Preview `uses`, Lucky Reroll `draws`; Chog Race Shield `blocks`, Card Vision `cards`, Card Steal `cards`, with their effects scaled. Chog Life: Reward Boost and Loss Protection standard, Event Preview and Lucky Reroll holder-only. Chog Race: Shield and Card Vision standard, Speed Boost and Card Steal holder-only. The match's ability panel shows the locked values and uses left. Update NFT-011–017 and the "Equal abilities" acceptance test in `docs/requirements.md`.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a guest or a standard Chog sees only the 2 standard abilities with Base values, a holder of a Common Chog sees all of the game's abilities with Base values, and holders of rarer Tiers lock the Tier's values from the config, which their effects apply in the match (e.g. an Epic Speed Boost moves 4 more tiles, a Rare Shield blocks 2 attacks).
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: a non-holder choosing a holder-only ability is refused (`ability_unavailable`), a Chog sold before the start plays with the standard pool, traits and values never come from a request, a config change never alters a running match, and a bad `Abilities:Holder` value stops the API at startup.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. No new abilities (STORY-091, STORY-092) and no Chog Royale abilities; no perk shown on My Chogs or the character picker.
+
+
+#### STORY-091 — Chog Life holder abilities: Double Dice and Tax the Rich
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E09
+- **Implementation:** Two new holder-only Chog Life abilities (DEC-077), added to the catalog with their Tier values in `Abilities:Holder`. **Double Dice:** used before the roll; the server rolls `dice` dice (2, or 3 from Rare) and the player keeps one of them for that move; a turn that runs out keeps the highest. **Tax the Rich:** used on the player's turn; takes `percent` (10% to 20% by Tier) of the MON of the richest other player still in the match, capped, and adds it to the player's; ties pick the first by seat; refused when the player is already the richest. Both show in the match's ability panel and last-move line like the other abilities.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a holder can lock and use either ability, Double Dice moves by the die they keep and Tax the Rich moves the Tier's share of MON from the richest opponent, with the results counted in the final standings.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: non-holders can't choose them, use outside the window, a second use or Tax the Rich while richest is refused with a stable code, and the kept die must be one the server rolled.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Life only.
+
+
+#### STORY-092 — Chog Race holder abilities: Double Dice and Freeze
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E09
+- **Implementation:** Two new holder-only Chog Race abilities (DEC-077), added to the catalog with their Tier values in `Abilities:Holder`. **Double Dice:** used before the roll; the server rolls `dice` dice (2, or 3 from Rare) and the player keeps one of them for that move; a turn that runs out keeps the highest. **Freeze:** used on the player's turn on an opponent still racing; that opponent skips their next turn, using the engine's existing skip-turn support (DEC-058), with `uses` 1, or 2 from Epic. Both show in the "Your ability" panel and the latest ability line like the other abilities.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a holder can lock and use either ability, Double Dice moves by the die they keep and a Frozen opponent is passed over once, shown with a "Skips a turn" tag.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: non-holders can't choose them, use outside the window, beyond the Tier's uses, on a finished or absent opponent, or on one already skipping is refused with a stable code, and the kept die must be one the server rolled.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Race only.
 
 
 ## E10 — Chog Royale

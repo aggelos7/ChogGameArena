@@ -8,8 +8,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ChogGames.Api.Tests.Characters;
 
 /// <summary>
-/// STORY-061, DEC-066: the lobby's Chog carries stored traits only while trait-based abilities are on; under the mock
-/// provider they are the fixtures'. Nothing here reads the chain or the database.
+/// STORY-061, DEC-066, STORY-090, DEC-077: the lobby's Chog carries its stored traits, for the holder's Tier, whether or
+/// not the superseded trait rules are on; under the mock provider they are the fixtures'. Nothing here reads the chain
+/// or the database.
 /// </summary>
 public class LobbyCharactersTests
 {
@@ -40,12 +41,14 @@ public class LobbyCharactersTests
         return await scope.ServiceProvider.GetRequiredService<LobbyCharacters>().ForEachAsync(players, CancellationToken.None);
     }
 
-    [Fact]
-    public async Task With_the_flag_on_a_selected_nft_carries_its_stored_traits()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_selected_nft_carries_its_stored_traits(bool enabled)
     {
         var (golden, noTraits, guest) = (Holder(7), Holder(1969), Guest());
 
-        var lobby = await LobbyAsync("Mock", enabled: true, golden, noTraits, guest);
+        var lobby = await LobbyAsync("Mock", enabled, golden, noTraits, guest);
 
         Assert.Equal(MockNftFixtures.Golden.Traits, lobby[golden.Id].Traits);
         Assert.Equal((CharacterKind.Nft, "7"), (lobby[golden.Id].Kind, lobby[golden.Id].CharacterId));
@@ -54,13 +57,13 @@ public class LobbyCharactersTests
     }
 
     [Theory]
-    [InlineData("Mock", false)]
-    [InlineData("None", true)]
-    public async Task Without_the_flag_or_a_trait_source_the_lobby_chog_has_no_traits(string provider, bool enabled)
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Without_a_trait_source_the_lobby_chog_has_no_traits(bool enabled)
     {
         var golden = Holder(7);
 
-        var lobby = await LobbyAsync(provider, enabled, golden);
+        var lobby = await LobbyAsync("None", enabled, golden);
 
         Assert.Equal((CharacterKind.Nft, "7"), (lobby[golden.Id].Kind, lobby[golden.Id].CharacterId));
         Assert.Empty(lobby[golden.Id].Traits);

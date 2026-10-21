@@ -13,7 +13,10 @@ namespace ChogGames.Games.ChogLife.Tests;
 /// STORY-042, DEC-044: Chog Life's four abilities through the shared engine. Reward Boost, Loss Protection and Lucky
 /// Reroll are armed before a roll and act on the first tile outcome they fit. Event Preview is armed at a fork; choosing
 /// a lane then draws the next move there and shows only its player the die, tile and event outcome. Keeping the lane
-/// plays it out exactly as shown; switching moves the stake and draws the next roll afresh.
+/// plays it out exactly as shown; switching moves the stake and draws the next roll afresh. STORY-090, DEC-077: with a
+/// holder Tier's locked values, the boost and the protection are stronger, Lucky Reroll draws more often and Event
+/// Preview has more uses. STORY-091, DEC-078: Double Dice rolls its dice at once and the roll moves by the one kept (the
+/// highest when the turn runs out); Tax the Rich moves a share of the richest opponent's liquid MON, capped.
 /// </summary>
 public class ChogLifeAbilityTests
 {
@@ -47,18 +50,37 @@ public class ChogLifeAbilityTests
     }
 
     /// <summary>A started two-player match: seat 1 locked <paramref name="ability"/>, seat 2 Reward Boost.</summary>
-    private static (GameRoom Room, Player[] Players) Started(string ability)
+    private static (GameRoom Room, Player[] Players) Started(string ability) =>
+        StartedWith(Catalog.Definitions.Single(d => d.Id == ability));
+
+    /// <summary>The catalog's ability with a holder Tier's values and uses (STORY-090, DEC-077).</summary>
+    private static AbilityDefinition Tiered(string id, Dictionary<string, decimal> values, int? uses = null)
     {
-        var players = Enumerable.Range(1, 2).Select(n =>
+        var defined = Catalog.Definitions.Single(d => d.Id == id);
+        return defined.WithValues(values, uses ?? defined.MaxUses);
+    }
+
+    /// <summary>
+    /// A started match of <paramref name="count"/> players: seat 1 locked <paramref name="definition"/> with its values, the
+    /// others Reward Boost.
+    /// </summary>
+    private static (GameRoom Room, Player[] Players) StartedWith(AbilityDefinition definition, int count = 2)
+    {
+        var ability = definition.Id;
+        var players = Enumerable.Range(1, count).Select(n =>
         {
             Assert.True(PlayerDisplayName.TryCreate($"Player {n}", out var name));
             return Player.CreateGuest(name, Now);
         }).ToArray();
         Assert.True(RoomCode.TryParse("K7QF3M", out var code));
         var room = GameRoom.Create(GameDefinition.Create(GameDefinition.ChogLife, 2, 6), players[0], code, Now);
-        room.Join(players[1], Now.AddSeconds(1));
+        foreach (var (player, n) in players.Skip(1).Select((player, n) => (player, n)))
+        {
+            room.Join(player, Now.AddSeconds(1 + n));
+            room.SelectAbility(player.Id, LifeAbilities.RewardBoost);
+        }
+
         room.SelectAbility(players[0].Id, ability);
-        room.SelectAbility(players[1].Id, LifeAbilities.RewardBoost);
         foreach (var player in players)
         {
             room.MarkReady(player);
@@ -72,11 +94,7 @@ public class ChogLifeAbilityTests
             TimeSpan.FromSeconds(20),
             random,
             Now.AddMinutes(1),
-            new Dictionary<Guid, AbilitySnapshot>
-            {
-                [players[0].Id] = Locked(ability),
-                [players[1].Id] = Locked(LifeAbilities.RewardBoost),
-            },
+            players.ToDictionary(p => p.Id, p => p == players[0] ? AbilitySnapshot.Lock(Catalog, definition) : Locked(LifeAbilities.RewardBoost)),
             started => Rules.StartState(new MatchStartContext(started, random))?.GetRawText());
         return (room, players);
     }
@@ -141,15 +159,17 @@ public class ChogLifeAbilityTests
         Apply(room, player, ChogLifeMatchRules.Roll, State("""{"seat":1,"tile":6,"mon":100}"""), new Dice(3)).State!.Value.GetRawText();
 
     [Fact]
-    public void The_catalog_offers_the_four_abilities_once_each_with_their_windows_and_values()
+    public void The_catalog_offers_the_six_abilities_once_each_with_their_windows_and_values()
     {
-        Assert.Equal((GameDefinition.ChogLife, 1), (Catalog.GameType, Catalog.Version));
+        Assert.Equal((GameDefinition.ChogLife, 3), (Catalog.GameType, Catalog.Version));
         Assert.Equal(
             [
                 ("reward_boost", "Reward Boost", "before_roll", "percent=25"),
                 ("loss_protection", "Loss Protection", "before_roll", "percent=50"),
                 ("event_preview", "Event Preview", "at_fork", ""),
-                ("event_reroll", "Lucky Reroll", "before_roll", ""),
+                ("event_reroll", "Lucky Reroll", "before_roll", "draws=2"),
+                ("double_dice", "Double Dice", "before_roll", "dice=2"),
+                ("tax_the_rich", "Tax the Rich", "before_roll", "cap=50,percent=10"),
             ],
             Catalog.Definitions.Select(d => (
                 d.Id,
@@ -268,6 +288,70 @@ public class ChogLifeAbilityTests
         Assert.Equal([(1, 7), (0, 100), (0, 100)], dice.Draws);
         Assert.Equal((change, discarded), (LastMove(rolled).GetProperty("change").GetInt32(), LastMove(rolled).GetProperty("rerolled").GetInt32()));
         Assert.False(PawnView(room, players[0], rolled, 1).TryGetProperty("armed", out _));
+    }
+
+    [Fact]
+    public void A_legendary_reward_boost_adds_half_of_the_next_reward()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.RewardBoost, new() { [LifeAbilities.Percent] = 50 }));
+        var armed = Armed(room, players[0], LifeAbilities.RewardBoost, room.State!);
+
+        var rolled = Roll(room, players[0], armed, new Dice(2));
+
+        Assert.Equal((20, 10), (LastMove(rolled).GetProperty("change").GetInt32(), LastMove(rolled).GetProperty("boost").GetInt32()));
+    }
+
+    [Fact]
+    public void A_legendary_loss_protection_takes_only_a_quarter_of_the_next_loss()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.LossProtection, new() { [LifeAbilities.Percent] = 25 }));
+        var armed = Armed(room, players[0], LifeAbilities.LossProtection, room.State!);
+
+        // The loss tile at 5 takes 15: 25% of it is taken, rounding up, and 11 saved.
+        var rolled = Roll(room, players[0], armed, new Dice(5));
+
+        Assert.Equal("""{"seat":1,"roll":5,"from":0,"to":5,"path":[1,2,3,4,5],"change":-4,"saved":11}""", LastMove(rolled).GetRawText());
+        Assert.Equal(96, PawnView(room, players[0], rolled, 1).GetProperty("mon").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(99, 99, 0, 10)] // two losses, then a gain: the gain applies
+    [InlineData(99, 99, 99, -10)] // three losses: one applies
+    public void A_rare_lucky_reroll_draws_an_event_three_times_and_keeps_the_best(int first, int second, int third, int change)
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.EventReroll, new() { [LifeAbilities.Draws] = 3 }));
+        var armed = Armed(room, players[0], LifeAbilities.EventReroll, room.State!);
+        var dice = new Dice(6, first, second, third);
+
+        var rolled = Roll(room, players[0], armed, dice);
+
+        Assert.Equal([(1, 7), (0, 100), (0, 100), (0, 100)], dice.Draws);
+        var move = LastMove(rolled);
+        Assert.Equal((change, -10, 3), (move.GetProperty("change").GetInt32(), move.GetProperty("rerolled").GetInt32(), move.GetProperty("draws").GetInt32()));
+    }
+
+    [Fact]
+    public void A_lucky_reroll_armed_before_tier_values_draws_twice()
+    {
+        var (room, players) = Started(LifeAbilities.EventReroll);
+        var armed = State("""{"seat":1,"tile":0,"mon":100,"armed":{"ability":"event_reroll"}}""");
+        var dice = new Dice(6, 99, 0);
+
+        var rolled = Roll(room, players[0], armed, dice);
+
+        Assert.Equal([(1, 7), (0, 100), (0, 100)], dice.Draws);
+        Assert.Equal((10, 2), (LastMove(rolled).GetProperty("change").GetInt32(), LastMove(rolled).GetProperty("draws").GetInt32()));
+    }
+
+    [Fact]
+    public void An_epic_event_preview_has_two_uses()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.EventPreview, [], uses: 2));
+        var member = room.Members.Single(m => m.PlayerId == players[0].Id);
+
+        Assert.Equal((2, 2), (member.Ability!.MaxUses, member.AbilityUsesLeft));
+        Assert.EndsWith("2 uses per game.", member.Ability.Description);
+        Assert.EndsWith("1 use per game.", Catalog.Definitions.Single(d => d.Id == LifeAbilities.EventPreview).Description);
     }
 
     [Theory]
@@ -570,5 +654,253 @@ public class ChogLifeAbilityTests
         var decision = Apply(room, players[0], ChogLifeMatchRules.Roll, State(pawn), dice);
 
         Assert.Equal(("game_state_unavailable", 0), (decision.Reason, dice.Draws.Count));
+    }
+
+    private static string Pawns(params string[] pawns) => $$"""{"rulesVersion":1,"pawns":[{{string.Join(",", pawns)}}]}""";
+
+    private static MatchRuleDecision RollKeeping(GameRoom room, Player player, string state, IRandomSource dice, object payload) =>
+        Apply(room, player, ChogLifeMatchRules.Roll, state, dice, payload);
+
+    private static int Mon(GameRoom room, Player viewer, string state, int seat) =>
+        PawnView(room, viewer, state, seat).GetProperty("mon").GetInt32();
+
+    [Fact]
+    public void Double_dice_rolls_its_dice_at_once_for_everyone_to_see_and_keeps_the_turn()
+    {
+        var (room, players) = Started(LifeAbilities.DoubleDice);
+        var dice = new Dice(2, 5);
+
+        var rolled = Armed(room, players[0], LifeAbilities.DoubleDice, room.State!, dice);
+
+        Assert.Equal([(1, 7), (1, 7)], dice.Draws);
+        Assert.Equal("[2,5]", PawnView(room, players[1], rolled, 1).GetProperty("dice").GetRawText());
+        Assert.False(PawnView(room, players[1], rolled, 1).TryGetProperty("armed", out _));
+        Assert.False(View(room, players[0], rolled).TryGetProperty("lastMove", out _));
+    }
+
+    [Theory]
+    [InlineData(2, """{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2],"change":20,"dice":[2,5]}""")]
+    [InlineData(5, """{"seat":1,"roll":5,"from":0,"to":5,"path":[1,2,3,4,5],"change":-15,"dice":[2,5]}""")]
+    public void The_roll_after_double_dice_moves_by_the_die_kept_and_draws_no_die(int kept, string move)
+    {
+        var (room, players) = Started(LifeAbilities.DoubleDice);
+        var rolled = Armed(room, players[0], LifeAbilities.DoubleDice, room.State!, new Dice(2, 5));
+        var dice = new Dice();
+
+        var decision = RollKeeping(room, players[0], rolled, dice, new { die = kept });
+
+        Assert.Equal((MatchRuleOutcome.Accepted, true), (decision.Outcome, decision.EndsTurn));
+        var state = decision.State!.Value.GetRawText();
+        Assert.Equal(move, LastMove(state).GetRawText());
+        Assert.Empty(dice.Draws);
+        Assert.False(PawnView(room, players[0], state, 1).TryGetProperty("dice", out _));
+    }
+
+    [Fact]
+    public void A_rare_double_dice_rolls_three_dice()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.DoubleDice, new() { [LifeAbilities.Dice] = 3 }));
+        var dice = new Dice(1, 6, 3);
+
+        var rolled = Armed(room, players[0], LifeAbilities.DoubleDice, room.State!, dice);
+
+        Assert.Equal(3, dice.Draws.Count);
+        Assert.Equal("[1,6,3]", PawnView(room, players[1], rolled, 1).GetProperty("dice").GetRawText());
+        Assert.Equal(3, LastMove(RollKeeping(room, players[0], rolled, new Dice(0), new { die = 3 }).State!.Value.GetRawText()).GetProperty("roll").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(null, "choose_die")]
+    [InlineData("""{"die":"5"}""", "choose_die")]
+    [InlineData("""{"die":4}""", "invalid_die")]
+    [InlineData("""{"die":7}""", "invalid_die")]
+    [InlineData("""{"die":5.5}""", "choose_die")]
+    public void The_kept_die_must_be_one_the_server_rolled(string? payload, string reason)
+    {
+        var (room, players) = Started(LifeAbilities.DoubleDice);
+        var rolled = Armed(room, players[0], LifeAbilities.DoubleDice, room.State!, new Dice(2, 5));
+        var dice = new Dice(4);
+
+        var decision = RollKeeping(room, players[0], rolled, dice, payload is null ? new { } : JsonDocument.Parse(payload).RootElement);
+
+        Assert.Equal((MatchRuleOutcome.Rejected, reason, 0), (decision.Outcome, decision.Reason, dice.Draws.Count));
+    }
+
+    [Fact]
+    public void A_roll_without_double_dice_ignores_a_die_in_the_payload()
+    {
+        var (room, players) = Started(LifeAbilities.RewardBoost);
+
+        var decision = RollKeeping(room, players[0], room.State!, new Dice(1), new { die = 6 });
+
+        Assert.Equal(1, LastMove(decision.State!.Value.GetRawText()).GetProperty("roll").GetInt32());
+    }
+
+    [Fact]
+    public void Dice_already_rolled_cannot_be_rolled_again()
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.DoubleDice, new() { [LifeAbilities.Dice] = 2 }, uses: 2));
+        var rolled = Armed(room, players[0], LifeAbilities.DoubleDice, room.State!, new Dice(2, 5));
+        var dice = new Dice(1, 1);
+
+        Assert.Equal(("dice_rolled", 0), (Use(room, players[0], LifeAbilities.DoubleDice, rolled, dice).Reason, dice.Draws.Count));
+    }
+
+    [Fact]
+    public void A_turn_that_runs_out_after_double_dice_keeps_the_highest_for_the_next_roll()
+    {
+        var (room, players) = Started(LifeAbilities.DoubleDice);
+        var rolled = Armed(room, players[0], LifeAbilities.DoubleDice, room.State!, new Dice(5, 2));
+
+        using var document = JsonDocument.Parse(rolled);
+        var dice = new Dice();
+        var timedOut = Rules.TimeOutTurn(new MatchTurnContext(room, document.RootElement, dice))!.Value.GetRawText();
+
+        Assert.Empty(dice.Draws);
+        var pawn = PawnView(room, players[1], timedOut, 1);
+        Assert.Equal((0, "[5,2]", 5), (pawn.GetProperty("tile").GetInt32(), pawn.GetProperty("dice").GetRawText(), pawn.GetProperty("kept").GetInt32()));
+
+        // The next roll moves by the die kept, whatever the payload says.
+        var decision = RollKeeping(room, players[0], timedOut, dice, new { die = 2 });
+        Assert.Equal("""{"seat":1,"roll":5,"from":0,"to":5,"path":[1,2,3,4,5],"change":-15,"dice":[5,2]}""", LastMove(decision.State!.Value.GetRawText()).GetRawText());
+        Assert.Empty(dice.Draws);
+    }
+
+    [Fact]
+    public void A_turn_that_runs_out_with_the_die_already_kept_is_skipped()
+    {
+        var (room, players) = Started(LifeAbilities.DoubleDice);
+        using var document = JsonDocument.Parse(State("""{"seat":1,"tile":0,"mon":100,"dice":[5,2],"kept":5}"""));
+
+        Assert.Null(Rules.TimeOutTurn(new MatchTurnContext(room, document.RootElement, new Dice())));
+    }
+
+    [Theory]
+    [InlineData("""{"seat":1,"tile":0,"mon":100,"dice":[5]}""")] // one die
+    [InlineData("""{"seat":1,"tile":0,"mon":100,"dice":[1,2,3,4,5]}""")] // too many
+    [InlineData("""{"seat":1,"tile":0,"mon":100,"dice":[0,5]}""")] // off the die
+    [InlineData("""{"seat":1,"tile":0,"mon":100,"dice":[7,5]}""")]
+    [InlineData("""{"seat":1,"tile":0,"mon":100,"dice":[2,5],"kept":4}""")] // kept a die not rolled
+    [InlineData("""{"seat":1,"tile":0,"mon":100,"kept":4}""")] // kept without dice
+    public void A_roll_with_dice_out_of_range_changes_nothing(string pawn)
+    {
+        var (room, players) = Started(LifeAbilities.DoubleDice);
+        var dice = new Dice(2);
+
+        var decision = RollKeeping(room, players[0], State(pawn), dice, new { die = 5 });
+
+        Assert.Equal(("game_state_unavailable", 0), (decision.Reason, dice.Draws.Count));
+    }
+
+    [Theory]
+    [InlineData(LifeAbilities.DoubleDice)]
+    [InlineData(LifeAbilities.TaxTheRich)]
+    public void Double_dice_and_tax_the_rich_cannot_be_used_while_choosing_a_lane(string ability)
+    {
+        var (room, players) = Started(ability);
+
+        Assert.Equal(AbilityRefusal.NotNow, Use(room, players[0], ability, AtFork(room, players[0])).Reason);
+    }
+
+    [Fact]
+    public void Tax_the_rich_takes_a_tenth_of_the_richest_opponents_liquid_mon_and_the_roll_tells_it()
+    {
+        var (room, players) = Started(LifeAbilities.TaxTheRich);
+        var dice = new Dice();
+
+        var taxed = Armed(room, players[0], LifeAbilities.TaxTheRich, State("""{"seat":1,"tile":0,"mon":100}""", """{"seat":2,"tile":0,"mon":305}"""), dice);
+
+        Assert.Empty(dice.Draws);
+        Assert.Equal((130, 275), (Mon(room, players[1], taxed, 1), Mon(room, players[1], taxed, 2)));
+        Assert.Equal("""{"seat":1,"from":2,"amount":30}""", View(room, players[1], taxed).GetProperty("tax").GetRawText());
+
+        var rolled = Roll(room, players[0], taxed, new Dice(2));
+        Assert.Equal(
+            """{"seat":1,"roll":2,"from":0,"to":2,"path":[1,2],"change":20,"taxed":{"seat":1,"from":2,"amount":30}}""",
+            LastMove(rolled).GetRawText());
+        Assert.False(View(room, players[1], rolled).TryGetProperty("tax", out _));
+        Assert.Equal(150, Mon(room, players[1], rolled, 1));
+    }
+
+    [Theory]
+    [InlineData(18, 1000, 50)] // capped
+    [InlineData(20, 200, 40)]
+    [InlineData(12, 99, 11)] // rounded down
+    public void Tax_the_rich_takes_the_tiers_percent_at_most_the_cap(int percent, int richest, int taken)
+    {
+        var (room, players) = StartedWith(Tiered(LifeAbilities.TaxTheRich, new() { [LifeAbilities.Percent] = percent, [LifeAbilities.Cap] = 50 }));
+
+        var taxed = Armed(room, players[0], LifeAbilities.TaxTheRich, State("""{"seat":1,"tile":0,"mon":10}""", $$"""{"seat":2,"tile":0,"mon":{{richest}}}"""));
+
+        Assert.Equal((10 + taken, richest - taken), (Mon(room, players[1], taxed, 1), Mon(room, players[1], taxed, 2)));
+    }
+
+    [Fact]
+    public void The_richest_is_by_total_portfolio_and_only_liquid_mon_is_taken()
+    {
+        var (room, players) = StartedWith(Catalog.Definitions.Single(d => d.Id == LifeAbilities.TaxTheRich), count: 3);
+
+        // Seat 2 holds the most liquid MON, but seat 3's bonuses and stake make it the richest.
+        var taxed = Armed(room, players[0], LifeAbilities.TaxTheRich, Pawns(
+            """{"seat":1,"tile":0,"mon":100}""",
+            """{"seat":2,"tile":0,"mon":300}""",
+            """{"seat":3,"tile":10,"mon":200,"stake":{"lane":"Safe","amount":50},"bonuses":100}"""));
+
+        var rich = PawnView(room, players[1], taxed, 3);
+        Assert.Equal((120, 300), (Mon(room, players[1], taxed, 1), Mon(room, players[1], taxed, 2)));
+        Assert.Equal((180, 50, 100, 330), (rich.GetProperty("mon").GetInt32(), rich.GetProperty("assets").GetInt32(), rich.GetProperty("bonuses").GetInt32(), rich.GetProperty("portfolio").GetInt32()));
+    }
+
+    [Fact]
+    public void A_tie_for_richest_takes_from_the_first_by_seat()
+    {
+        var (room, players) = StartedWith(Catalog.Definitions.Single(d => d.Id == LifeAbilities.TaxTheRich), count: 3);
+
+        var taxed = Armed(room, players[0], LifeAbilities.TaxTheRich, Pawns(
+            """{"seat":1,"tile":0,"mon":100}""", """{"seat":2,"tile":0,"mon":300}""", """{"seat":3,"tile":0,"mon":300}"""));
+
+        Assert.Equal((270, 300), (Mon(room, players[1], taxed, 2), Mon(room, players[1], taxed, 3)));
+    }
+
+    [Fact]
+    public void A_finished_opponent_can_be_taxed_but_one_who_left_cannot()
+    {
+        var (room, players) = StartedWith(Catalog.Definitions.Single(d => d.Id == LifeAbilities.TaxTheRich), count: 3);
+        room.Leave(players[1].Id, Now.AddMinutes(2));
+
+        var state = Pawns("""{"seat":1,"tile":0,"mon":100}""", """{"seat":2,"tile":0,"mon":900}""", """{"seat":3,"tile":35,"mon":200}""")
+            .Replace("]}", "],\"finished\":[3]}", StringComparison.Ordinal);
+        var taxed = Armed(room, players[0], LifeAbilities.TaxTheRich, state);
+
+        Assert.Equal((120, 180), (Mon(room, players[0], taxed, 1), Mon(room, players[0], taxed, 3)));
+    }
+
+    [Theory]
+    [InlineData("""{"seat":1,"tile":0,"mon":300}""", """{"seat":2,"tile":0,"mon":300}""", "already_richest")]
+    [InlineData("""{"seat":1,"tile":0,"mon":400}""", """{"seat":2,"tile":0,"mon":300}""", "already_richest")]
+    [InlineData("""{"seat":1,"tile":0,"mon":100,"bonuses":300}""", """{"seat":2,"tile":0,"mon":350}""", "already_richest")]
+    [InlineData("""{"seat":1,"tile":0,"mon":100}""", """{"seat":2,"tile":0,"mon":0,"bonuses":500}""", "nothing_to_tax")]
+    [InlineData("""{"seat":1,"tile":0,"mon":100}""", """{"seat":2,"tile":0,"mon":9,"bonuses":500}""", "nothing_to_tax")]
+    public void Tax_the_rich_is_refused_without_a_richer_opponent_with_mon_to_take(string pawn1, string pawn2, string reason)
+    {
+        var (room, players) = Started(LifeAbilities.TaxTheRich);
+        var dice = new Dice();
+
+        Assert.Equal((reason, 0), (Use(room, players[0], LifeAbilities.TaxTheRich, State(pawn1, pawn2), dice).Reason, dice.Draws.Count));
+    }
+
+    [Fact]
+    public void Taxed_mon_counts_in_the_final_standings()
+    {
+        var (room, players) = Started(LifeAbilities.TaxTheRich);
+        var taxed = Armed(room, players[0], LifeAbilities.TaxTheRich, State("""{"seat":1,"tile":0,"mon":100}""", """{"seat":2,"tile":0,"mon":110}"""));
+
+        using var document = JsonDocument.Parse(taxed);
+        var ending = Rules.EndMatch(new MatchEndContext(room, document.RootElement, TimeUp: true))!;
+
+        // 111 to 99: the tax turned a 10 MON deficit into a lead.
+        Assert.Equal(
+            [(players[0].Id, 1, 111), (players[1].Id, 2, 99)],
+            ending.Standings.Select(s => (s.PlayerId, s.Rank, s.Result!.Value.GetProperty("portfolio").GetInt32())));
     }
 }

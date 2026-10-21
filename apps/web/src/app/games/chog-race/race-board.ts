@@ -15,12 +15,14 @@ import {
 } from '@angular/core';
 import { RoomMember } from '../../rooms/rooms-api';
 import { HOP_MS, SIDE_BY_SIDE, reducedMotion } from '../chog-life/life-board';
-import { timeLeft } from '../chog-life/life-board-model';
+import { diceList, timeLeft } from '../chog-life/life-board-model';
 import { seatColor } from '../seats';
 import {
   RACE_CARD_NAMES,
   RACE_CARD_STEAL,
   RACE_CARD_VISION,
+  RACE_DOUBLE_DICE,
+  RACE_FREEZE,
   RACE_SHIELD,
   RACE_SPEED_BOOST,
   RaceBoard,
@@ -37,7 +39,11 @@ import {
   raceTileLabel,
   raceWalk,
 } from './race-board-model';
+import { HolderBadge } from '../holder-badge';
 import { ReportPhoto } from '../../moderation/report-photo';
+import { DIE_MS, DieRoll, RollingDie } from '../rolling-die';
+import { BANNER_MS, MoveBanner, MoveNews, RECENT_MOVES, RecentMoves, signedTilesText } from '../move-news';
+import { SoundEffect, SoundEffects } from '../../shell/sound-effects';
 
 /** A card you can play now, and for Whale, Rug and Liquidated the opponent it's played on (DEC-057, DEC-058). */
 export interface RaceCardPlay {
@@ -45,7 +51,7 @@ export interface RaceCardPlay {
   target?: number;
 }
 
-/** Your locked ability used now, and for Card Steal the opponent it's used on (STORY-055, DEC-059). */
+/** Your locked ability used now, and for Card Steal and Freeze the opponent it's used on (STORY-055, DEC-059; STORY-092). */
 export interface RaceAbilityPlay {
   abilityId: string;
   target?: number;
@@ -70,6 +76,15 @@ interface DrawnPawn {
   isHopping?: boolean;
 }
 
+/** Which car sound a hop from `now` to `then` makes: reversing if any pawn goes back, the engine if one drives on. */
+function carHeading(now: ReadonlyMap<number, number>, then: ReadonlyMap<number, number> | undefined): SoundEffect | null {
+  if (!then) {
+    return null;
+  }
+  const steps = [...then].map(([seat, tile]) => tile - (now.get(seat) ?? tile));
+  return steps.some((step) => step < 0) ? 'carReverse' : steps.some((step) => step > 0) ? 'carForward' : null;
+}
+
 /**
  * The Chog Race board (STORY-050, DEC-054): the track as a serpentine grid, four tiles a row on a phone and up to ten on
  * wider screens, so the whole race is on screen. Each tile shows its number, what it does and the pawns on it, up to all
@@ -91,7 +106,7 @@ interface DrawnPawn {
  */
 @Component({
   selector: 'app-race-board',
-  imports: [ReportPhoto],
+  imports: [ReportPhoto, RollingDie, MoveBanner, RecentMoves, HolderBadge],
   templateUrl: './race-board.html',
   styleUrl: './race-board.scss',
 })
@@ -103,12 +118,17 @@ export class RaceBoardView {
   /** A command is on its way: the buttons wait for it. */
   readonly rolling = input(false);
   readonly roll = output<void>();
+  /** The move on the track has been shown: its die and hops are over, or it had none (DEC-076). */
+  readonly settled = output<void>();
   readonly endTurn = output<void>();
   readonly playCard = output<RaceCardPlay>();
   /** Lets an attack on you land (DEC-058). */
   readonly pass = output<void>();
   /** Uses your locked ability (DEC-059). */
   readonly useAbility = output<RaceAbilityPlay>();
+
+  /** Rolls keeping one of the dice Double Dice rolled for you (STORY-092, DEC-080). */
+  readonly keepDie = output<number>();
 
   protected readonly label = raceTileLabel;
 
@@ -146,6 +166,32 @@ export class RaceBoardView {
 
   /** Where pawns are shown while a move hops along, by seat; null when no move is being shown. */
   private readonly hops = signal<ReadonlyMap<number, number> | null>(null);
+  /** The die over the track while a new roll is shown, before its pawn hops (DEC-076). */
+  protected readonly die = signal<DieRoll | null>(null);
+  private rolls = 0;
+  private readonly sounds = inject(SoundEffects);
+  /** A move's die or hops are being shown (DEC-076). */
+  readonly moving = signal(false);
+  /**
+   * The latest move as the page tells it: the server's, once its die and hops have been shown, so the words don't give
+   * the roll away before the die lands (DEC-076).
+   */
+  private readonly revealed = signal<RaceMove | undefined>(undefined);
+  /** What the move just shown did, over the track for a moment; null otherwise. */
+  protected readonly banner = signal<MoveNews | null>(null);
+  /** The popup over the tile the move just shown stopped on, while its banner shows. */
+  protected readonly popup = computed(() => {
+    const news = this.banner();
+    return news?.popup ? { ...news.popup, tone: news.tone, id: news.id } : null;
+  });
+  /** The latest moves seen on this page, newest first. */
+  protected readonly recent = signal<MoveNews[]>([]);
+  /** The news of the move being shown, told once its hops are over. */
+  private pending: MoveNews[] = [];
+  private news = 0;
+  private bannerTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The reversing sound playing while pawns go back (DEC-076), stopped when they stop; null when none is. */
+  private carSound: SoundEffect | null = null;
   /** The latest roll and card play already seen; undefined before the first board, whose move is never replayed. */
   private seenRoll: string | null | undefined = undefined;
   private seenPlay: string | null | undefined = undefined;
@@ -282,11 +328,13 @@ export class RaceBoardView {
     const pawn = this.armed().get(you.seat);
     switch (ability.id) {
       case RACE_SPEED_BOOST:
-        return phase === 'Move' && !pawn?.boost ? [{ abilityId: ability.id, label: `Use ${ability.name}: +2 to your roll` }] : [];
+        return phase === 'Move' && !pawn?.boost
+          ? [{ abilityId: ability.id, label: `Use ${ability.name}: +${ability.values['tiles'] ?? 2} to your roll` }]
+          : [];
       case RACE_SHIELD:
         return pawn?.shielded ? [] : [{ abilityId: ability.id, label: `Use ${ability.name}` }];
       case RACE_CARD_VISION:
-        return (board.deck ?? 0) > 0 ? [{ abilityId: ability.id, label: `Use ${ability.name}: see the next card` }] : [];
+        return (board.deck ?? 0) > 0 ? [{ abilityId: ability.id, label: `Use ${ability.name}: see the ${this.nextCards(ability.values['cards'])}` }] : [];
       case RACE_CARD_STEAL:
         if ((board.hand?.length ?? 0) >= (board.maxHand ?? Infinity)) {
           return [];
@@ -294,6 +342,17 @@ export class RaceBoardView {
         return board.pawns
           .filter((other) => other.seat !== you.seat && (other.cards ?? 0) > 0)
           .map((other) => ({ abilityId: ability.id, target: other.seat, label: `${ability.name}: from ${this.nameOf(other.seat, false)}` }));
+      case RACE_DOUBLE_DICE:
+        return phase === 'Move' && !pawn?.dice
+          ? [{ abilityId: ability.id, label: `Use ${ability.name}: roll ${ability.values['dice'] ?? 2}, keep 1` }]
+          : [];
+      case RACE_FREEZE:
+        if (pawn?.froze) {
+          return [];
+        }
+        return board.pawns
+          .filter((other) => other.seat !== you.seat && !this.skipping().has(other.seat))
+          .map((other) => ({ abilityId: ability.id, target: other.seat, label: `${ability.name}: ${this.nameOf(other.seat, false)}` }));
       default:
         return [{ abilityId: ability.id, label: `Use ${ability.name}` }];
     }
@@ -313,11 +372,52 @@ export class RaceBoardView {
     return { ...ability, status: this.abilityPlays().length > 0 ? null : this.abilityStatus(you.seat, you.isTurn) };
   });
 
-  /** The deck's top card Card Vision shows you, by name (DEC-059). */
+  /** What Card Vision shows you: the deck's top cards by name, top first (DEC-059, DEC-077). */
   protected readonly nextCard = computed(() => {
-    const next = this.board().next;
-    return next ? this.cardName(next) : null;
+    const board = this.board();
+    const seen = board.seen ?? (board.next ? [board.next] : []);
+    if (seen.length === 0) {
+      return null;
+    }
+    const names = seen.map((card) => this.cardName(card)).join(', then ');
+    return `${seen.length === 1 ? 'Next card' : `Next ${seen.length} cards`} in the deck: ${names}`;
   });
+
+  /** The dice Double Dice rolled for you to keep one of, distinct and in order, while it's your turn; empty otherwise. */
+  protected readonly yourDice = computed(() => {
+    const you = this.turnOf();
+    const pawn = you?.isYou && this.yourPhase() === 'Move' ? this.armed().get(you.seat) : undefined;
+    return pawn?.dice && pawn.kept === undefined ? [...new Set(pawn.dice)].sort((a, b) => a - b) : [];
+  });
+
+  /**
+   * Double Dice's dice waiting for a roll, in words, for everyone (STORY-092, DEC-080): "Your Double Dice rolled 1 and 3:
+   * keep one to move by it." or "Alice’s Double Dice rolled 1 and 3." With a die kept when time ran out, which one the
+   * next roll moves by.
+   */
+  protected readonly diceNote = computed(() => {
+    const pawn = this.board().pawns.find((each) => each.dice);
+    if (!pawn?.dice || !this.board().phase) {
+      return null;
+    }
+    const isYou = !!this.members().find((member) => member.seat === pawn.seat)?.isYou;
+    const rolled = `${isYou ? 'Your' : this.possessive(pawn.seat)} Double Dice rolled ${diceList(pawn.dice)}`;
+    if (pawn.kept !== undefined) {
+      return `${rolled}. Time ran out, so ${isYou ? 'your' : 'their'} next roll moves by ${pawn.kept}.`;
+    }
+    return isYou ? `${rolled}: keep one to move by it.` : `${rolled}.`;
+  });
+
+  /** A raised Shield's tag: "Shielded", with the attacks it still blocks when more than one (DEC-077). */
+  protected shieldLabel(seat: number): string {
+    const blocks = this.armed().get(seat)?.blocks ?? 1;
+    return blocks > 1 ? `Shielded ×${blocks}` : 'Shielded';
+  }
+
+  /** How many cards seeing shows: "next card", or "next 2 cards" from a rarer Tier (DEC-077). */
+  private nextCards(count = 1): string {
+    return count === 1 ? 'next card' : `next ${count} cards`;
+  }
 
   /** The latest ability used, in words; a stolen card is named only when the server sent it, to its two players (DEC-059). */
   protected readonly lastAbility = computed(() => {
@@ -330,20 +430,28 @@ export class RaceBoardView {
     if (used.target === undefined) {
       return `${action}.`;
     }
-    const took = used.card ? this.cardName(used.card) : 'a card';
+    if (used.ability === RACE_FREEZE) {
+      const target = this.nameOf(used.target, false);
+      return `${action} on ${target}: ${target === 'you' ? 'you skip your' : 'they skip their'} next turn.`;
+    }
+    const cards = used.cards ?? (used.card ? [used.card] : []);
+    const taken = used.taken ?? 1;
+    const took = cards.length > 0
+      ? cards.map((card) => this.cardName(card)).join(' and ')
+      : taken === 1 ? 'a card' : `${taken} cards`;
     return `${action} and took ${took} from ${this.nameOf(used.target, false)}.`;
   });
 
   /** What the latest move did, in words: who rolled what, where they landed and where the tile sent them. */
   protected readonly lastMove = computed(() => {
-    const move = this.board().lastMove;
+    const move = this.revealed();
     const boost = move?.boost ? ` (+${move.boost} Speed Boost)` : '';
-    return move ? this.landed(`${this.nameOf(move.seat)} rolled ${move.roll}${boost}`, move, move.seat) : null;
+    return move ? this.landed(`${this.nameOf(move.seat)} ${this.rolled(move)}${boost}`, move, move.seat) : null;
   });
 
   /** What the card played after the latest roll did, in words (DEC-057). */
   protected readonly lastPlay = computed(() => {
-    const move = this.board().lastMove;
+    const move = this.revealed();
     return move?.play ? this.played(move.play, move.seat) : null;
   });
 
@@ -368,14 +476,18 @@ export class RaceBoardView {
     inject(DestroyRef).onDestroy(() => {
       clearInterval(tick);
       clearTimeout(this.hopTimer);
+      clearTimeout(this.bannerTimer);
+      this.stopCar();
       resize?.disconnect();
       globalThis.removeEventListener?.('resize', onResize);
     });
   }
 
   /**
-   * Shows what's new in the latest move: the roll's hops, then the card played's, then the pawns it pushed back, together.
-   * The first board's move and reduced motion show no hops; a pawn hopping stays where it was until its turn comes.
+   * Shows what's new in the latest move: a new roll's die tumbling and landing on its number (DEC-076), then the roll's
+   * hops, then the card played's, then the pawns it pushed back, together. An engine starts as a pawn drives on, played to
+   * its end, and a back-up beeper sounds while one goes back (a card's move backwards, or pushed back), until it stops. The first board's move and
+   * reduced motion show none of it; a pawn hopping stays where it was until its turn comes.
    */
   private follow(move: RaceMove | undefined): void {
     const roll = move ? JSON.stringify([move.seat, move.roll, move.from, move.landed, move.to]) : null;
@@ -384,7 +496,11 @@ export class RaceBoardView {
     const fresh = { roll: roll !== null && roll !== this.seenRoll, play: play !== null && play !== this.seenPlay };
     this.seenRoll = roll;
     this.seenPlay = play;
+    if (move) {
+      this.pending.push(...this.newsOf(move, fresh));
+    }
     if (!move || first || (!fresh.roll && !fresh.play) || reducedMotion()) {
+      this.settle(first || reducedMotion(), !first);
       return;
     }
     // Each stage is the walks hopping together; a card's own move hops first, then the pawns it pushed back.
@@ -402,6 +518,7 @@ export class RaceBoardView {
       }
     }
     if (stages.length === 0) {
+      this.settle(false, true);
       return;
     }
     const frames: Map<number, number>[] = [];
@@ -417,14 +534,130 @@ export class RaceBoardView {
       }
     }
     clearTimeout(this.hopTimer);
+    this.stopCar();
+    this.moving.set(true);
     let frame = 0;
+    let heading: SoundEffect | null = null;
     const next = (): void => {
-      this.hops.set(frame < frames.length ? frames[frame++] : null);
-      if (this.hops()) {
+      this.die.set(null);
+      const shown = frames[frame];
+      // The sound follows the hop about to happen: the engine starts as a car drives on, and the beeper sounds while one
+      // goes back (a Setback tile, a card's move backwards, pushed back), until it stops going back.
+      const going = shown ? carHeading(shown, frames[frame + 1]) : null;
+      frame++;
+      if (going !== heading) {
+        this.stopCar();
+        if (going) {
+          this.sounds.play(going);
+          // The engine start is short and always heard whole; only the beeper stops with the car.
+          this.carSound = going === 'carReverse' ? going : null;
+        }
+        heading = going;
+      }
+      this.hops.set(shown ?? null);
+      if (shown) {
         this.hopTimer = setTimeout(next, HOP_MS);
+      } else {
+        this.moving.set(false);
+        this.reveal(true);
+        this.settled.emit();
       }
     };
-    next();
+    if (fresh.roll) {
+      this.die.set({ value: move.roll, id: ++this.rolls });
+      this.hops.set(frames[0]);
+      this.hopTimer = setTimeout(next, DIE_MS);
+    } else {
+      next();
+    }
+  }
+
+  /**
+   * Says the track shows its move in full, telling it (with a banner when `announce`), unless one is still being shown;
+   * `cut` ends one being shown (the first board, reduced motion).
+   */
+  private settle(cut: boolean, announce: boolean): void {
+    if (cut) {
+      clearTimeout(this.hopTimer);
+      this.hops.set(null);
+      this.die.set(null);
+      this.stopCar();
+      this.moving.set(false);
+    }
+    if (!this.moving()) {
+      this.reveal(announce);
+      this.settled.emit();
+    }
+  }
+
+  /** Tells the move shown: the last-move lines, Recent moves and, when `announce`, the banner and popup of its news. */
+  private reveal(announce: boolean): void {
+    this.revealed.set(this.board().lastMove);
+    const told = this.pending;
+    this.pending = [];
+    if (told.length === 0) {
+      return;
+    }
+    this.recent.update((recent) => [...told.reverse(), ...recent].slice(0, RECENT_MOVES));
+    if (announce) {
+      clearTimeout(this.bannerTimer);
+      this.banner.set(told[0]);
+      this.bannerTimer = setTimeout(() => this.banner.set(null), BANNER_MS);
+    }
+  }
+
+  /** The news of what's new in a move: its roll, then the card played after it. */
+  private newsOf(move: RaceMove, fresh: { roll: boolean; play: boolean }): MoveNews[] {
+    const news: MoveNews[] = [];
+    if (fresh.roll) {
+      const boost = move.boost ? ` (+${move.boost})` : '';
+      news.push({ id: ++this.news, title: `${this.nameOf(move.seat)} ${this.rolled(move)}${boost}`, ...this.landing(move, move.seat) });
+    }
+    const play = move.play;
+    if (fresh.play && play) {
+      const action = `${this.nameOf(move.seat)} played ${this.cardName(play.card)}`;
+      const moved = play.from !== undefined && play.to !== undefined ? play.to - play.from : 0;
+      const told =
+        play.from !== undefined && play.landed !== undefined && play.to !== undefined && play.effect
+          ? this.landing({ landed: play.landed, to: play.to, effect: play.effect }, move.seat)
+          : null;
+      const sentence = this.played(play, move.seat);
+      const rest = sentence.startsWith(action) ? sentence.slice(action.length).replace(/^[ ,]+/, '') : sentence;
+      news.push({
+        id: ++this.news,
+        title: action,
+        detail: told?.detail ?? (moved !== 0 ? `${signedTilesText(moved)}, to tile ${play.to}` : rest.charAt(0).toUpperCase() + rest.slice(1)),
+        tone: told?.tone ?? (moved > 0 ? 'good' : moved < 0 ? 'bad' : 'neutral'),
+        popup: moved !== 0 && play.to !== undefined ? { tile: play.to, text: signedTilesText(moved) } : null,
+      });
+    }
+    return news;
+  }
+
+  /** What a landing did, for news: a Boost or Setback's jump, a Card tile, the finish, or the tile reached. */
+  private landing(landing: Pick<Landing, 'landed' | 'to' | 'effect'>, seat: number): Omit<MoveNews, 'id' | 'title'> {
+    const jump = landing.to - landing.landed;
+    switch (landing.effect) {
+      case 'Boost':
+        return { detail: `Boost! Jumped to tile ${landing.to}`, tone: 'good', popup: { tile: landing.to, text: signedTilesText(jump) } };
+      case 'Setback':
+        return { detail: `Setback! Back to tile ${landing.to}`, tone: 'bad', popup: { tile: landing.to, text: signedTilesText(jump) } };
+      case 'Card':
+        return { detail: `Card tile: drew a card`, tone: 'neutral', popup: { tile: landing.to, text: 'Card!' } };
+      case 'Finish':
+        return this.board().winner === seat
+          ? { detail: 'Reached the finish and won the race!', tone: 'good', popup: { tile: landing.to, text: 'Winner!' } }
+          : { detail: 'Reached the finish!', tone: 'good', popup: { tile: landing.to, text: 'Finish!' } };
+      default:
+        return { detail: `Moved to tile ${landing.to}`, tone: 'neutral', popup: null };
+    }
+  }
+
+  private stopCar(): void {
+    if (this.carSound) {
+      this.sounds.stop(this.carSound);
+      this.carSound = null;
+    }
   }
 
   private measure(): void {
@@ -448,8 +681,14 @@ export class RaceBoardView {
     if (pawn?.boost) {
       return `Armed: your next roll moves ${pawn.boost} more.`;
     }
+    if (pawn?.dice) {
+      return pawn.kept === undefined ? 'Rolled: move by the die you keep.' : `Your next roll moves by ${pawn.kept}.`;
+    }
     if (pawn?.shielded) {
-      return 'Raised: it blocks the next Rug, Liquidated or Whale played on you.';
+      const blocks = pawn.blocks ?? 1;
+      return blocks === 1
+        ? 'Raised: it blocks the next Rug, Liquidated or Whale played on you.'
+        : `Raised: it blocks the next ${blocks} Rugs, Liquidateds or Whales played on you.`;
     }
     if (!ability?.usesLeft) {
       return 'Used.';
@@ -462,7 +701,10 @@ export class RaceBoardView {
     }
     switch (ability.id) {
       case RACE_SPEED_BOOST:
+      case RACE_DOUBLE_DICE:
         return 'Only before you roll.';
+      case RACE_FREEZE:
+        return pawn?.froze ? 'Used this turn: one Freeze a turn.' : 'Every opponent already skips a turn.';
       case RACE_CARD_VISION:
         return 'The deck is empty.';
       case RACE_CARD_STEAL:
@@ -470,6 +712,11 @@ export class RaceBoardView {
       default:
         return 'Not now.';
     }
+  }
+
+  /** A roll in words: "rolled 3", or after Double Dice "rolled 1 and 3 with Double Dice and kept 3" (STORY-092, DEC-080). */
+  private rolled(move: RaceMove): string {
+    return move.dice ? `rolled ${diceList(move.dice)} with Double Dice and kept ${move.roll}` : `rolled ${move.roll}`;
   }
 
   /** A seat's player: "You" (or "you" mid-sentence) for yours, otherwise their name. */

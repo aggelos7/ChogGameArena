@@ -1,3 +1,5 @@
+using ChogGames.Api.ChogLife;
+using ChogGames.Api.ChogRace;
 using ChogGames.Api.Legal;
 using ChogGames.Api.Rooms;
 using ChogGames.Api.Wallet;
@@ -38,6 +40,9 @@ internal static class StartupValidation
             .AddWalletChain(configuration)
             .AddRooms(configuration)
             .AddLegal(configuration)
+            // With the games and their abilities, so the shipped Abilities:Holder is checked against them (DEC-077).
+            .AddChogLife()
+            .AddChogRace()
             .BuildServiceProvider();
 
         provider.GetRequiredService<IStartupValidator>().Validate();

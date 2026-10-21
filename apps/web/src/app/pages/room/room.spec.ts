@@ -6,6 +6,10 @@ import { Subject } from 'rxjs';
 import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { Room, RoomAbility, RoomMember } from '../../rooms/rooms-api';
 import { CATALOGUE, FORK_BOARD, RACE_BOARD, lifePawn, lifeResult } from '../../testing';
+import { SoundEffects } from '../../shell/sound-effects';
+import { ThemeMusic } from '../../shell/theme-music';
+import { DIE_MS } from '../../games/rolling-die';
+import { HOP_MS } from '../../games/chog-life/life-board';
 import { RoomPage } from './room';
 
 /** Stands in for the hub connection: the spec pushes status changes and snapshots. */
@@ -87,6 +91,7 @@ describe('Room page', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: RoomLiveUpdates, useValue: live },
+        { provide: SoundEffects, useValue: { play: () => undefined } },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -293,6 +298,7 @@ describe('Room page', () => {
     description: 'Raise one reward.',
     target: 'None',
     maxUses: 1,
+    values: {},
     usesLeft: null,
   };
   const reroll: RoomAbility = {
@@ -301,6 +307,7 @@ describe('Room page', () => {
     description: 'Reroll one event.',
     target: 'None',
     maxUses: 1,
+    values: {},
     usesLeft: null,
   };
 
@@ -337,6 +344,41 @@ describe('Room page', () => {
     expect(column('[data-ability]')).toEqual(['Ability not chosen yet', 'Lucky Reroll']);
     expect(button('I’m ready').disabled).toBe(false);
     expect(element().querySelector('[data-ability-hint]')).toBeNull();
+  });
+
+  it('groups a holder’s holder abilities under a gold heading, choosable (STORY-091)', () => {
+    const dice: RoomAbility = { ...reroll, id: 'double_dice', name: 'Double Dice', holderOnly: true };
+    load({ ...withAbilities(), abilities: [boost, dice], unavailableAbilities: [] });
+
+    expect(element().querySelector('[data-holder-heading]')?.textContent?.trim()).toBe('♛ Holder abilities');
+    expect(abilityButtons().map((b) => [b.querySelector('.ability-name')?.textContent?.trim(), b.classList.contains('holder')])).toEqual([
+      ['Reward Boost', false],
+      ['Double Dice', true],
+    ]);
+    expect(element().querySelector('[data-locked-option]')).toBeNull();
+    expect(element().querySelector('[data-unlock-hint]')).toBeNull();
+
+    abilityButtons()[1].click();
+    expect(http.expectOne('/api/rooms/K7QF3M/ability').request.body).toEqual({ abilityId: 'double_dice' });
+  });
+
+  it('shows a non-holder the holder abilities locked, which can’t be chosen (STORY-091)', () => {
+    const dice: RoomAbility = { ...reroll, id: 'double_dice', name: 'Double Dice', holderOnly: true };
+    const tax: RoomAbility = { ...reroll, id: 'tax_the_rich', name: 'Tax the Rich', holderOnly: true };
+    load({ ...withAbilities(), abilities: [boost], unavailableAbilities: [dice, tax] });
+
+    expect(abilityButtons().length).toBe(1);
+    expect(element().querySelector('[data-holder-heading]')).not.toBeNull();
+    const locked = Array.from(element().querySelectorAll<HTMLElement>('[data-locked-option]'));
+    expect(locked.map((option) => [option.dataset['lockedOption'], option.getAttribute('aria-disabled')])).toEqual([
+      ['double_dice', 'true'],
+      ['tax_the_rich', 'true'],
+    ]);
+    expect(locked[0].textContent).toContain('🔒 Locked');
+    expect(element().querySelector('[data-unlock-hint]')?.textContent?.trim()).toBe('Play as a Chog NFT you own to unlock these.');
+
+    locked[0].click();
+    http.expectNone('/api/rooms/K7QF3M/ability');
   });
 
   it('does not send the ability already chosen again', () => {
@@ -615,6 +657,85 @@ describe('Room page', () => {
       expect(board()?.querySelector('[data-turn-line]')?.textContent?.trim()).toBe('It’s your turn.');
     });
 
+    it('shows the winning roll drive over the line before the results take the board’s place (DEC-076)', () => {
+      const members = [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })];
+      const racing: Room = { ...room, gameType: 'chog-race', status: 'Active', state: { ...RACE_BOARD, pawns: [{ seat: 1, tile: 1 }, { seat: 2, tile: 0 }] }, members };
+      load(racing);
+      vi.useFakeTimers();
+      try {
+        changed({
+          ...racing,
+          version: 2,
+          status: 'Completed',
+          state: { ...RACE_BOARD, pawns: [{ seat: 1, tile: 3 }, { seat: 2, tile: 0 }], lastMove: { seat: 1, roll: 2, from: 1, landed: 3, to: 3 } },
+          members: [member('Alice', { isHost: true, seat: 1, rank: 1 }), member('Bob', { isYou: true, seat: 2, rank: 2 })],
+        });
+        vi.advanceTimersByTime(0);
+        fixture.detectChanges();
+
+        // The live board stays, rolling the die and driving on, with no results, ending or Leave button yet.
+        expect(element().querySelector('[data-die]')).not.toBeNull();
+        expect(element().querySelector('[data-final-board]')).toBeNull();
+        expect(element().querySelector('[data-result]')).toBeNull();
+        expect(element().querySelector('[data-leave]')).toBeNull();
+
+        vi.advanceTimersByTime(DIE_MS + HOP_MS * 3);
+        fixture.detectChanges();
+        fixture.detectChanges();
+
+        expect(element().querySelector('[data-final-board]')).not.toBeNull();
+        expect(element().querySelector('[data-result]')?.textContent).toContain('you finished 2nd');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows the results at once when the last snapshot has no move to show', () => {
+      const members = [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })];
+      const racing: Room = { ...room, gameType: 'chog-race', status: 'Active', state: RACE_BOARD, members };
+      load(racing);
+      vi.useFakeTimers();
+      try {
+        changed({ ...racing, version: 2, status: 'Completed', state: { ...RACE_BOARD, ended: 'TimeUp' } as Room['state'] });
+        vi.advanceTimersByTime(0);
+        fixture.detectChanges();
+        fixture.detectChanges();
+        expect(element().querySelector('[data-final-board]')).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('pauses the theme for the game’s music while you play a live match, and not in the lobby, after leaving or at the end (DEC-076)', () => {
+      const music = TestBed.inject(ThemeMusic);
+      load({ ...room, state: FORK_BOARD });
+      expect(music.liveGame()).toBeNull();
+
+      const started: Room = {
+        ...room,
+        version: 2,
+        status: 'Active',
+        state: FORK_BOARD,
+        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+      };
+      changed(started);
+      expect(music.liveGame()).toBe('chog-life');
+
+      changed({ ...started, version: 3, members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, hasLeft: true })] });
+      expect(music.liveGame()).toBeNull();
+
+      changed({ ...started, version: 4 });
+      expect(music.liveGame()).toBe('chog-life');
+      // At the end, once the board has shown the last move (none new here, so at once).
+      changed({ ...started, version: 5, status: 'Completed' });
+      fixture.detectChanges();
+      expect(music.liveGame()).toBeNull();
+
+      changed({ ...started, version: 6 });
+      fixture.destroy();
+      expect(music.liveGame()).toBeNull();
+    });
+
     it('hides the invite and the lobby list while the board shows the players, but not a dropped live connection', () => {
       load({ ...room, state: FORK_BOARD });
       expect(element().querySelector('[data-invite-link]')).not.toBeNull();
@@ -678,16 +799,26 @@ describe('Room page', () => {
       expect(element().querySelector<HTMLButtonElement>('[data-roll]')?.disabled).toBe(true);
       roll.flush({ actionId: roll.request.body.actionId, type: 'ROLL', version: 5, currentVersion: 5, replayed: false });
 
-      http.expectOne('/api/rooms/K7QF3M').flush({
-        ...started,
-        version: 5,
-        state: { ...FORK_BOARD, pawns: [lifePawn(1, 0, 100), lifePawn(2, 1, 100)], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1] } },
-        members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
-      });
-      fixture.detectChanges();
+      vi.useFakeTimers();
+      try {
+        http.expectOne('/api/rooms/K7QF3M').flush({
+          ...started,
+          version: 5,
+          state: { ...FORK_BOARD, pawns: [lifePawn(1, 0, 100), lifePawn(2, 1, 100)], lastMove: { seat: 2, roll: 1, from: 0, to: 1, path: [1] } },
+          members: [member('Alice', { isHost: true, seat: 1, isTurn: true }), member('Bob', { isYou: true, seat: 2 })],
+        });
+        fixture.detectChanges();
+        expect(element().querySelector('[data-roll]')).toBeNull();
+        // The die rolls and the pawn hops before the board says what happened (DEC-076).
+        expect(element().querySelector('[data-die]')).not.toBeNull();
+        expect(element().querySelector('[data-last-move]')?.textContent?.trim()).toBe('');
 
-      expect(element().querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1 and moved to tile 1 (+20 MON).');
-      expect(element().querySelector('[data-roll]')).toBeNull();
+        vi.advanceTimersByTime(DIE_MS + HOP_MS * 2);
+        fixture.detectChanges();
+        expect(element().querySelector('[data-last-move]')?.textContent?.trim()).toBe('You rolled 1 and moved to tile 1 (+20 MON).');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('sends the route you choose at a fork and shows the room as the server left it', () => {
@@ -735,7 +866,7 @@ describe('Room page', () => {
     });
 
     it('uses your ability on your turn and shows the room as the server left it (STORY-042)', () => {
-      const boost = { id: 'reward_boost', name: 'Reward Boost', description: 'Boost a reward.', target: 'None' as const, maxUses: 1 };
+      const boost = { id: 'reward_boost', name: 'Reward Boost', description: 'Boost a reward.', target: 'None' as const, maxUses: 1, values: {} };
       const started: Room = {
         ...room,
         version: 8,
@@ -744,6 +875,8 @@ describe('Room page', () => {
         members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true, ability: { ...boost, usesLeft: 1 } })],
       };
       load(started);
+      // The locked ability's description, with its values (DEC-077).
+      expect(element().querySelector('[data-locked-description]')?.textContent?.trim()).toBe('Boost a reward.');
 
       element().querySelector<HTMLButtonElement>('[data-use-ability]')?.click();
       const use = http.expectOne('/api/rooms/K7QF3M/commands');
@@ -767,6 +900,21 @@ describe('Room page', () => {
       expect(element().querySelector('[data-use-ability]')).toBeNull();
       expect(element().querySelector('[data-armed]')?.textContent?.trim()).toBe('Reward Boost armed');
       expect(element().querySelector('[data-roll]')).not.toBeNull();
+    });
+
+    it('rolls keeping the die you pick of your Double Dice (STORY-091)', () => {
+      const dice = { id: 'double_dice', name: 'Double Dice', description: 'Keep a die.', target: 'None' as const, maxUses: 1, values: { dice: 2 }, usesLeft: 0 };
+      load({
+        ...room,
+        version: 10,
+        status: 'Active',
+        state: { ...FORK_BOARD, pawns: [lifePawn(1, 0), lifePawn(2, 0, 100, { dice: [2, 5] })] },
+        members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, isTurn: true, ability: dice })],
+      });
+
+      element().querySelector<HTMLButtonElement>('[data-keep-die="5"]')?.click();
+      const roll = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(roll.request.body).toMatchObject({ expectedVersion: 10, type: 'ROLL', payload: { die: 5 } });
     });
 
     it('shows whose turn it is and how much of it is left (DEC-045)', () => {
@@ -994,7 +1142,7 @@ describe('Room page', () => {
     });
 
     it('uses a Chog Race ability on your turn, naming Card Steal’s target (STORY-055)', () => {
-      const steal = { id: 'card_steal', name: 'Card Steal', description: '', target: 'Opponent' as const, maxUses: 1, usesLeft: 1 };
+      const steal = { id: 'card_steal', name: 'Card Steal', description: '', target: 'Opponent' as const, maxUses: 1, values: {}, usesLeft: 1 };
       const started: Room = {
         ...room,
         version: 9,

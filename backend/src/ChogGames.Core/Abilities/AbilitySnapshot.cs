@@ -4,7 +4,8 @@ namespace ChogGames.Core.Abilities;
 
 /// <summary>
 /// The ability a player locked for one match (STORY-033, NFT-015, ADR-008, DEC-035): a copy of its definition and the
-/// catalog version it came from, taken at start. Later catalog changes never alter it; the next match takes a new one.
+/// catalog version it came from, taken at start, with the values the player's pool gave it (DEC-077). Later catalog or
+/// configuration changes never alter it; the next match takes a new one.
 /// Uses are counted on the member (STORY-034, DEC-036), and the engine applies the values locked here.
 /// </summary>
 public sealed record AbilitySnapshot
@@ -46,23 +47,26 @@ public sealed record AbilitySnapshot
 
     public IReadOnlyDictionary<string, decimal> Parameters { get; }
 
-    /// <summary>Locks <paramref name="ability"/> as <paramref name="catalog"/> defines it now.</summary>
+    /// <summary>
+    /// Locks <paramref name="ability"/>, one of <paramref name="catalog"/>'s abilities with the values the player's pool
+    /// gave it, such as their holder Tier's (STORY-090, DEC-077), and the description they fill in.
+    /// </summary>
     public static AbilitySnapshot Lock(AbilityCatalog catalog, AbilityDefinition ability)
     {
-        if (!catalog.TryFind(ability.Id, out var defined, out _) || !defined.Equals(ability))
+        if (!catalog.Allows(ability))
         {
-            throw new ArgumentException($"The {catalog.GameType} catalog doesn't define {ability.Id} like this.", nameof(ability));
+            throw new ArgumentException($"The {catalog.GameType} catalog doesn't allow {ability.Id} like this.", nameof(ability));
         }
 
         return new AbilitySnapshot(
-            defined.Id,
+            ability.Id,
             catalog.Version,
-            defined.Name,
-            defined.Description,
-            defined.Target,
-            defined.MaxUses,
-            [.. defined.Windows],
-            defined.Parameters.ToImmutableSortedDictionary(StringComparer.Ordinal));
+            ability.Name,
+            ability.Description,
+            ability.Target,
+            ability.MaxUses,
+            [.. ability.Windows],
+            ability.Parameters.ToImmutableSortedDictionary(StringComparer.Ordinal));
     }
 
     /// <summary>The locked ability as a definition, with the values taken at start, for its handler to use (DEC-036).</summary>

@@ -1,5 +1,6 @@
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Matches;
+using ChogGames.Infrastructure.Abilities;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -14,12 +15,15 @@ namespace ChogGames.Api.Tests;
 /// (STORY-029): matches seat players in join order, host first, unless <paramref name="configureServices"/> registers
 /// another <see cref="IRandomSource"/>. No game offers abilities (STORY-042, STORY-055): Chog Life's and Chog Race's
 /// catalogs are taken out, so their players ready without one; tests of abilities register a catalog again, such as with
-/// <c>AddChogLifeAbilities()</c> or <c>AddChogRaceAbilities()</c>.
+/// <c>AddChogLifeAbilities()</c> or <c>AddChogRaceAbilities()</c>. The holder split and Tier values of
+/// <c>Abilities:Holder</c> (STORY-090, DEC-077) are cleared too, so every player gets a catalog's whole pool, unless
+/// <paramref name="holderAbilities"/> keeps them.
 /// </summary>
 public sealed class ApiFactory(
     string connectionString,
     IReadOnlyDictionary<string, string?>? settings = null,
-    Action<IServiceCollection>? configureServices = null)
+    Action<IServiceCollection>? configureServices = null,
+    bool holderAbilities = false)
     : WebApplicationFactory<Program>
 {
     /// <summary>A syntactically valid connection string for tests that never open a connection.</summary>
@@ -54,6 +58,10 @@ public sealed class ApiFactory(
         {
             services.AddSingleton<IRandomSource>(ScriptedRandomSource.KeepOrder);
             services.RemoveAll<AbilityCatalog>();
+            if (!holderAbilities)
+            {
+                services.PostConfigure<HolderAbilityOptions>(options => options.Games.Clear());
+            }
         });
         if (configureServices is not null)
         {

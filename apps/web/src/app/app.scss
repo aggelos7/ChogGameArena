@@ -56,6 +56,36 @@
   color: inherit;
 }
 
+// The player and the music toggle, at the end of the header.
+.header-end {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+// Theme music on or off (DEC-076).
+.music {
+  display: inline-grid;
+  place-items: center;
+  width: var(--tap-target);
+  height: var(--tap-target);
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+
+  &:hover {
+    background: rgb(255 255 255 / 0.12);
+  }
+
+  &[aria-pressed='false'] {
+    opacity: 0.7;
+  }
+}
+
 .player {
   margin: 0;
   font-size: 0.875rem;
@@ -145,7 +175,7 @@ nav a:not(.active):hover {
     padding: 0;
   }
 
-  .player {
+  .header-end {
     order: 2;
   }
 }

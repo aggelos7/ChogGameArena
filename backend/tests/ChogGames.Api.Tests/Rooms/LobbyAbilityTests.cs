@@ -1,9 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ChogGames.Api.ChogLife;
+using ChogGames.Api.ChogRace;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Wallets;
+using ChogGames.Games.ChogLife.Abilities;
 using ChogGames.Tests.Wallets;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -14,8 +17,10 @@ namespace ChogGames.Api.Tests.Rooms;
 /// <summary>
 /// Lobby ability selection and lock (STORY-033, NFT-013, NFT-015, DEC-035): in a game with abilities each player chooses
 /// one from their pool before marking ready; others only see that they chose until the start, which locks it with the
-/// catalog version. Chog Life gets a test catalog here; Chog Race's is taken out, as by the test host. With trait-based
-/// abilities on (STORY-061, DEC-066) a holder's cached traits narrow their lobby pool and the live ones decide at start.
+/// catalog version. Chog Life gets a test catalog here, with no holder rules; Chog Race's is taken out, as by the test
+/// host. With trait-based abilities on (STORY-061, DEC-066) a holder's cached traits narrow their lobby pool and the live
+/// ones decide at start. With the shipped holder rules and Chog Life's real catalog (STORY-090, DEC-077) a guest gets the
+/// 2 standard abilities with Base values, a holder all 4 with their Tier's, which the live Tier at start locks.
 /// </summary>
 public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -103,7 +108,7 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
     /// </summary>
     private async Task<HttpClient> HolderAsync(string name, int others = 0) => (await HolderWithWalletAsync(name, others)).Client;
 
-    private async Task<(HttpClient Client, WalletAddress Wallet)> HolderWithWalletAsync(string name, int others = 0)
+    private async Task<(HttpClient Client, WalletAddress Wallet)> HolderWithWalletAsync(string name, int others = 0, NftTrait[]? traits = null)
     {
         var client = await GuestAsync(name);
         var wallet = TestWallet.Random();
@@ -122,7 +127,7 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
 
         _chain.Holdings[wallet.Address] =
         [
-            new OwnedNft(NftTokenId.From(7), "Chog #7", null, [new NftTrait("Rarity", "Legendary")]),
+            new OwnedNft(NftTokenId.From(7), "Chog #7", null, traits ?? [new NftTrait("Rarity", "Legendary")]),
             .. Enumerable.Range(100, others).Select(id => new OwnedNft(NftTokenId.From((ulong)id), $"Chog #{id}", null, [])),
         ];
         using var select = await client.PutAsJsonAsync("/api/characters/selected", new { kind = "Nft", id = "7" });
@@ -630,7 +635,7 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
             Assert.Equal(["event_reroll"], (await ViewAsync(bob, code)).Abilities.Select(a => a.Id));
 
             var before = await ViewAsync(bob, code);
-            await ProblemAsync(await ChooseAsync(bob, code, "reward_boost"), HttpStatusCode.BadRequest, "unknown_ability");
+            await ProblemAsync(await ChooseAsync(bob, code, "reward_boost"), HttpStatusCode.BadRequest, "ability_unavailable");
             var after = await ViewAsync(bob, code);
             Assert.Equal((before.Version, false), (after.Version, after.Member("Bob").HasAbility));
 
@@ -682,6 +687,264 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
             Assert.Equal(["reward_boost", "event_reroll"], (await ViewAsync(bob, code)).Abilities.Select(a => a.Id));
         }
     }
+
+    /// <summary>The shipped holder rules (DEC-077) with Chog Life's real catalog, or with <paramref name="race"/> Chog Race's.</summary>
+    private async Task UseHolderRulesAsync(IReadOnlyDictionary<string, string?>? settings = null, bool race = false)
+    {
+        await _factory.DisposeAsync();
+        _factory = new ApiFactory(
+            database.ConnectionString,
+            new Dictionary<string, string?>(settings ?? new Dictionary<string, string?>())
+            {
+                [race ? "Games:Items:1:Status" : "Games:Items:0:Status"] = "Available",
+            },
+            services =>
+            {
+                services.AddScoped<INftProvider>(_ => _chain);
+                if (race)
+                {
+                    services.AddChogRaceAbilities();
+                }
+                else
+                {
+                    services.AddChogLifeAbilities();
+                }
+            },
+            holderAbilities: true);
+    }
+
+    [PostgresFact]
+    public async Task A_chog_race_guest_cant_choose_double_dice_or_freeze_and_an_epic_holder_gets_them_with_epic_values()
+    {
+        await UseHolderRulesAsync(race: true);
+        var (code, alice, bob) = await PairAsync("chog-race", await TierHolderAsync("Bob", "Epic"));
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(
+                ["attack_block: blocks=1 x1", "card_preview: cards=1 x1"],
+                Described((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Equal(
+                [
+                    "movement_boost: tiles=4 x1", "attack_block: blocks=2 x1", "card_preview: cards=2 x1", "card_steal: cards=2 x1",
+                    "double_dice: dice=3 x1", "freeze:  x2",
+                ],
+                Described((await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Equal(
+                ["movement_boost: tiles=2 x1", "card_steal: cards=1 x1", "double_dice: dice=2 x1", "freeze:  x1"],
+                Described((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray(), a => Assert.True(a.GetProperty("holderOnly").GetBoolean()));
+
+            var before = await ViewAsync(alice, code);
+            await ProblemAsync(await ChooseAsync(alice, code, "double_dice"), HttpStatusCode.BadRequest, "ability_unavailable");
+            await ProblemAsync(await ChooseAsync(alice, code, "freeze"), HttpStatusCode.BadRequest, "ability_unavailable");
+            Assert.Equal(before.Version, (await ViewAsync(alice, code)).Version);
+
+            await ChosenAsync(alice, code, "attack_block");
+            await ChosenAsync(bob, code, "freeze");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+            var room = await RawAsync(alice, code);
+            Assert.Equal(["freeze:  x2"], Described([MemberAbility(room, "Bob")]));
+            Assert.EndsWith("2 uses per game, one a turn.", MemberAbility(room, "Bob").GetProperty("description").GetString());
+            Assert.True(MemberAbility(room, "Bob").GetProperty("holderOnly").GetBoolean());
+        }
+    }
+
+    /// <summary>A holder of token 7 with <paramref name="tier"/> on chain and, when given, <paramref name="cached"/> in the cache.</summary>
+    private async Task<HttpClient> TierHolderAsync(string name, string tier, string? cached = null)
+    {
+        var (client, wallet) = await HolderWithWalletAsync(name, traits: [new NftTrait("Tier", tier)]);
+        await CacheTraitsAsync(wallet, "Tier", cached ?? tier);
+        return client;
+    }
+
+    /// <summary>Each offered or locked ability as "id: values, uses".</summary>
+    private static string[] Described(IEnumerable<JsonElement> abilities) =>
+    [
+        .. abilities.Select(a =>
+            $"{a.GetProperty("id").GetString()}: "
+            + string.Join(",", a.GetProperty("values").EnumerateObject().Select(v => $"{v.Name}={v.Value.GetDecimal()}"))
+            + $" x{a.GetProperty("maxUses").GetInt32()}"),
+    ];
+
+    private static async Task<JsonElement> RawAsync(HttpClient client, string code) =>
+        JsonDocument.Parse(await client.GetStringAsync($"/api/rooms/{code}")).RootElement.Clone();
+
+    private static JsonElement MemberAbility(JsonElement room, string name) =>
+        room.GetProperty("members").EnumerateArray().Single(m => m.GetProperty("displayName").GetString() == name).GetProperty("ability");
+
+    [PostgresFact]
+    public async Task A_guest_gets_the_standard_abilities_and_an_epic_holder_all_of_them_with_epic_values()
+    {
+        await UseHolderRulesAsync();
+        var (code, alice, bob) = await PairAsync(bob: await TierHolderAsync("Bob", "Epic"));
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(
+                ["reward_boost: percent=25 x1", "loss_protection: percent=50 x1"],
+                Described((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Equal(
+                [
+                    "reward_boost: percent=40 x1", "loss_protection: percent=35 x1", "event_preview:  x2", "event_reroll: draws=3 x1",
+                    "double_dice: dice=3 x1", "tax_the_rich: cap=50,percent=18 x1",
+                ],
+                Described((await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Contains("earns 40% more", (await RawAsync(bob, code)).GetProperty("abilities")[0].GetProperty("description").GetString());
+            // Holder-only abilities are marked (STORY-091, DEC-078).
+            Assert.Equal(
+                [false, false, true, true, true, true],
+                (await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray().Select(a => a.GetProperty("holderOnly").GetBoolean()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray(), a => Assert.False(a.GetProperty("holderOnly").GetBoolean()));
+
+            // The guest sees the holder-only abilities locked, with Base values; the holder has none locked.
+            Assert.Equal(
+                [
+                    "event_preview:  x1", "event_reroll: draws=2 x1", "double_dice: dice=2 x1", "tax_the_rich: cap=50,percent=10 x1",
+                ],
+                Described((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray(), a => Assert.True(a.GetProperty("holderOnly").GetBoolean()));
+            Assert.Empty((await RawAsync(bob, code)).GetProperty("unavailableAbilities").EnumerateArray());
+
+            // A holder-only ability is refused to the guest, and nothing changes.
+            var before = await ViewAsync(alice, code);
+            await ProblemAsync(await ChooseAsync(alice, code, "event_preview"), HttpStatusCode.BadRequest, "ability_unavailable");
+            await ProblemAsync(await ChooseAsync(alice, code, "double_dice"), HttpStatusCode.BadRequest, "ability_unavailable");
+            await ProblemAsync(await ChooseAsync(alice, code, "tax_the_rich"), HttpStatusCode.BadRequest, "ability_unavailable");
+            await ProblemAsync(await ChooseAsync(alice, code, "fireball"), HttpStatusCode.BadRequest, "unknown_ability");
+            var after = await ViewAsync(alice, code);
+            Assert.Equal((before.Version, false), (after.Version, after.Member("Alice").HasAbility));
+
+            // Values and traits never come from a request: extra fields change nothing.
+            using (var forged = await alice.PutAsJsonAsync(
+                $"/api/rooms/{code}/ability", new { abilityId = "reward_boost", values = new { percent = 100 }, tier = "Legendary", maxUses = 5 }))
+            {
+                Assert.Equal(HttpStatusCode.OK, forged.StatusCode);
+            }
+
+            Assert.Equal(["reward_boost: percent=25 x1"], Described([MemberAbility(await RawAsync(alice, code), "Alice")]));
+            var chosen = await ChosenAsync(bob, code, "event_preview");
+            Assert.Equal(2, chosen.Member("Bob").Ability!.MaxUses);
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+
+            var room = await RawAsync(alice, code);
+            Assert.Equal(["reward_boost: percent=25 x1"], Described([MemberAbility(room, "Alice")]));
+            Assert.Equal(["event_preview:  x2"], Described([MemberAbility(room, "Bob")]));
+            Assert.Equal(2, MemberAbility(room, "Bob").GetProperty("usesLeft").GetInt32());
+            Assert.Equal((false, true), (MemberAbility(room, "Alice").GetProperty("holderOnly").GetBoolean(), MemberAbility(room, "Bob").GetProperty("holderOnly").GetBoolean()));
+            Assert.Empty(room.GetProperty("unavailableAbilities").EnumerateArray());
+            Assert.EndsWith("2 uses per game.", MemberAbility(room, "Bob").GetProperty("description").GetString());
+            var stored = await StoredAbilityAsync(code, "Bob");
+            Assert.Equal((LifeAbilities.Version, 2), (stored.CatalogVersion, stored.MaxUses));
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_common_holder_gets_every_ability_with_base_values()
+    {
+        await UseHolderRulesAsync();
+        var (code, alice, bob) = await PairAsync(bob: await TierHolderAsync("Bob", "Common"));
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(
+                [
+                    "reward_boost: percent=25 x1", "loss_protection: percent=50 x1", "event_preview:  x1", "event_reroll: draws=2 x1",
+                    "double_dice: dice=2 x1", "tax_the_rich: cap=50,percent=10 x1",
+                ],
+                Described((await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray()));
+        }
+    }
+
+    [PostgresFact]
+    public async Task The_live_tier_at_start_locks_its_values_over_the_cached_one()
+    {
+        await UseHolderRulesAsync();
+        var (code, alice, bob) = await PairAsync(bob: await TierHolderAsync("Bob", tier: "Rare", cached: "Legendary"));
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal("reward_boost: percent=50 x1", Described((await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray())[0]);
+            await ChosenAsync(alice, code, "loss_protection");
+            await ChosenAsync(bob, code, "reward_boost");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+
+            Assert.Equal(["reward_boost: percent=35 x1"], Described([MemberAbility(await RawAsync(bob, code), "Bob")]));
+            Assert.Equal(35, (await StoredAbilityAsync(code, "Bob")).Parameters["percent"]);
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_chog_sold_before_the_start_leaves_its_player_the_standard_pool()
+    {
+        await UseHolderRulesAsync();
+        var (holder, wallet) = await HolderWithWalletAsync("Bob", traits: [new NftTrait("Tier", "Rare")]);
+        var (code, alice, bob) = await PairAsync(bob: holder);
+        using (alice)
+        using (bob)
+        {
+            await ChosenAsync(alice, code, "reward_boost");
+            await ChosenAsync(bob, code, "event_reroll");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+
+            _chain.Holdings[wallet] = [];
+            await ProblemAsync(await StartAsync(alice, code), HttpStatusCode.Conflict, "character_unavailable");
+
+            using var standard = await bob.PutAsJsonAsync("/api/characters/selected", new { kind = "Standard", id = "mint" });
+            Assert.Equal(HttpStatusCode.OK, standard.StatusCode);
+            Assert.Equal(["reward_boost", "loss_protection"], (await ViewAsync(bob, code)).Abilities.Select(a => a.Id));
+            await ProblemAsync(await ReadyAsync(bob, code), HttpStatusCode.Conflict, "ability_required");
+
+            await ChosenAsync(bob, code, "loss_protection");
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+            Assert.Equal(["loss_protection: percent=50 x1"], Described([MemberAbility(await RawAsync(bob, code), "Bob")]));
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_config_change_never_alters_a_running_match()
+    {
+        await UseHolderRulesAsync();
+        var (code, alice, bob) = await PairAsync(bob: await TierHolderAsync("Bob", "Epic"));
+        var (aliceCookie, bobCookie) = (Cookie(alice), Cookie(bob));
+        using (alice)
+        using (bob)
+        {
+            await ChosenAsync(alice, code, "reward_boost");
+            await ChosenAsync(bob, code, "event_preview");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+        }
+
+        // A redeploy with retuned Epic and Base values.
+        await UseHolderRulesAsync(new Dictionary<string, string?>
+        {
+            ["Abilities:Holder:Games:chog-life:Tiers:Epic:event_preview:uses"] = "3",
+            ["Abilities:Holder:Games:chog-life:Tiers:Base:reward_boost:percent"] = "30",
+        });
+        using var aliceAgain = Browser(aliceCookie);
+        using var bobAgain = Browser(bobCookie);
+        var room = await RawAsync(bobAgain, code);
+
+        Assert.Equal(["event_preview:  x2"], Described([MemberAbility(room, "Bob")]));
+        Assert.Equal(["reward_boost: percent=25 x1"], Described([MemberAbility(room, "Alice")]));
+    }
+
+    private static string Cookie(HttpClient client) => client.DefaultRequestHeaders.GetValues("Cookie").Single();
 
     private sealed class NoEffect(string abilityId, IEnumerable<string> parameters) : IAbilityHandler
     {

@@ -23,7 +23,7 @@
             <span class="tag" data-skipping>Skips a turn</span>
           }
           @if (armed().get(member.seat)?.shielded) {
-            <span class="tag" data-shielded>Shielded</span>
+            <span class="tag" data-shielded>{{ shieldLabel(member.seat) }}</span>
           }
           @if (armed().get(member.seat)?.boost; as boost) {
             <span class="tag" data-boosted>Boost +{{ boost }}</span>
@@ -48,18 +48,24 @@
         }
       }
     </p>
-    @if (lastMove(); as move) {
-      <p class="last-move" data-last-move>{{ move }}</p>
-    }
-    @if (lastPlay(); as play) {
-      <p class="last-move" data-last-play>{{ play }}</p>
+    <div role="status" data-move-lines>
+      @if (lastMove(); as move) {
+        <p class="last-move" data-last-move>{{ move }}</p>
+      }
+      @if (lastPlay(); as play) {
+        <p class="last-move" data-last-play>{{ play }}</p>
+      }
+    </div>
+    @if (diceNote(); as note) {
+      <p class="last-move" data-dice-note>{{ note }}</p>
     }
     @if (lastAbility(); as used) {
       <p class="last-move" data-last-ability>{{ used }}</p>
     }
     @if (nextCard(); as next) {
-      <p class="last-move" data-next-card>Next card in the deck: {{ next }}. Only you can see this.</p>
+      <p class="last-move" data-next-card>{{ next }}. Only you can see this.</p>
     }
+    <app-recent-moves [moves]="recent()" />
     @if (board().deck !== undefined) {
       <p class="piles" data-piles>Deck {{ board().deck }} · Discard {{ board().discard ?? 0 }}</p>
     }
@@ -88,7 +94,11 @@
     @if (yourAbility(); as ability) {
       <section class="hand ability" aria-labelledby="race-ability-title" data-your-ability>
         <h3 id="race-ability-title">
-          Your ability: {{ ability.name }} <span class="count" data-uses-left>{{ ability.usesLeft }}/{{ ability.maxUses }} left</span>
+          Your ability: {{ ability.name }}
+          @if (ability.holderOnly) {
+            <app-holder-badge />
+          }
+          <span class="count" data-uses-left>{{ ability.usesLeft }}/{{ ability.maxUses }} left</span>
         </h3>
         <p class="card-text">{{ ability.description }}</p>
         @if (abilityPlays().length > 0) {
@@ -118,7 +128,15 @@
         <button type="button" class="action" [disabled]="rolling()" (click)="pass.emit()" data-pass>Take it</button>
       </div>
     } @else if (yourPhase() === 'Move') {
-      <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
+      @if (yourDice().length > 0) {
+        <div class="plays" role="group" aria-label="Keep one of your dice" data-keep-dice>
+          @for (die of yourDice(); track die) {
+            <button type="button" class="action" [disabled]="rolling()" (click)="keepDie.emit(die)" [attr.data-keep-die]="die">Move {{ die }}</button>
+          }
+        </div>
+      } @else {
+        <button type="button" class="action" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll</button>
+      }
     } @else if (yourPhase() === 'Play') {
       @if (plays().length > 0) {
         <div class="plays" role="group" aria-label="Play a card, which ends your turn" data-plays>
@@ -143,6 +161,8 @@
 
   <div class="stage">
     <ng-content select="[boardTimer]" />
+    <app-rolling-die [roll]="die()" />
+    <app-move-banner [news]="banner()" />
     <ol
       #track
       class="track"
@@ -165,6 +185,13 @@
         >
           <span class="number" aria-hidden="true">{{ spot.tile.index }}</span>
           <span class="label" aria-hidden="true">{{ label(spot.tile) }}</span>
+          @if (popup(); as shown) {
+            @if (shown.tile === spot.tile.index) {
+              @for (id of [shown.id]; track id) {
+                <span [class]="'popup ' + shown.tone" aria-hidden="true" [attr.data-popup]="shown.tile">{{ shown.text }}</span>
+              }
+            }
+          }
           <span class="pawns" aria-hidden="true">
             @for (pawn of shownOn(spot.tile); track pawn.seat) {
               <span class="car" [class.hopping]="pawn.isHopping">

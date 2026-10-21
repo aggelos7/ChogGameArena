@@ -8,6 +8,7 @@ import { ProfileApi } from './profile/profile-api';
 import { CurrentRoomBanner } from './rooms/current-room-banner';
 import { ErrorState } from './shared/ui/state-views';
 import { NavigationStatus } from './shell/navigation-status';
+import { ThemeMusic } from './shell/theme-music';
 
 @Component({
   imports: [RouterLink, RouterLinkActive, RouterOutlet, ErrorState, CurrentRoomBanner, AvatarBadge],
@@ -18,6 +19,7 @@ import { NavigationStatus } from './shell/navigation-status';
 export class App {
   protected readonly session = inject(PlayerSession);
   protected readonly navigation = inject(NavigationStatus);
+  protected readonly music = inject(ThemeMusic);
   private readonly main = viewChild.required<ElementRef<HTMLElement>>('main');
 
   constructor() {

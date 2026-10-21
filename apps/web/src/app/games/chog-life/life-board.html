@@ -65,9 +65,14 @@
         }
       }
     </p>
-    @if (lastMove(); as move) {
-      <p class="last-move" data-last-move>{{ move }}</p>
+    @if (taxNote(); as note) {
+      <p class="ability-note" data-tax-note>{{ note }}</p>
     }
+    @if (diceNote(); as note) {
+      <p class="ability-note" data-dice-note>{{ note }}</p>
+    }
+    <p class="last-move" role="status" data-last-move>{{ lastMove() }}</p>
+    <app-recent-moves [moves]="recent()" />
   </div>
 
   <div class="controls">
@@ -90,7 +95,12 @@
         }
         @if (forkAbility(); as ability) {
           <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
-            Use {{ ability.name }}
+            <span class="ability-title"
+              >Use {{ ability.name }}
+              @if (ability.holderOnly) {
+                <app-holder-badge />
+              }
+            </span>
             <span class="ability-description">{{ ability.description }}</span>
           </button>
         }
@@ -117,10 +127,25 @@
         <p class="preview" data-preview>Previewed: {{ preview }}.</p>
       }
       <div class="actions">
-        <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
+        @if (yourDice().length > 0) {
+          <div class="dice" role="group" aria-label="Keep one of your dice" data-keep-dice>
+            @for (die of yourDice(); track die) {
+              <button type="button" class="roll" [disabled]="rolling()" (click)="keepDie.emit(die)" [attr.data-keep-die]="die">
+                Move {{ die }}
+              </button>
+            }
+          </div>
+        } @else {
+          <button type="button" class="roll" [disabled]="rolling()" (click)="roll.emit()" data-roll>Roll the die</button>
+        }
         @if (rollAbility(); as ability) {
           <button type="button" class="ability" [disabled]="rolling()" (click)="useAbility.emit(ability.id)" data-use-ability>
-            Use {{ ability.name }}
+            <span class="ability-title"
+              >Use {{ ability.name }}
+              @if (ability.holderOnly) {
+                <app-holder-badge />
+              }
+            </span>
             <span class="ability-description">{{ ability.description }}</span>
           </button>
         }
@@ -138,6 +163,8 @@
 
   <div class="stage">
     <ng-content select="[boardTimer]" />
+    <app-rolling-die [roll]="die()" />
+    <app-move-banner [news]="banner()" />
     @if (layout(); as plan) {
       @if (view() === 'drawing') {
         <div class="board-box" #box [style.height.px]="fitHeight()">
@@ -146,6 +173,7 @@
             [layout]="plan"
             [pawns]="boardPawns()"
             [lastStop]="lastStop()"
+            [popup]="popup()"
             [choice]="choiceTiles()"
           />
         </div>
@@ -190,6 +218,7 @@
   <div
     role="group"
     [class]="'tile type-' + tile.type.toLowerCase() + ' lane-' + tile.lane.toLowerCase()"
+    [class.takes-mon]="takesMon(tile)"
     [attr.aria-label]="describe(tile)"
     [attr.data-tile]="tile.index"
     [attr.data-type]="tile.type"

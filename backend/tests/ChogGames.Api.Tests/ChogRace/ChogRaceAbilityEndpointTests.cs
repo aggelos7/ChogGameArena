@@ -15,7 +15,8 @@ namespace ChogGames.Api.Tests.ChogRace;
 /// STORY-055, DEC-059: Chog Race's lobby offers its four abilities and a player readies only with one, locked at start.
 /// In the match, Card Steal takes a server-drawn card that only the two players see, a Shield blocks an attack with no
 /// reply window, and no ability is used while an attack waits for its target's reply or after its one use; a refusal
-/// changes nothing.
+/// changes nothing. STORY-092, DEC-080: Double Dice moves by the die kept of those the server rolled, and a Frozen opponent
+/// is passed over once.
 /// </summary>
 public sealed class ChogRaceAbilityEndpointTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -156,13 +157,13 @@ public sealed class ChogRaceAbilityEndpointTests(MigratedPostgresDatabase databa
             .GetProperty("ability").GetProperty("usesLeft").GetInt32();
 
     [PostgresFact]
-    public async Task The_lobby_offers_the_four_race_abilities()
+    public async Task The_lobby_offers_the_six_race_abilities()
     {
         var alice = await GuestAsync("Alice");
         var room = await SendAsync(alice, HttpMethod.Post, "/api/rooms", new { gameType = "chog-race" }, HttpStatusCode.Created);
 
         Assert.Equal(
-            ["movement_boost", "attack_block", "card_preview", "card_steal"],
+            ["movement_boost", "attack_block", "card_preview", "card_steal", "double_dice", "freeze"],
             room.GetProperty("abilities").EnumerateArray().Select(a => a.GetProperty("id").GetString()));
     }
 
@@ -183,11 +184,11 @@ public sealed class ChogRaceAbilityEndpointTests(MigratedPostgresDatabase databa
         var aliceView = await ViewAsync(alice, code);
         Assert.Equal("""["Hodl"]""", Hand(aliceView));
         Assert.Equal("""["Rug"]""", Hand(await ViewAsync(bob, code)));
-        const string Stolen = """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl"}""";
+        const string Stolen = """{"seat":1,"ability":"card_steal","target":2,"card":"Hodl","cards":["Hodl"],"taken":1}""";
         Assert.Equal(Stolen, aliceView.GetProperty("state").GetProperty("ability").GetRawText());
         Assert.Equal(Stolen, (await ViewAsync(bob, code)).GetProperty("state").GetProperty("ability").GetRawText());
         var carolView = await ViewAsync(carol, code);
-        Assert.Equal("""{"seat":1,"ability":"card_steal","target":2}""", carolView.GetProperty("state").GetProperty("ability").GetRawText());
+        Assert.Equal("""{"seat":1,"ability":"card_steal","target":2,"taken":1}""", carolView.GetProperty("state").GetProperty("ability").GetRawText());
         Assert.DoesNotContain("Hodl", carolView.GetRawText());
         Assert.Equal(0, UsesLeft(aliceView, "Alice"));
 
@@ -243,5 +244,89 @@ public sealed class ChogRaceAbilityEndpointTests(MigratedPostgresDatabase databa
         Assert.Equal(bobTile, state.GetProperty("pawns")[1].GetProperty("tile").GetInt32());
         Assert.False(state.GetProperty("pawns")[1].TryGetProperty("shielded", out _));
         Assert.Equal("""["Fomo"]""", Hand(blocked));
+    }
+
+    private static int TurnSeat(JsonElement room) =>
+        room.GetProperty("members").EnumerateArray().Single(m => m.GetProperty("isTurn").GetBoolean()).GetProperty("seat").GetInt32();
+
+    [PostgresFact]
+    public async Task Double_dice_moves_by_the_die_kept_of_those_the_server_rolled()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var code = await StartedAsync((alice, "double_dice"), (bob, "attack_block"));
+
+        // The dice come from the server, never the payload, and everyone sees them.
+        _dice.Enqueue(1, 3);
+        await CommandAsync(alice, await ViewAsync(alice, code), MatchCommand.UseAbility, new { abilityId = "double_dice" });
+        Assert.Equal("[1,3]", (await ViewAsync(bob, code)).GetProperty("state").GetProperty("pawns")[0].GetProperty("dice").GetRawText());
+
+        // A die not rolled is refused and changes nothing.
+        var before = await StoredAsync(code);
+        await RefusedAsync(CommandAsync(alice, await ViewAsync(alice, code), "ROLL", new { die = 2 }, HttpStatusCode.Conflict), "invalid_die");
+        await RefusedAsync(CommandAsync(alice, await ViewAsync(alice, code), "ROLL", null, HttpStatusCode.Conflict), "choose_die");
+        Assert.Equal(before, await StoredAsync(code));
+
+        await CommandAsync(alice, await ViewAsync(alice, code), "ROLL", new { die = 3 });
+        var moved = (await ViewAsync(bob, code)).GetProperty("state");
+        Assert.Equal(3, moved.GetProperty("pawns")[0].GetProperty("tile").GetInt32());
+        Assert.Equal((3, "[1,3]"), (moved.GetProperty("lastMove").GetProperty("roll").GetInt32(), moved.GetProperty("lastMove").GetProperty("dice").GetRawText()));
+        Assert.False(moved.GetProperty("pawns")[0].TryGetProperty("dice", out _));
+    }
+
+    [PostgresFact]
+    public async Task A_frozen_opponent_is_passed_over_once()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var carol = await GuestAsync("Carol");
+        var code = await StartedAsync((alice, "freeze"), (bob, "attack_block"), (carol, "card_preview"));
+
+        await CommandAsync(alice, await ViewAsync(alice, code), MatchCommand.UseAbility, new { abilityId = "freeze", target = 2 });
+        var frozen = await ViewAsync(carol, code);
+        Assert.Equal("[2]", frozen.GetProperty("state").GetProperty("skipping").GetRawText());
+        Assert.Equal("""{"seat":1,"ability":"freeze","target":2}""", frozen.GetProperty("state").GetProperty("ability").GetRawText());
+        Assert.Equal(0, UsesLeft(frozen, "Alice"));
+
+        // Alice's turn goes on; her roll ends it and Bob is passed over.
+        _dice.Enqueue(1);
+        await CommandAsync(alice, await ViewAsync(alice, code), "ROLL", null);
+        Assert.Equal(3, TurnSeat(await ViewAsync(carol, code)));
+        _dice.Enqueue(1);
+        await CommandAsync(carol, await ViewAsync(carol, code), "ROLL", null);
+        Assert.Equal(1, TurnSeat(await ViewAsync(carol, code)));
+        _dice.Enqueue(3);
+        await CommandAsync(alice, await ViewAsync(alice, code), "ROLL", null);
+        Assert.Equal(2, TurnSeat(await ViewAsync(bob, code)));
+    }
+
+    [PostgresFact]
+    public async Task Freeze_on_a_player_already_skipping_or_who_left_is_refused_and_changes_nothing()
+    {
+        var alice = await GuestAsync("Alice");
+        var bob = await GuestAsync("Bob");
+        var carol = await GuestAsync("Carol");
+        var code = await StartedAsync((alice, "freeze"), (bob, "attack_block"), (carol, "card_preview"));
+
+        // Carol plays Liquidated on Bob, who holds nothing, so he is still due to skip on Alice's turn; then Carol leaves.
+        await SetStateAsync(
+            code,
+            """{"rulesVersion":1,"pawns":[{"seat":1,"tile":0},{"seat":2,"tile":0},{"seat":3,"tile":0,"hand":["Liquidated"]}],"deck":["Pump"],"discard":[]}""");
+        _dice.Enqueue(1, 1, 1);
+        await CommandAsync(alice, await ViewAsync(alice, code), "ROLL", null);
+        await CommandAsync(bob, await ViewAsync(bob, code), "ROLL", null);
+        await CommandAsync(carol, await ViewAsync(carol, code), "ROLL", null);
+        await CommandAsync(carol, await ViewAsync(carol, code), "PLAY_CARD", new { card = "Liquidated", target = 2 });
+        Assert.Equal(1, TurnSeat(await ViewAsync(alice, code)));
+        await SendAsync(carol, HttpMethod.Post, $"/api/rooms/{code}/leave", expected: HttpStatusCode.NoContent);
+
+        var before = await StoredAsync(code);
+        await RefusedAsync(
+            CommandAsync(alice, await ViewAsync(alice, code), MatchCommand.UseAbility, new { abilityId = "freeze", target = 2 }, HttpStatusCode.Conflict),
+            "already_skipping");
+        await RefusedAsync(
+            CommandAsync(alice, await ViewAsync(alice, code), MatchCommand.UseAbility, new { abilityId = "freeze", target = 3 }, HttpStatusCode.Conflict),
+            "invalid_target");
+        Assert.Equal(before, await StoredAsync(code));
     }
 }

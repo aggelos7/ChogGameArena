@@ -24,6 +24,12 @@ export function collectorColor(badge: CollectorBadge): string {
   template: `<span class="chip" [style.background]="color()" [attr.data-collector]="badge().id"
     [attr.title]="'Collector tier: ' + badge().name">{{ badge().name }}</span>`,
   styles: `
+    // Centred on the name beside it, wherever it sits, rather than on the text's baseline.
+    :host {
+      display: inline-flex;
+      align-items: center;
+      vertical-align: middle;
+    }
     .chip {
       display: inline-block;
       padding: 0.0625rem 0.5rem;

@@ -42,14 +42,118 @@ public sealed partial class ChogLifeMatchRules
         _ => null,
     };
 
-    /// <summary>The pawn carries the ability, with its locked percent, until the first outcome it fits.</summary>
+    /// <summary>The pawn carries the ability, with its locked percent or draws, until the first outcome it fits.</summary>
     internal JsonElement Arm(AbilityContext context)
     {
         var (state, pawn, _) = AbilityPawn(context)!.Value;
-        var percent = context.Ability.Parameters.TryGetValue(LifeAbilities.Percent, out var value) ? value : (decimal?)null;
-        var armed = pawn with { Armed = new LifeArmed(context.Ability.Id, percent) };
+        var parameters = context.Ability.Parameters;
+        var percent = parameters.TryGetValue(LifeAbilities.Percent, out var value) ? value : (decimal?)null;
+        var draws = parameters.TryGetValue(LifeAbilities.Draws, out var times) ? (int)times : (int?)null;
+        var armed = pawn with { Armed = new LifeArmed(context.Ability.Id, percent, draws) };
         return JsonSerializer.SerializeToElement(state with { Pawns = Replace(state, armed) }, Json);
     }
+
+    /// <summary>Double Dice rolls once: the dice already rolled for this pawn can't be rolled again.</summary>
+    internal string? CanRollDice(AbilityContext context) => AbilityPawn(context) switch
+    {
+        null => "game_state_unavailable",
+        { Pawn.Dice: not null } => "dice_rolled",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Double Dice (STORY-091, DEC-078): the server rolls the locked number of dice now, from its own source, and the pawn
+    /// holds them until its roll, which moves by the one its player keeps.
+    /// </summary>
+    internal JsonElement RollDice(AbilityContext context)
+    {
+        var (state, pawn, rules) = AbilityPawn(context)!.Value;
+        var count = (int)context.Ability.Parameters[LifeAbilities.Dice];
+        var dice = Enumerable.Range(0, count).Select(_ => context.Random.Next(1, rules.DieFaces + 1)).ToArray();
+        return JsonSerializer.SerializeToElement(state with { Pawns = Replace(state, pawn with { Dice = dice }) }, Json);
+    }
+
+    /// <summary>
+    /// Tax the Rich needs an opponent richer than the player, by total portfolio, with liquid MON to take: otherwise
+    /// <c>already_richest</c> or <c>nothing_to_tax</c>.
+    /// </summary>
+    internal string? CanTax(AbilityContext context)
+    {
+        if (AbilityPawn(context) is not var (state, pawn, _))
+        {
+            return "game_state_unavailable";
+        }
+
+        return Taxed(context, state, pawn) switch
+        {
+            null => "already_richest",
+            { Amount: 0 } => "nothing_to_tax",
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Tax the Rich (STORY-091, DEC-078): the richest opponent's liquid MON pays the player's; the state remembers the tax
+    /// until the player's roll, whose move then tells it.
+    /// </summary>
+    internal JsonElement Tax(AbilityContext context)
+    {
+        var (state, pawn, _) = AbilityPawn(context)!.Value;
+        var tax = Taxed(context, state, pawn)!;
+        var pawns = state.Pawns
+            .Select(p => p.Seat == pawn.Seat ? p with { Mon = p.Mon + tax.Amount }
+                : p.Seat == tax.From ? p with { Mon = p.Mon - tax.Amount }
+                : p)
+            .ToArray();
+        return JsonSerializer.SerializeToElement(state with { Pawns = pawns, Tax = tax }, Json);
+    }
+
+    /// <summary>
+    /// What Tax the Rich takes and from whom: the opponent still in the match (finished or not) with the highest total
+    /// portfolio, the first by seat on a tie, pays the locked percent of their liquid MON, rounded down, at most the cap and
+    /// no more than the player can hold. Null when no opponent's total is higher than the player's.
+    /// </summary>
+    private static LifeTax? Taxed(AbilityContext context, LifeMatchState state, LifePawn pawn)
+    {
+        var playing = context.Players.Where(player => player.IsPlaying).Select(player => player.Seat).ToHashSet();
+        var richest = state.Pawns
+            .Where(other => other.Seat != pawn.Seat && playing.Contains(other.Seat))
+            .OrderByDescending(other => PortfolioOf(other).Total)
+            .ThenBy(other => other.Seat)
+            .FirstOrDefault();
+        if (richest is null || PortfolioOf(richest).Total <= PortfolioOf(pawn).Total)
+        {
+            return null;
+        }
+
+        var parameters = context.Ability.Parameters;
+        var share = (int)(richest.Mon!.Value * parameters[LifeAbilities.Percent] / 100);
+        var amount = Math.Min(Math.Min(share, (int)parameters[LifeAbilities.Cap]), LifeRules.MaxMon - pawn.Mon!.Value);
+        return new LifeTax(pawn.Seat, richest.Seat, amount);
+    }
+
+    /// <summary>Double Dice's dice in range, and the die kept when a turn ran out one of them (STORY-091, DEC-078).</summary>
+    private static bool AreDiceValid(LifePawn pawn, LifeRules rules) =>
+        pawn.Dice is null
+            ? pawn.Kept is null
+            : pawn.Dice.Count is >= 2 and <= LifeAbilities.MaxDice
+                && pawn.Dice.All(die => die >= 1 && die <= rules.DieFaces)
+                && (pawn.Kept is null || pawn.Dice.Contains(pawn.Kept.Value));
+
+    /// <summary>The die a <c>ROLL</c> keeps of Double Dice's, <c>{"die": 5}</c>; null when the payload names none.</summary>
+    private static int? DieIn(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object
+        && payload.TryGetProperty("die", out var die)
+        && die.ValueKind == JsonValueKind.Number
+        && die.TryGetInt32(out var value)
+            ? value
+            : null;
+
+    /// <summary>
+    /// Tax the Rich: <paramref name="Seat"/> took <paramref name="Amount"/> MON from <paramref name="From"/>'s liquid MON
+    /// (STORY-091, DEC-078).
+    /// </summary>
+    private sealed record LifeTax(int Seat, int From, int Amount);
 
     /// <summary>
     /// The lane just chosen with Event Preview armed: the pawn's next move on it is drawn now, from the server's source and
@@ -104,8 +208,9 @@ public sealed partial class ChogLifeMatchRules
 
     /// <summary>
     /// What the tile <paramref name="tile"/> moves, changed by the pawn's <paramref name="armed"/> ability if it fits: the
-    /// boost a gain earns, the share of a loss kept, or the better of two draws of an event with several outcomes. The
-    /// ability is spent once it acts and stays armed otherwise.
+    /// boost a gain earns, the share of a loss still taken, or the best of the locked draws (2 before STORY-090) of an
+    /// event with several outcomes, which reports the worst one. The ability is spent once it acts and stays armed
+    /// otherwise.
     /// </summary>
     private static LifeResolution Resolve(LifeRules rules, int tile, int liquid, LifeArmed? armed, IRandomSource random)
     {
@@ -119,12 +224,18 @@ public sealed partial class ChogLifeMatchRules
         {
             case LifeAbilities.EventReroll
                 when rules.Tiles[tile] is { Type: LifeTileType.Event, Event: { } kind } && rules.Events[kind].Outcomes.Count > 1:
-                var second = rules.Resolve(tile, liquid, random)!.Value;
-                return new LifeResolution(Math.Max(change, second), null, Rerolled: Math.Min(change, second));
+                var draws = armed.Draws ?? DefaultDraws;
+                var drawn = new List<int>(draws) { change };
+                while (drawn.Count < draws)
+                {
+                    drawn.Add(rules.Resolve(tile, liquid, random)!.Value);
+                }
+
+                return new LifeResolution(drawn.Max(), null, Rerolled: drawn.Min(), Draws: draws);
             case LifeAbilities.RewardBoost when change > 0:
                 return new LifeResolution(change, null, Boost: (int)(change * armed.Percent!.Value / 100));
             case LifeAbilities.LossProtection when change < 0:
-                var saved = (int)(-change * armed.Percent!.Value / 100);
+                var saved = (int)(-change * (100 - armed.Percent!.Value) / 100);
                 return new LifeResolution(change + saved, null, Saved: saved);
             default:
                 return new LifeResolution(change, armed);
@@ -169,23 +280,29 @@ public sealed partial class ChogLifeMatchRules
         && drawn[0] >= 1 && drawn[0] <= rules.DieFaces
         && drawn.Skip(1).All(chance => chance is >= 0 and < 100);
 
+    /// <summary>Lucky Reroll's draws in states armed before it had a value (STORY-090).</summary>
+    private const int DefaultDraws = 2;
+
     /// <summary>
-    /// An ability armed until it acts: its id and, for Reward Boost and Loss Protection, the percent locked at start. Event
-    /// Preview is armed only on a fork, before its lane is chosen.
+    /// An ability armed until it acts: its id and, for Reward Boost and Loss Protection, the percent locked at start, or for
+    /// Lucky Reroll its draws (null in states from before STORY-090: 2). Event Preview is armed only on a fork, before its
+    /// lane is chosen.
     /// </summary>
-    private sealed record LifeArmed(string Ability, decimal? Percent = null)
+    private sealed record LifeArmed(string Ability, decimal? Percent = null, int? Draws = null)
     {
         public bool IsValid() => Ability switch
         {
-            LifeAbilities.RewardBoost or LifeAbilities.LossProtection => Percent is >= 1 and <= 100,
-            LifeAbilities.EventReroll or LifeAbilities.EventPreview => Percent is null,
+            LifeAbilities.RewardBoost or LifeAbilities.LossProtection => Percent is >= 1 and <= 100 && Draws is null,
+            LifeAbilities.EventReroll => Percent is null && Draws is null or (>= 2 and <= LifeAbilities.MaxDraws),
+            LifeAbilities.EventPreview => Percent is null && Draws is null,
             _ => false,
         };
     }
 
     /// <param name="Change">The signed MON the tile moves, null for a tile that does nothing.</param>
     /// <param name="Armed">The ability still armed after it, null once it acted.</param>
-    private sealed record LifeResolution(int? Change, LifeArmed? Armed, int? Boost = null, int? Saved = null, int? Rerolled = null);
+    private sealed record LifeResolution(
+        int? Change, LifeArmed? Armed, int? Boost = null, int? Saved = null, int? Rerolled = null, int? Draws = null);
 
     /// <summary>Plays back a preview's draws in order, then the server's source; a draw that doesn't fit is a bug.</summary>
     private sealed class PreviewDraws(IReadOnlyList<int> drawn, IRandomSource then) : IRandomSource

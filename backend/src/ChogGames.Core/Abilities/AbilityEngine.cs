@@ -41,7 +41,7 @@ public sealed class AbilityEngine
         var players = match.Members
             .Where(m => m.Seat is not null)
             .OrderBy(m => m.Seat)
-            .Select(m => new AbilityPlayer(m.PlayerId, m.Seat!.Value, !m.HasLeft))
+            .Select(m => new AbilityPlayer(m.PlayerId, m.Seat!.Value, !m.HasLeft, m.SkipsNextTurn))
             .ToArray();
         if (match.Status != RoomStatus.Active || !players.Any(p => p.PlayerId == request.PlayerId && p.IsPlaying))
         {
@@ -67,8 +67,14 @@ public sealed class AbilityEngine
 
         // The values locked at start apply, even if a deploy changed the catalog since; a handler that is gone or no
         // longer takes those values can't apply them.
-        var ability = locked.ToDefinition();
-        if (catalog is null || !catalog.TryFind(abilityId, out _, out var handler) || !AbilityCatalog.Fits(ability, handler))
+        // A value added since the ability was locked takes its handler's default, as the effect was then.
+        if (catalog is null || !catalog.TryFind(abilityId, out _, out var handler))
+        {
+            return AbilityResult.Reject(AbilityRefusal.Unavailable);
+        }
+
+        var ability = AbilityCatalog.WithDefaults(locked.ToDefinition(), handler);
+        if (!AbilityCatalog.Fits(ability, handler))
         {
             return AbilityResult.Reject(AbilityRefusal.Unavailable);
         }
@@ -87,7 +93,7 @@ public sealed class AbilityEngine
             return AbilityResult.Reject(AbilityRefusal.InvalidTarget);
         }
 
-        var context = new AbilityContext(match.GameType, request.PlayerId, ability, target, players, request.State, request.Random);
+        var context = new AbilityContext(match.GameType, request.PlayerId, ability, target, players, request.State, request.Random, match.TurnNumber);
         if (catalog.Timing.CurrentWindow(context) is not { } window || !ability.Windows.Contains(window, StringComparer.Ordinal))
         {
             return AbilityResult.Reject(AbilityRefusal.NotNow);
@@ -103,7 +109,14 @@ public sealed class AbilityEngine
             return AbilityResult.Reject(reason);
         }
 
-        return AbilityResult.Use(ability, target, handler.Execute(context));
+        var effect = handler.Apply(context);
+        if (effect.SkipsNextTurnOf is { } skipped
+            && (skipped == request.PlayerId || !players.Any(p => p.PlayerId == skipped && p.IsPlaying)))
+        {
+            throw new InvalidOperationException($"The {abilityId} handler made a player skip who isn't an opponent still playing.");
+        }
+
+        return AbilityResult.Use(ability, target, effect.State, effect.SkipsNextTurnOf);
     }
 
     /// <summary>An object with a string <c>abilityId</c> and an optional integer <c>target</c>, and nothing else.</summary>
@@ -158,15 +171,17 @@ public sealed record AbilityRequest(GameRoom Match, Guid PlayerId, JsonElement P
 /// <param name="Reason">When refused: a stable, lower-case code, from <see cref="AbilityRefusal"/> or the game's handler.</param>
 /// <param name="Ability">When used: the ability as the player locked it.</param>
 /// <param name="Target">When used on an opponent: who.</param>
+/// <param name="SkipsNextTurnOf">When used: the opponent the effect makes skip their next turn, if any (STORY-092).</param>
 public sealed record AbilityResult(
     bool Used,
     string? Reason = null,
     AbilityDefinition? Ability = null,
     AbilityPlayer? Target = null,
-    JsonElement? State = null)
+    JsonElement? State = null,
+    Guid? SkipsNextTurnOf = null)
 {
-    public static AbilityResult Use(AbilityDefinition ability, AbilityPlayer? target, JsonElement state) =>
-        new(true, Ability: ability, Target: target, State: state);
+    public static AbilityResult Use(AbilityDefinition ability, AbilityPlayer? target, JsonElement state, Guid? skipsNextTurnOf = null) =>
+        new(true, Ability: ability, Target: target, State: state, SkipsNextTurnOf: skipsNextTurnOf);
 
     public static AbilityResult Reject(string reason) => new(false, Reason: reason);
 }

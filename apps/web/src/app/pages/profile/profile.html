@@ -1,14 +1,8 @@
 <h1>Profile</h1>
 
-@switch (loadState()) {
-  @case ('loading') {
-    <app-loading-state message="Loading profile…" />
-  }
-  @case ('error') {
-    <app-error-state message="Your profile could not be loaded." (retry)="load()" />
-  }
-  @case ('ready') {
-    @if (profile(); as current) {
+<div class="top">
+  <div class="identity">
+    @if (loadState() === 'ready' && profile(); as current) {
       <section class="summary" aria-label="Summary">
         <app-avatar-badge [avatar]="current.avatar" [name]="current.displayName" [size]="4" [frame]="current.collector.badge" />
         <div>
@@ -20,7 +14,21 @@
           </dl>
         </div>
       </section>
+    }
+  </div>
+  <!-- Up top beside your summary, where it's seen: signing in with a wallet unlocks NFT Chogs and collector tiers. -->
+  <app-wallet-panel class="top-wallet" />
+</div>
 
+@switch (loadState()) {
+  @case ('loading') {
+    <app-loading-state message="Loading profile…" />
+  }
+  @case ('error') {
+    <app-error-state message="Your profile could not be loaded." (retry)="load()" />
+  }
+  @case ('ready') {
+    @if (profile(); as current) {
       <section class="collector" aria-labelledby="collector-heading">
         <h2 id="collector-heading">Collector</h2>
         @if (current.kind === 'Guest') {
@@ -173,7 +181,6 @@
         }
       </form>
 
-      <app-wallet-panel />
 
       @if (current.operator) {
         <section class="operator" aria-labelledby="operator-heading">

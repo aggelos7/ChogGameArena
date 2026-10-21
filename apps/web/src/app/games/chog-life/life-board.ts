@@ -22,7 +22,9 @@ import {
   LifeMove,
   LifePawn,
   LifeRoute,
+  LifeTax,
   LifeTile,
+  diceList,
   laneSummary,
   laneTiles,
   fittedLayout,
@@ -34,10 +36,14 @@ import {
   seatColor,
   signedMon,
   stakeSummary,
+  takesMon,
   tileLabel,
   timeLeft,
 } from './life-board-model';
+import { HolderBadge } from '../holder-badge';
 import { ReportPhoto } from '../../moderation/report-photo';
+import { DIE_MS, DieRoll, RollingDie } from '../rolling-die';
+import { BANNER_MS, MoveBanner, MoveNews, RECENT_MOVES, RecentMoves, signedMonText } from '../move-news';
 
 /** A pawn as drawn: its seat, colour and the player it belongs to. */
 interface DrawnPawn {
@@ -119,7 +125,7 @@ export function reducedMotion(): boolean {
  */
 @Component({
   selector: 'app-life-board',
-  imports: [LifeDrawing, NgTemplateOutlet, ReportPhoto],
+  imports: [LifeDrawing, NgTemplateOutlet, ReportPhoto, RollingDie, MoveBanner, RecentMoves, HolderBadge],
   templateUrl: './life-board.html',
   styleUrl: './life-board.scss',
 })
@@ -131,11 +137,16 @@ export class LifeBoardView {
   /** A roll or a lane choice is on its way to the server. */
   readonly rolling = input(false);
   readonly roll = output<void>();
+  /** The move on the board has been shown: its die and hops are over, or it had none (DEC-076). */
+  readonly settled = output<void>();
   readonly chooseLane = output<LifeRoute>();
   /** Uses your locked ability, by id. */
   readonly useAbility = output<string>();
+  /** Rolls keeping one of the dice Double Dice rolled for you (STORY-091, DEC-078). */
+  readonly keepDie = output<number>();
 
   protected readonly label = tileLabel;
+  protected readonly takesMon = takesMon;
   protected readonly ordinal = ordinal;
 
   /** The time now, ticking every second for the clock. */
@@ -165,9 +176,30 @@ export class LifeBoardView {
 
   /** The pawn hopping along the latest move and the tile it's on now; null when no move is being shown. */
   private readonly hop = signal<{ seat: number; tile: number } | null>(null);
+  /** The die over the board while a new roll is shown, before its pawn hops (DEC-076). */
+  protected readonly die = signal<DieRoll | null>(null);
+  private rolls = 0;
   /** The latest move already seen; undefined before the first board, whose move is never replayed. */
   private seenMove: string | null | undefined = undefined;
   private hopTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A move's die or hops are being shown (DEC-076). */
+  readonly moving = signal(false);
+  /**
+   * The latest move as the page tells it: the server's, once its die and hops have been shown, so the words don't give
+   * the roll away before the die lands (DEC-076).
+   */
+  private readonly revealed = signal<LifeMove | undefined>(undefined);
+  /** What the move just shown did, over the board for a moment; null otherwise. */
+  protected readonly banner = signal<MoveNews | null>(null);
+  /** The popup over the tile the move just shown stopped on, while its banner shows. */
+  protected readonly popup = computed(() => {
+    const news = this.banner();
+    return news?.popup ? { ...news.popup, tone: news.tone, id: news.id } : null;
+  });
+  /** The latest moves seen on this page, newest first. */
+  protected readonly recent = signal<MoveNews[]>([]);
+  private news = 0;
+  private bannerTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
     const tick = setInterval(() => this.now.set(Date.now()), 1000);
@@ -186,6 +218,7 @@ export class LifeBoardView {
     inject(DestroyRef).onDestroy(() => {
       clearInterval(tick);
       clearTimeout(this.hopTimer);
+      clearTimeout(this.bannerTimer);
       resize?.disconnect();
       globalThis.removeEventListener?.('resize', onResize);
     });
@@ -220,30 +253,95 @@ export class LifeBoardView {
   }
 
   /**
-   * Shows a new move: its pawn hops from where it was along the route the server resolved, a tile at a time, and then
-   * stands where the server put it. The first board's move, a pass at the finish and reduced motion show no hops.
+   * Shows a new move: the die tumbles and lands on the roll while its pawn waits where it was (DEC-076), then the pawn hops
+   * along the route the server resolved, a tile at a time, and stands where the server put it; then what it did is told
+   * (a banner, a popup, Recent moves and the last-move line). The first board's move, a pass at the finish and reduced
+   * motion show neither die nor hops, and the first board's move no banner.
    */
   private follow(move: LifeMove | undefined): void {
     const key = move ? JSON.stringify([move.seat, move.roll, move.from, move.to, move.path]) : null;
     if (key === this.seenMove) {
+      if (!this.moving()) {
+        // The same move told again, as after a route choice: its words follow.
+        this.revealed.set(move);
+        this.settled.emit();
+      }
       return;
     }
     const first = this.seenMove === undefined;
     this.seenMove = key;
     clearTimeout(this.hopTimer);
     this.hop.set(null);
+    this.die.set(null);
     if (first || !move || move.roll === undefined || move.path.length === 0 || reducedMotion()) {
+      this.moving.set(false);
+      this.reveal(move, !first);
+      this.settled.emit();
       return;
     }
+    this.moving.set(true);
     const route = [move.from, ...move.path];
     let step = 0;
     const next = (): void => {
+      this.die.set(null);
       this.hop.set(step < route.length ? { seat: move.seat, tile: route[step++] } : null);
       if (this.hop()) {
         this.hopTimer = setTimeout(next, HOP_MS);
+      } else {
+        this.moving.set(false);
+        this.reveal(this.board().lastMove ?? move, true);
+        this.settled.emit();
       }
     };
-    next();
+    this.die.set({ value: move.roll, id: ++this.rolls });
+    this.hop.set({ seat: move.seat, tile: move.from });
+    this.hopTimer = setTimeout(next, DIE_MS);
+  }
+
+  /** Tells a move that has been shown: the last-move line, Recent moves and, when `announce`, the banner and popup. */
+  private reveal(move: LifeMove | undefined, announce: boolean): void {
+    this.revealed.set(move);
+    const news = move ? this.newsOf(move) : null;
+    if (!news) {
+      return;
+    }
+    this.recent.update((recent) => [news, ...recent].slice(0, RECENT_MOVES));
+    if (announce) {
+      clearTimeout(this.bannerTimer);
+      this.banner.set(news);
+      this.bannerTimer = setTimeout(() => this.banner.set(null), BANNER_MS);
+    }
+  }
+
+  /** A roll's news: who rolled what, and what the tile did; null for a pass at the finish. */
+  private newsOf(move: LifeMove): MoveNews | null {
+    if (move.roll === undefined) {
+      return null;
+    }
+    const member = this.players().find((player) => player.seat === move.seat);
+    const who = member?.isYou ? 'You' : (member?.displayName ?? `Seat ${move.seat}`);
+    const tile = this.board().tiles[move.to];
+    const news = { id: ++this.news, title: `${who} rolled ${move.roll}` };
+    if (move.place !== undefined) {
+      const bonus = move.bonus ? ` ${signedMonText(move.bonus)} bonus` : '';
+      return { ...news, detail: `Finished ${ordinal(move.place)}!${bonus}`, tone: 'good', popup: { tile: move.to, text: `${ordinal(move.place)}!` } };
+    }
+    if (move.change !== undefined && move.change !== 0) {
+      const name = tile?.type === 'Event' ? `${tileLabel(tile)}!` : move.change > 0 ? 'Reward!' : 'Loss!';
+      const change = signedMonText(move.change);
+      return { ...news, detail: `${name} ${change}`, tone: move.change > 0 ? 'good' : 'bad', popup: { tile: move.to, text: change } };
+    }
+    if (move.matured) {
+      const { stake, payout } = move.matured;
+      return {
+        ...news,
+        detail: `Stake paid back ${payout} MON`,
+        tone: payout >= stake ? 'good' : 'bad',
+        popup: { tile: move.to, text: signedMonText(payout) },
+      };
+    }
+    const where = tile?.type === 'Branch' ? 'a fork: pick a route!' : `tile ${move.to}`;
+    return { ...news, detail: `Moved to ${where}`, tone: 'neutral', popup: null };
   }
 
   /** The time left as "12:05", while the match runs and has a time limit. */
@@ -402,6 +500,46 @@ export class LifeBoardView {
     return { keep: preview.lane, keepName: ROUTE_NAMES[preview.lane], other, otherName: ROUTE_NAMES[other] };
   });
 
+  /** The dice Double Dice rolled for you to keep one of, distinct and in order, while it's your turn; empty otherwise. */
+  protected readonly yourDice = computed(() => {
+    const you = this.players().find((member) => member.isYou);
+    const pawn = you?.isTurn ? this.pawnBySeat().get(you.seat) : undefined;
+    return pawn?.dice && pawn.kept === undefined && !this.board().ended ? [...new Set(pawn.dice)].sort((a, b) => a - b) : [];
+  });
+
+  /**
+   * Double Dice's dice waiting for a roll, in words, for everyone: "Your Double Dice rolled 2 and 5: keep one to move
+   * by it." or "Alice’s Double Dice rolled 2 and 5." With a die kept when time ran out, which one the next roll moves by.
+   */
+  protected readonly diceNote = computed(() => {
+    const pawn = this.board().pawns.find((each) => each.dice);
+    if (!pawn?.dice || this.board().ended) {
+      return null;
+    }
+    const member = this.players().find((player) => player.seat === pawn.seat);
+    const whose = member?.isYou ? 'Your' : `${member?.displayName ?? `Seat ${pawn.seat}`}’s`;
+    const rolled = `${whose} Double Dice rolled ${diceList(pawn.dice)}`;
+    if (pawn.kept !== undefined) {
+      return `${rolled}. Time ran out, so ${member?.isYou ? 'your' : 'their'} next roll moves by ${pawn.kept}.`;
+    }
+    return member?.isYou ? `${rolled}: keep one to move by it.` : `${rolled}.`;
+  });
+
+  /** A Tax the Rich used this turn, in words: "You took 30 MON from Bob with Tax the Rich." */
+  protected readonly taxNote = computed(() => {
+    const tax = this.board().tax;
+    return tax ? `${this.taxed(tax)}.` : null;
+  });
+
+  /** Who took how much from whom with Tax the Rich: "Alice took 30 MON from you with Tax the Rich". */
+  private taxed(tax: LifeTax): string {
+    const name = (seat: number, you: string): string => {
+      const member = this.players().find((player) => player.seat === seat);
+      return member?.isYou ? you : (member?.displayName ?? `Seat ${seat}`);
+    };
+    return `${name(tax.seat, 'You')} took ${tax.amount} MON from ${name(tax.from, 'you')} with Tax the Rich`;
+  }
+
   /** The name of the ability the player on `seat` has armed; null when none is. */
   protected armedName(seat: number): string | null {
     const armed = this.pawnBySeat().get(seat)?.armed;
@@ -426,7 +564,7 @@ export class LifeBoardView {
 
   /** What the latest move was, in words: who rolled what, where they went and what the tile did to their MON. */
   protected readonly lastMove = computed(() => {
-    const move = this.board().lastMove;
+    const move = this.revealed();
     if (!move) {
       return null;
     }
@@ -437,9 +575,13 @@ export class LifeBoardView {
     if (move.roll === undefined) {
       return `${who} passed at the finish.`;
     }
+    // Abilities used before the roll come first: "Alice took 30 MON from you with Tax the Rich. Alice rolled 2 and 5
+    // with Double Dice and kept 2, landed on…" (STORY-091, DEC-078).
+    const taxed = move.taxed ? `${this.taxed(move.taxed)}. ` : '';
+    const rolled = move.dice ? `rolled ${diceList(move.dice)} with Double Dice and kept ${move.roll}` : `rolled ${move.roll}`;
     if (move.place !== undefined) {
       const bonus = move.bonus ? `, winning the ${move.bonus} MON bonus` : '';
-      return `${who} rolled ${move.roll} and reached the finish in ${ordinal(move.place)} place${bonus}.`;
+      return `${taxed}${who} ${rolled} and reached the finish in ${ordinal(move.place)} place${bonus}.`;
     }
     const staked = move.staked ? ` and ${member?.isYou ? 'stake' : 'stakes'} ${move.staked} MON` : '';
     const route = !move.lane
@@ -459,10 +601,10 @@ export class LifeBoardView {
         : move.saved !== undefined
           ? ` ${yours} Loss Protection saved ${move.saved} MON.`
           : move.rerolled !== undefined
-            ? ` ${yours} Lucky Reroll drew the event twice: it kept ${signedMon(move.change ?? 0)} over ${signedMon(move.rerolled)}.`
+            ? ` ${yours} Lucky Reroll drew the event ${timesDrawn(move.draws ?? 2)}: it kept ${signedMon(move.change ?? 0)} over ${signedMon(move.rerolled)}.`
             : '';
     if (move.change === undefined) {
-      return `${who} rolled ${move.roll} and moved to ${where}.${matured}${route}`;
+      return `${taxed}${who} ${rolled} and moved to ${where}.${matured}${route}`;
     }
     const outcome =
       move.change > 0
@@ -470,7 +612,7 @@ export class LifeBoardView {
         : move.change < 0
           ? `lost ${-move.change} MON`
           : `${member?.isYou ? 'your' : 'their'} MON didn’t change`;
-    return `${who} rolled ${move.roll}, landed on ${where} and ${outcome}.${ability}${matured}${route}`;
+    return `${taxed}${who} ${rolled}, landed on ${where} and ${outcome}.${ability}${matured}${route}`;
   });
 
   protected isChoice(tile: LifeTile): boolean {
@@ -479,7 +621,7 @@ export class LifeBoardView {
 
   /** The tile the latest roll stopped on, which the board marks; null before the first roll or after a pass. */
   protected readonly lastStop = computed(() => {
-    const move = this.board().lastMove;
+    const move = this.revealed();
     return move && move.roll !== undefined ? move.to : null;
   });
 
@@ -512,4 +654,9 @@ export class LifeBoardView {
     return what.join(', ');
   }
 
+}
+
+/** How often Lucky Reroll drew: "twice", or "3 times" from a rarer Tier (STORY-090, DEC-077). */
+function timesDrawn(draws: number): string {
+  return draws === 2 ? 'twice' : `${draws} times`;
 }

@@ -7,7 +7,10 @@ namespace ChogGames.Core.Abilities;
 /// One ability a game offers (STORY-030, NFT-014, DEC-032): what it is called, whom it targets, when it may be used,
 /// how often per match and the values its effect uses, such as a 25% reward boost. Definitions are versioned code in each
 /// game module; the game's <see cref="AbilityCatalog"/> carries the version that matches snapshot. Nothing here depends on
-/// a player's character or NFT traits (NFT-016, ADR-007).
+/// a player's character or NFT traits (NFT-016, ADR-007). The description is a template its values fill in, so a holder's
+/// stronger values read right (STORY-090, DEC-077): <c>{percent}</c> is a value, <c>{uses}</c> the uses, and
+/// <c>{cards|the top card|the top # cards}</c> the first form for a value of 1, otherwise the second, with <c>#</c> as
+/// the value, such as "the top 2 cards".
 /// </summary>
 public sealed partial record AbilityDefinition
 {
@@ -20,9 +23,13 @@ public sealed partial record AbilityDefinition
     /// <summary>Most uses one ability may allow per match; abilities are normally once per match (requirements §6).</summary>
     public const int MaxUsesLimit = 10;
 
+    /// <summary>The value name that stands for <see cref="MaxUses"/>, in a description and in holder Tier values (DEC-077).</summary>
+    public const string Uses = "uses";
+
     private AbilityDefinition(
         string id,
         string name,
+        string descriptionTemplate,
         string description,
         AbilityTargetKind target,
         int maxUses,
@@ -31,6 +38,7 @@ public sealed partial record AbilityDefinition
     {
         Id = id;
         Name = name;
+        DescriptionTemplate = descriptionTemplate;
         Description = description;
         Target = target;
         MaxUses = maxUses;
@@ -43,7 +51,11 @@ public sealed partial record AbilityDefinition
 
     public string Name { get; }
 
+    /// <summary>The description with its values filled in.</summary>
     public string Description { get; }
+
+    /// <summary>The description as written, with its placeholders.</summary>
+    public string DescriptionTemplate { get; }
 
     public AbilityTargetKind Target { get; }
 
@@ -76,11 +88,6 @@ public sealed partial record AbilityDefinition
             throw new ArgumentException($"Ability {id} needs a name of 1 to {MaxNameLength} characters.", nameof(name));
         }
 
-        if (string.IsNullOrWhiteSpace(description) || description.Length > MaxDescriptionLength)
-        {
-            throw new ArgumentException($"Ability {id} needs a description of 1 to {MaxDescriptionLength} characters.", nameof(description));
-        }
-
         if (!Enum.IsDefined(target))
         {
             throw new ArgumentException($"Ability {id} has an unknown target kind.", nameof(target));
@@ -103,7 +110,59 @@ public sealed partial record AbilityDefinition
             throw new ArgumentException($"Ability {id} has a parameter name that isn't snake case.", nameof(parameters));
         }
 
-        return new AbilityDefinition(id, name, description, target, maxUses, windowList, values);
+        if (values.ContainsKey(Uses))
+        {
+            throw new ArgumentException($"Ability {id} can't name a parameter {Uses}; that is its uses per match.", nameof(parameters));
+        }
+
+        var rendered = Render(id, description, values, maxUses);
+        if (string.IsNullOrWhiteSpace(rendered) || rendered.Length > MaxDescriptionLength)
+        {
+            throw new ArgumentException($"Ability {id} needs a description of 1 to {MaxDescriptionLength} characters.", nameof(description));
+        }
+
+        return new AbilityDefinition(id, name, description, rendered, target, maxUses, windowList, values);
+    }
+
+    /// <summary>
+    /// This ability with other values, such as a holder Tier's (STORY-090, DEC-077): the description is filled in again.
+    /// Throws <see cref="ArgumentException"/> when the values don't fit the description or the uses are out of range.
+    /// </summary>
+    public AbilityDefinition WithValues(IReadOnlyDictionary<string, decimal> parameters, int maxUses) =>
+        Create(Id, Name, DescriptionTemplate, Target, Windows, parameters, maxUses);
+
+    /// <summary>The template with each placeholder replaced by its value; a stray brace or an unknown name is malformed.</summary>
+    private static string Render(string id, string? template, IReadOnlyDictionary<string, decimal> values, int maxUses)
+    {
+        if (template is null)
+        {
+            throw new ArgumentException($"Ability {id} needs a description.", "description");
+        }
+
+        var rendered = Placeholder().Replace(template, match =>
+        {
+            var key = match.Groups["name"].Value;
+            decimal value;
+            if (key == Uses)
+            {
+                value = maxUses;
+            }
+            else if (!values.TryGetValue(key, out value))
+            {
+                throw new ArgumentException($"Ability {id}'s description names {key}, which it doesn't configure.", "description");
+            }
+
+            var number = value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            return match.Groups["one"].Success
+                ? (value == 1 ? match.Groups["one"].Value : match.Groups["many"].Value).Replace("#", number, StringComparison.Ordinal)
+                : number;
+        });
+        if (rendered.Contains('{') || rendered.Contains('}'))
+        {
+            throw new ArgumentException($"Ability {id}'s description has a malformed placeholder.", "description");
+        }
+
+        return rendered;
     }
 
     /// <summary>Lower-case letters, digits and underscores, starting with a letter: ability, window and parameter names.</summary>
@@ -111,6 +170,9 @@ public sealed partial record AbilityDefinition
 
     [GeneratedRegex("^[a-z][a-z0-9_]{0,31}$")]
     private static partial Regex IdFormat();
+
+    [GeneratedRegex(@"\{(?<name>[a-z][a-z0-9_]{0,31})(\|(?<one>[^{}|]+)\|(?<many>[^{}|]+))?\}")]
+    private static partial Regex Placeholder();
 
     public bool Equals(AbilityDefinition? other) =>
         other is not null

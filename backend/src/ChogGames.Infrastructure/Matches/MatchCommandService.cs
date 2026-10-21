@@ -209,7 +209,7 @@ public sealed class MatchCommandService(
             throw new InvalidOperationException($"The {room.GameType} {result.Ability!.Id} handler returned no JSON object state.");
         }
 
-        var action = room.ApplyAbility(player.Id, command, result.Ability!.Id, newState.GetRawText(), now);
+        var action = room.ApplyAbility(player.Id, command, result.Ability!.Id, newState.GetRawText(), now, result.SkipsNextTurnOf);
         db.MatchActions.Add(action);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

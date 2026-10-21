@@ -26,7 +26,8 @@ namespace ChogGames.Games.ChogLife;
 /// are ranked by portfolio, then by who finished first, then by who is further along. Players use the ability they
 /// locked at start (STORY-042, DEC-044): Reward Boost, Loss Protection and Lucky Reroll are armed before a roll and act
 /// on the first outcome they fit; Event Preview, armed at a fork, shows only its player their next move on the lane they
-/// choose, which they then keep or switch blind.
+/// choose, which they then keep or switch blind. Holders may also lock Double Dice, whose roll moves by the die they keep
+/// of those rolled, or Tax the Rich, which takes MON from the richest opponent (STORY-091, DEC-078).
 /// </summary>
 public sealed partial class ChogLifeMatchRules : IMatchRules
 {
@@ -111,7 +112,7 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         var confirming = state.Confirming == pawn.Seat;
         state = state with { Choosing = null, Confirming = null };
         return context.Type == Roll
-            ? RollFor(pawn, choosing || confirming, state, rules, context.Random, context.Match)
+            ? RollFor(pawn, choosing || confirming, state, rules, context.Payload, context.Random, context.Match)
             : ChooseFor(pawn, choosing, confirming, state, rules, context.Payload, context.Random);
     }
 
@@ -130,17 +131,34 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         && (pawn.Armed is null || (pawn.Armed.IsValid()
             && (pawn.Armed.Ability != LifeAbilities.EventPreview || (rules.Tiles[pawn.Tile].Type == LifeTileType.Branch && pawn.Lane is null))))
         && (pawn.Preview is null || IsPreviewValid(pawn, pawn.Preview, rules))
+        && AreDiceValid(pawn, rules)
         && (pawn.Stats is null || pawn.Stats.IsValid());
 
     private static MatchRuleDecision RollFor(
-        LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, IRandomSource random, GameRoom match)
+        LifePawn pawn, bool choosing, LifeMatchState state, LifeRules rules, JsonElement payload, IRandomSource random, GameRoom match)
     {
         if (choosing)
         {
             return MatchRuleDecision.Reject("choose_lane_first");
         }
 
-        var next = Moved(pawn, state, rules, random);
+        // After Double Dice the roll moves by the die its player keeps, or the one kept for them when a turn ran out.
+        int? die = null;
+        if (pawn.Dice is { } dice)
+        {
+            die = pawn.Kept ?? DieIn(payload);
+            if (die is null)
+            {
+                return MatchRuleDecision.Reject("choose_die");
+            }
+
+            if (!dice.Contains(die.Value))
+            {
+                return MatchRuleDecision.Reject("invalid_die");
+            }
+        }
+
+        var next = Moved(pawn, state, rules, random, die);
         var move = next.LastMove!;
         if (move.To != rules.Finish.Index)
         {
@@ -160,9 +178,11 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// <summary>
     /// The state after <paramref name="pawn"/> rolls: the die, its stake's payout if it rejoins the main track, then the
     /// tile it stops on, with its armed ability applied to that tile's outcome if it fits (STORY-042, DEC-044). A roll its
-    /// player previewed plays out with the draws already shown to them. Reaching the Finish records the player's place.
+    /// player previewed plays out with the draws already shown to them, and one after Double Dice moves by the
+    /// <paramref name="die"/> kept, drawing no die (STORY-091, DEC-078). A Tax the Rich its player used this turn goes with
+    /// the move. Reaching the Finish records the player's place.
     /// </summary>
-    private static LifeMatchState Moved(LifePawn pawn, LifeMatchState state, LifeRules rules, IRandomSource random)
+    private static LifeMatchState Moved(LifePawn pawn, LifeMatchState state, LifeRules rules, IRandomSource random, int? die = null)
     {
         if (pawn.Preview is { } drawn)
         {
@@ -179,7 +199,7 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         }
         else
         {
-            var roll = random.Next(1, rules.DieFaces + 1);
+            var roll = die ?? random.Next(1, rules.DieFaces + 1);
             var path = rules.Path(pawn.Tile, roll, pawn.Lane);
 
             // A stake pays out as the pawn rejoins the main track, before the tile it stops on resolves (DEC-042).
@@ -209,7 +229,13 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
             armed = resolved.Armed;
             move = new LifeMove(
                 pawn.Seat, roll, pawn.Tile, path[^1], path, change, Matured: matured,
-                Boost: resolved.Boost, Saved: resolved.Saved, Rerolled: resolved.Rerolled);
+                Boost: resolved.Boost, Saved: resolved.Saved, Rerolled: resolved.Rerolled, Draws: resolved.Draws,
+                Dice: pawn.Dice);
+        }
+
+        if (state.Tax is { } tax && tax.Seat == pawn.Seat)
+        {
+            move = move with { Taxed = tax };
         }
 
         var finished = state.Finished ?? [];
@@ -227,7 +253,7 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         var gained = portfolio.Total - PortfolioOf(pawn).Total;
         var moved = pawn with
         {
-            Tile = move.To, Lane = null, Stake = stake, Armed = armed, Preview = null,
+            Tile = move.To, Lane = null, Stake = stake, Armed = armed, Preview = null, Dice = null, Kept = null,
             Stats = Tallied(pawn.Stats, move, gained, rules),
         };
         return state with
@@ -236,6 +262,7 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
             LastMove = move,
             Choosing = atFork ? pawn.Seat : null,
             Finished = finished.Count > 0 ? finished : null,
+            Tax = null,
         };
     }
 
@@ -402,10 +429,17 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// <summary>
     /// A turn that runs out while its player is choosing a lane takes the rules' default lane (DEC-041), drawing an armed
     /// Event Preview's move on it; one that runs out while they decide whether to keep a previewed lane keeps it
-    /// (STORY-042, DEC-044). Any other turn is skipped with the state unchanged, and so is a state this server can't play.
+    /// (STORY-042, DEC-044). One that runs out after Double Dice, before a die was kept, keeps the highest for the player's
+    /// next roll (STORY-091, DEC-078). Any other turn is skipped with the state unchanged, and so is a state this server
+    /// can't play.
     /// </summary>
     public JsonElement? TimeOutTurn(MatchTurnContext context)
     {
+        if (context.State is { } dicing && Read(dicing) is { } rolled && DiceKept(rolled, context.Match) is { } kept)
+        {
+            return JsonSerializer.SerializeToElement(kept, Json);
+        }
+
         if (context.State is not { } json
             || Read(json) is not { } read
             || (read.Choosing ?? read.Confirming) is not { } seat
@@ -428,6 +462,26 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         var chosen = Choose(state, pawn, rules.DefaultLane, byDefault: true, rules);
         return JsonSerializer.SerializeToElement(
             pawn.Armed?.Ability == LifeAbilities.EventPreview ? Previewed(chosen, seat, rules, context.Random) : chosen, Json);
+    }
+
+    /// <summary>
+    /// The state with the highest of Double Dice's dice kept for the current player's next roll, when the turn ran out with
+    /// none kept and no lane to choose; null otherwise.
+    /// </summary>
+    private LifeMatchState? DiceKept(LifeMatchState stored, GameRoom match)
+    {
+        var seat = match.Members.SingleOrDefault(member => member.PlayerId == match.CurrentPlayerId)?.Seat;
+        if (stored.Choosing is not null
+            || stored.Confirming is not null
+            || !_rulesByVersion.TryGetValue(stored.RulesVersion, out var rules)
+            || WithMon(stored, rules) is not { } state
+            || state.Pawns.FirstOrDefault(pawn => pawn.Seat == seat) is not { Dice: { } dice, Kept: null } pawn
+            || !IsPlayable(pawn, rules))
+        {
+            return null;
+        }
+
+        return state with { Pawns = Replace(state, pawn with { Kept = dice.Max() }) };
     }
 
     /// <summary>
@@ -467,7 +521,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
             rules.ForkStake > 0 ? [rules.Stakes[LifeLane.Safe], rules.Stakes[LifeLane.Degen]] : null,
             rules.FinishBonus > 0 ? rules.FinishBonus : null,
             state.Ended,
-            viewer is { } own && playing.Contains(own) ? PreviewFor(WithMon(state, rules), own, rules) : null);
+            viewer is { } own && playing.Contains(own) ? PreviewFor(WithMon(state, rules), own, rules) : null,
+            state.Tax);
         return JsonSerializer.SerializeToElement(view, Json);
     }
 
@@ -501,7 +556,9 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
             portfolio.Liabilities,
             portfolio.Total,
             place,
-            pawn.Armed?.Ability);
+            pawn.Armed?.Ability,
+            pawn.Dice,
+            pawn.Kept);
     }
 
     private static LifeTileView ToView(LifeTile tile) => new(
@@ -518,7 +575,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// The stored state: the rules version the match started with, where each seat's pawn stands with its liquid MON,
     /// the latest move and the seat whose roll stopped on a fork and who is still to choose a lane, the seats that reached
     /// the Finish in the order they arrived (null for none), once the match is over, what ended it, and the seat that
-    /// previewed its next move on the lane it chose and is still to keep or switch it (STORY-042, DEC-044).
+    /// previewed its next move on the lane it chose and is still to keep or switch it (STORY-042, DEC-044), and a Tax the
+    /// Rich used this turn, until its player rolls (STORY-091, DEC-078).
     /// </summary>
     private sealed record LifeMatchState(
         int RulesVersion,
@@ -527,7 +585,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         int? Choosing = null,
         IReadOnlyList<int>? Finished = null,
         LifeEnding? Ended = null,
-        int? Confirming = null);
+        int? Confirming = null,
+        LifeTax? Tax = null);
 
     /// <summary>What ended the match: every player still playing finished, or the time cap was up.</summary>
     private enum LifeEnding
@@ -546,8 +605,11 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// player's <paramref name="Place"/> in the order of arrival and the finish <paramref name="Bonus"/> it won, if any.
     /// An armed ability that acted on the tile's outcome says what it did (STORY-042, DEC-044): the bonuses a Reward Boost
     /// added (<paramref name="Boost"/>), the MON Loss Protection kept from a loss (<paramref name="Saved"/>) or the signed
-    /// MON of the event outcome a Lucky Reroll discarded (<paramref name="Rerolled"/>). A lane switched after an Event
-    /// Preview sets <paramref name="Switched"/>.
+    /// MON of the worst event outcome a Lucky Reroll discarded (<paramref name="Rerolled"/>) of its
+    /// <paramref name="Draws"/> (STORY-090). A lane switched after an Event
+    /// Preview sets <paramref name="Switched"/>. A roll after Double Dice gives every die rolled (<paramref name="Dice"/>),
+    /// its <paramref name="Roll"/> the one kept, and a Tax the Rich used before it what it took (<paramref name="Taxed"/>)
+    /// (STORY-091, DEC-078).
     /// </summary>
     private sealed record LifeMove(
         int Seat,
@@ -565,7 +627,10 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         int? Boost = null,
         int? Saved = null,
         int? Rerolled = null,
-        bool? Switched = null);
+        bool? Switched = null,
+        int? Draws = null,
+        IReadOnlyList<int>? Dice = null,
+        LifeTax? Taxed = null);
 
     /// <summary>A stake of <paramref name="Stake"/> MON on <paramref name="Lane"/> that paid <paramref name="Payout"/> MON back.</summary>
     private sealed record LifeMaturity(LifeLane Lane, int Stake, int Payout);
@@ -575,7 +640,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
     /// the lane it will leave by (null until chosen), the MON staked on the lane it took until that pays out, and the
     /// player's bonuses and liabilities (null for none), the ability its player armed until it acts and, on a fork after
     /// an Event Preview, the draws its next roll will use (STORY-042, DEC-044), which only its player may see, and its
-    /// player's statistics so far (STORY-043, DEC-046), which only the results show.
+    /// player's statistics so far (STORY-043, DEC-046), which only the results show. After Double Dice it holds the dice
+    /// rolled until its next roll and, once a turn ran out, the die kept of them (STORY-091, DEC-078).
     /// </summary>
     private sealed record LifePawn(
         int Seat,
@@ -587,12 +653,15 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         int? Liabilities = null,
         LifeArmed? Armed = null,
         IReadOnlyList<int>? Preview = null,
-        LifeStats? Stats = null);
+        LifeStats? Stats = null,
+        IReadOnlyList<int>? Dice = null,
+        int? Kept = null);
 
     /// <summary>
     /// A pawn as every player sees it, with its player's portfolio: <c>mon</c> is the liquid MON. <c>place</c> is the
     /// order in which its player reached the Finish, from 1; null while still on the board. <c>armed</c> is the id of the
-    /// ability its player armed and that hasn't acted yet (STORY-042, DEC-044).
+    /// ability its player armed and that hasn't acted yet (STORY-042, DEC-044). <c>dice</c> are Double Dice's, rolled for
+    /// its player's next roll, and <c>kept</c> the one kept when their turn ran out (STORY-091, DEC-078).
     /// </summary>
     private sealed record LifePawnView(
         int Seat,
@@ -605,7 +674,9 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         int Liabilities,
         int Portfolio,
         int? Place,
-        string? Armed);
+        string? Armed,
+        IReadOnlyList<int>? Dice,
+        int? Kept);
 
     private sealed record LifeBoardView(
         int RulesVersion,
@@ -619,7 +690,8 @@ public sealed partial class ChogLifeMatchRules : IMatchRules
         IReadOnlyList<LifeLaneStake>? StakeReturns,
         int? FinishBonus,
         LifeEnding? Ended,
-        LifePreview? Preview);
+        LifePreview? Preview,
+        LifeTax? Tax);
 
     private sealed record LifeTileView(
         int Index,

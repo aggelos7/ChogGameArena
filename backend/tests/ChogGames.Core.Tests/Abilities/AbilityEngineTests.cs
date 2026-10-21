@@ -318,6 +318,57 @@ public class AbilityEngineTests
         Assert.Equal(125, result.State!.Value.GetProperty("reward").GetInt32());
     }
 
+    /// <summary>
+    /// STORY-090: a value a deploy adds to a locked ability takes its handler's default, so the match keeps going as it
+    /// did; a value without a default can't be applied.
+    /// </summary>
+    [Fact]
+    public void A_value_added_after_the_lock_takes_its_default()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob")];
+        var room = Started(players);
+        var withDefault = new RecordingHandler("boost", new AbilityParameter("percent", 1, 100), new AbilityParameter("rounds", 1, 5, Default: 2));
+        var withoutDefault = new RecordingHandler("boost", new AbilityParameter("percent", 1, 100), new AbilityParameter("rounds", 1, 5));
+        AbilityDefinition Deployed() => AbilityDefinition.Create(
+            "boost", "Boost", "Raise the pending reward.", AbilityTargetKind.None, ["before_reward"],
+            new Dictionary<string, decimal> { ["percent"] = 50, ["rounds"] = 4 });
+        var request = new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"boost"}"""), State("before_reward"), new ScriptedRandomSource());
+
+        var used = new AbilityEngine([AbilityCatalog.Create(GameType, 2, [Deployed(), Steal()], [withDefault, _steal], new StateWindow())]).Use(request);
+        var refused = new AbilityEngine([AbilityCatalog.Create(GameType, 2, [Deployed(), Steal()], [withoutDefault, _steal], new StateWindow())]).Use(request);
+
+        Assert.True(used.Used);
+        Assert.Equal(new Dictionary<string, decimal> { ["percent"] = 25, ["rounds"] = 2 }, withDefault.Seen);
+        Assert.Equal(AbilityRefusal.Unavailable, refused.Reason);
+        Assert.Null(withoutDefault.Seen);
+    }
+
+    [Fact]
+    public void A_handler_default_outside_its_range_stops_the_catalog()
+    {
+        var handler = new RecordingHandler("boost", new AbilityParameter("percent", 1, 100, Default: 0));
+
+        Assert.Throws<ArgumentException>(() => AbilityCatalog.Create(GameType, 1, [Boost()], [handler], new StateWindow()));
+    }
+
+    /// <summary>A handler that records the values it was given.</summary>
+    private sealed class RecordingHandler(string abilityId, params AbilityParameter[] parameters) : IAbilityHandler
+    {
+        public Dictionary<string, decimal>? Seen { get; private set; }
+
+        public string AbilityId => abilityId;
+
+        public IReadOnlyList<AbilityParameter> Parameters => parameters;
+
+        public string? CanExecute(AbilityContext context) => null;
+
+        public JsonElement Execute(AbilityContext context)
+        {
+            Seen = context.Ability.Parameters.ToDictionary();
+            return context.State!.Value;
+        }
+    }
+
     [Fact]
     public void Locked_ability_the_game_can_no_longer_apply_is_unavailable()
     {
@@ -341,7 +392,7 @@ public class AbilityEngineTests
     [Fact]
     public void Ability_contract_cannot_reach_characters_or_nft_traits()
     {
-        Type[] contract = [typeof(IAbilityHandler), typeof(IAbilityTiming), typeof(AbilityContext), typeof(AbilityPlayer), typeof(AbilityDefinition), typeof(AbilityParameter), typeof(AbilityCatalog)];
+        Type[] contract = [typeof(IAbilityHandler), typeof(IAbilityTiming), typeof(AbilityContext), typeof(AbilityPlayer), typeof(AbilityEffect), typeof(AbilityDefinition), typeof(AbilityParameter), typeof(AbilityCatalog)];
         var forbidden = new[] { typeof(NftTrait).Namespace!, typeof(CharacterSnapshot).Namespace!, typeof(GameRoom).Namespace!, typeof(WalletAddress).Namespace! };
 
         var reachable = contract.SelectMany(type => ReachableTypes(type)).Distinct().ToArray();
@@ -359,6 +410,80 @@ public class AbilityEngineTests
 
         static IEnumerable<Type> Expand(Type t) =>
             (t.HasElementType ? Expand(t.GetElementType()!) : [t]).Concat(t.IsGenericType ? t.GetGenericArguments().SelectMany(Expand) : []);
+    }
+
+    [Fact]
+    public void An_effect_can_make_the_target_skip_their_next_turn_once()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob"), Guest("Carol")];
+        var room = Started(players, ability: "steal");
+        var skip = new SkipHandler(_steal.Parameters, context => context.Target!.PlayerId);
+        var engine = new AbilityEngine([AbilityCatalog.Create(GameType, 1, [Boost(), Steal()], [_boost, skip], new StateWindow())]);
+
+        var result = engine.Use(new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"steal","target":2}"""), State("own_turn"), new ScriptedRandomSource()));
+
+        Assert.True(result.Used, result.Reason);
+        Assert.Equal(players[1].Id, result.SkipsNextTurnOf);
+        Assert.Equal((room.TurnNumber, false), (skip.Seen!.Turn, skip.Seen.Target!.SkipsNextTurn));
+        room.ApplyAbility(
+            players[0].Id,
+            new MatchCommand(Guid.NewGuid(), room.Id, room.Version, MatchCommand.UseAbility, Payload("{}")),
+            "steal",
+            result.State!.Value.GetRawText(),
+            Now,
+            result.SkipsNextTurnOf);
+
+        // The handler sees who is due to skip; the turn passes Bob over once.
+        Assert.True(Use(room, players[0], """{"abilityId":"steal","target":2}""", State("own_turn")) is { Used: false, Reason: AbilityRefusal.UsedUp });
+        Assert.True(room.Members.Single(m => m.PlayerId == players[1].Id).SkipsNextTurn);
+        room.ApplyCommand(players[0].Id, new MatchCommand(Guid.NewGuid(), room.Id, room.Version, "END", Payload("{}")), "{}", endsTurn: true, Now);
+        Assert.Equal(players[2].Id, room.CurrentPlayerId);
+        Assert.False(room.Members.Single(m => m.PlayerId == players[1].Id).SkipsNextTurn);
+    }
+
+    [Fact]
+    public void An_effect_making_its_own_player_or_one_who_left_skip_is_a_bug()
+    {
+        Player[] players = [Guest("Alice"), Guest("Bob"), Guest("Carol")];
+        var room = Started(players, ability: "steal");
+        room.Leave(players[2].Id, Now.AddSeconds(1));
+        var request = new AbilityRequest(room, players[0].Id, Payload("""{"abilityId":"steal","target":2}"""), State("own_turn"), new ScriptedRandomSource());
+
+        foreach (var skipped in new[] { players[0].Id, players[2].Id, Guid.NewGuid() })
+        {
+            var engine = new AbilityEngine(
+                [AbilityCatalog.Create(GameType, 1, [Boost(), Steal()], [_boost, new SkipHandler(_steal.Parameters, _ => skipped)], new StateWindow())]);
+            Assert.Throws<InvalidOperationException>(() => engine.Use(request));
+        }
+
+        Assert.Throws<InvalidOperationException>(() => room.ApplyAbility(
+            players[0].Id,
+            new MatchCommand(Guid.NewGuid(), room.Id, room.Version, MatchCommand.UseAbility, Payload("{}")),
+            "steal",
+            "{}",
+            Now,
+            players[0].Id));
+        Assert.All(room.Members, m => Assert.False(m.SkipsNextTurn));
+    }
+
+    /// <summary>A handler whose effect makes the player <paramref name="skipped"/> picks skip their next turn.</summary>
+    private sealed class SkipHandler(IReadOnlyList<AbilityParameter> parameters, Func<AbilityContext, Guid> skipped) : IAbilityHandler
+    {
+        public AbilityContext? Seen { get; private set; }
+
+        public string AbilityId => "steal";
+
+        public IReadOnlyList<AbilityParameter> Parameters => parameters;
+
+        public string? CanExecute(AbilityContext context) => null;
+
+        public JsonElement Execute(AbilityContext context) => context.State!.Value;
+
+        public AbilityEffect Apply(AbilityContext context)
+        {
+            Seen = context;
+            return new AbilityEffect(Execute(context), skipped(context));
+        }
     }
 
     [Fact]

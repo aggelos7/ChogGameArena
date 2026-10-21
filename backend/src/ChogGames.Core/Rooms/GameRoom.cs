@@ -595,9 +595,11 @@ public sealed class GameRoom
     /// Applies an ability the engine allowed (STORY-034, NFT-014, DEC-036): counts one use of the ability the player
     /// locked at start and stores the effect's <paramref name="state"/>. Using an ability is an action, so it resets the
     /// player's missed turns, but it never ends the turn or the match. Refused unchanged if the ability isn't the one
-    /// they locked or has no uses left, so a use is counted at most <see cref="AbilitySnapshot.MaxUses"/> times.
+    /// they locked or has no uses left, so a use is counted at most <see cref="AbilitySnapshot.MaxUses"/> times. The
+    /// effect may make <paramref name="skipsNextTurnOf"/>, an opponent still playing, skip their next turn once (STORY-092).
     /// </summary>
-    public MatchAction ApplyAbility(Guid playerId, MatchCommand command, string abilityId, string state, DateTimeOffset now)
+    public MatchAction ApplyAbility(
+        Guid playerId, MatchCommand command, string abilityId, string state, DateTimeOffset now, Guid? skipsNextTurnOf = null)
     {
         if (CheckCommand(playerId, command, now) is { } problem)
         {
@@ -620,7 +622,14 @@ public sealed class GameRoom
             throw new InvalidOperationException($"The {abilityId} ability has no uses left.");
         }
 
+        if (skipsNextTurnOf == playerId)
+        {
+            throw new InvalidOperationException("An ability can't make its own player skip a turn.");
+        }
+
+        var skipping = skipsNextTurnOf is { } skipped ? PlayingMember(skipped) : null;
         State = state;
+        skipping?.SkipNextTurn();
         member.UseAbility();
         member.Act();
         Version++;

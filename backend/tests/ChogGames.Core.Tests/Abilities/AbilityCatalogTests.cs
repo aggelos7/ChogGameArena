@@ -40,6 +40,61 @@ public class AbilityCatalogTests
             AbilityDefinition.Create("boost", name, description, AbilityTargetKind.None, ["before_reward"], maxUses: maxUses));
     }
 
+    /// <summary>STORY-090, DEC-077: a description fills in the values, so a holder Tier's stronger ones read right.</summary>
+    [Fact]
+    public void Description_fills_in_its_values_and_uses()
+    {
+        var boost = AbilityDefinition.Create(
+            "boost", "Boost", "Earn {percent}% more, {uses|1 time|# times}; draws {draws|# card|# cards}.", AbilityTargetKind.None, ["before_reward"],
+            new Dictionary<string, decimal> { ["percent"] = 25, ["draws"] = 1 });
+        var stronger = boost.WithValues(new Dictionary<string, decimal> { ["percent"] = 37.5m, ["draws"] = 3 }, maxUses: 2);
+
+        Assert.Equal("Earn 25% more, 1 time; draws 1 card.", boost.Description);
+        Assert.Equal("Earn 37.5% more, 2 times; draws 3 cards.", stronger.Description);
+        Assert.Equal(boost.DescriptionTemplate, stronger.DescriptionTemplate);
+        Assert.Equal((2, 37.5m), (stronger.MaxUses, stronger.Parameters["percent"]));
+        Assert.NotEqual(boost, stronger);
+    }
+
+    [Theory]
+    [InlineData("Earn {bonus}% more.")]
+    [InlineData("Earn {percent% more.")]
+    [InlineData("Earn percent}% more.")]
+    [InlineData("Earn {percent|one}% more.")]
+    [InlineData("Earn {Percent}% more.")]
+    public void Description_refuses_a_malformed_or_unknown_placeholder(string description)
+    {
+        Assert.Throws<ArgumentException>(() => AbilityDefinition.Create(
+            "boost", "Boost", description, AbilityTargetKind.None, ["before_reward"], new Dictionary<string, decimal> { ["percent"] = 25 }));
+    }
+
+    [Fact]
+    public void A_parameter_cannot_be_named_uses_and_a_filled_in_description_must_fit()
+    {
+        Assert.Throws<ArgumentException>(() => AbilityDefinition.Create(
+            "boost", "Boost", "Raise it.", AbilityTargetKind.None, ["before_reward"], new Dictionary<string, decimal> { ["uses"] = 2 }));
+        var longText = AbilityDefinition.Create(
+            "boost", "Boost", new string('x', 197) + "{n}", AbilityTargetKind.None, ["before_reward"], new Dictionary<string, decimal> { ["n"] = 1 });
+        Assert.Throws<ArgumentException>(() => longText.WithValues(new Dictionary<string, decimal> { ["n"] = 10000 }, 1));
+    }
+
+    [Fact]
+    public void A_catalog_allows_its_abilities_with_values_in_range_only()
+    {
+        var catalog = Catalog(new BoostHandler(maxPercent: 50));
+        var renamed = AbilityDefinition.Create(
+            "boost", "Big Boost", "Raise the pending reward.", AbilityTargetKind.None, ["before_reward"], new Dictionary<string, decimal> { ["percent"] = 25 });
+        var otherWindow = AbilityDefinition.Create(
+            "boost", "Boost", "Raise the pending reward.", AbilityTargetKind.None, ["own_turn"], new Dictionary<string, decimal> { ["percent"] = 25 });
+
+        Assert.True(catalog.Allows(Boost(percent: 50)));
+        Assert.True(catalog.Allows(Steal(maxUses: 3)));
+        Assert.False(catalog.Allows(Boost(percent: 51)));
+        Assert.False(catalog.Allows(renamed));
+        Assert.False(catalog.Allows(otherWindow));
+        Assert.False(catalog.Allows(AbilityDefinition.Create("shield", "Shield", "Block.", AbilityTargetKind.None, ["own_turn"])));
+    }
+
     [Fact]
     public void Definition_refuses_missing_duplicate_or_malformed_windows_and_parameters()
     {

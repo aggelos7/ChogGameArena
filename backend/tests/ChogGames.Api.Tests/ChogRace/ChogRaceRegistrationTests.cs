@@ -34,7 +34,10 @@ public class ChogRaceRegistrationTests
         var catalog = Assert.Single(services.GetServices<AbilityCatalog>());
         Assert.Equal(("chog-race", RaceAbilities.Version), (catalog.GameType, catalog.Version));
         Assert.Equal(
-            [RaceAbilities.MovementBoost, RaceAbilities.AttackBlock, RaceAbilities.CardPreview, RaceAbilities.CardSteal],
+            [
+                RaceAbilities.MovementBoost, RaceAbilities.AttackBlock, RaceAbilities.CardPreview, RaceAbilities.CardSteal,
+                RaceAbilities.DoubleDice, RaceAbilities.Freeze,
+            ],
             catalog.Definitions.Select(d => d.Id));
     }
 }

@@ -448,3 +448,58 @@
     font-size: 0.75rem;
   }
 }
+
+// The rolling die is laid over the board (DEC-076).
+.stage {
+  position: relative;
+}
+
+// What the move just shown did, floating up from its tile (DEC-076).
+.popup {
+  position: absolute;
+  left: 50%;
+  bottom: 60%;
+  z-index: 4;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  color: #fff;
+  background: #0b0e43;
+  font-size: 0.95rem;
+  font-weight: 800;
+  white-space: nowrap;
+  pointer-events: none;
+  translate: -50% 0;
+  animation: float-up 2.4s ease-out both;
+
+  &.good {
+    background: #1a7f37;
+  }
+
+  &.bad {
+    background: #b42318;
+  }
+}
+
+@keyframes float-up {
+  from {
+    transform: translateY(0.5rem);
+    opacity: 0;
+  }
+  15% {
+    transform: none;
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-1.5rem);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup {
+    animation: none;
+  }
+}
