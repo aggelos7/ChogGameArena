@@ -3,18 +3,34 @@ using ChogGames.Games.ChogRoyale.Rules;
 namespace ChogGames.Games.ChogRoyale;
 
 /// <summary>
-/// A Chog Royale match's stored state (STORY-071–077, DEC-082–088): the rules version it started with, the round being
-/// played and its market event, the next card instance number and every seated player, whose hand and pending action are
-/// private, plus the public ledger of every resolved round.
+/// A Chog Royale match's stored state (STORY-071–077, STORY-080, DEC-082–088, DEC-091): the rules version it started
+/// with, the round being played and its market event, the next card instance number and every seated player, whose hand,
+/// pending action and ability are private, plus the public ledger of every resolved round.
 /// </summary>
 /// <param name="Round">The round being played, from 1, which the engine's round counter matches.</param>
 /// <param name="Event">The round's market event, drawn before its decisions open and never changed after (ROYALE-021).</param>
 /// <param name="NextCard">The number the next dealt card gets, so card ids are unique in the match (ROYALE-019).</param>
+/// <param name="NextEvent">
+/// The next round's event, when Alpha Leak drew it early (DEC-091); the round's resolution then uses it instead of a draw.
+/// </param>
 public sealed record RoyaleMatchState(
-    int RulesVersion, int Round, RoyaleMarketEvent Event, int NextCard, RoyalePlayer[] Players, RoyaleRoundLedger[] Ledger);
+    int RulesVersion,
+    int Round,
+    RoyaleMarketEvent Event,
+    int NextCard,
+    RoyalePlayer[] Players,
+    RoyaleRoundLedger[] Ledger,
+    RoyaleMarketEvent? NextEvent = null);
 
 /// <param name="Action">What the player submitted this round, until it resolves; null while they have submitted nothing.</param>
-public sealed record RoyalePlayer(int Seat, int Mon, RoyaleHandCard[] Hand, RoyaleAction? Action = null);
+/// <param name="Ability">The ability the player used this round, until it resolves (STORY-080, DEC-091).</param>
+public sealed record RoyalePlayer(int Seat, int Mon, RoyaleHandCard[] Hand, RoyaleAction? Action = null, RoyaleAbilityUse? Ability = null);
+
+/// <summary>
+/// An ability used in the round (STORY-080, DEC-091): its id and the value it acts with, locked at the start: Diamond
+/// Hands+'s extra blocks, Double Pump's percent, Stop Loss's most MON lost; 0 for Alpha Leak.
+/// </summary>
+public sealed record RoyaleAbilityUse(string Id, int Value);
 
 /// <summary>One card in a hand: its match-unique instance id (<c>c1</c>, <c>c2</c>, …) and which card it is.</summary>
 public sealed record RoyaleHandCard(string Id, RoyaleCard Card);
@@ -40,11 +56,12 @@ public sealed record RoyaleRoundLedger(
 /// The MON the card moved for its player: Pump's, Airdrop's and Diamond Hands' gain, what a Rug Pull stole, and a Whale
 /// Swap's net change, which may be negative.
 /// </param>
-/// <param name="Defense">What the player's Diamond Hands did this round, if they played it.</param>
+/// <param name="Defense">What the player's Diamond Hands, or Diamond Hands+, did this round, if they had one up.</param>
 /// <param name="Lost">The MON other players' cards took from the player this round (DEC-089).</param>
 /// <param name="Market">The MON the round's market effects moved for the player.</param>
 /// <param name="Change">The player's MON change over the round, after the clamp.</param>
 /// <param name="Balance">The player's MON after the round.</param>
+/// <param name="Ability">The ability the player used this round, shown from its reveal on (STORY-080, DEC-091).</param>
 public sealed record RoyaleLedgerEntry(
     int Seat,
     RoyaleCard? Card,
@@ -56,7 +73,8 @@ public sealed record RoyaleLedgerEntry(
     int Lost,
     int Market,
     int Change,
-    int Balance);
+    int Balance,
+    string? Ability = null);
 
 /// <summary>What became of a played card (DEC-086, DEC-087). Only <see cref="Applied"/> counts as a successful card.</summary>
 public enum RoyaleOutcome
@@ -75,14 +93,17 @@ public enum RoyaleOutcome
 
     /// <summary>A Rug Pull on a player with nothing left to take.</summary>
     Empty,
+
+    /// <summary>A Rug Pull the target's Stop Loss let nothing through (DEC-091).</summary>
+    Stopped,
 }
 
-/// <summary>What a player's Diamond Hands did (DEC-086).</summary>
+/// <summary>What a player's Diamond Hands, or Diamond Hands+, did (DEC-086, DEC-091).</summary>
 public enum RoyaleDefense
 {
     /// <summary>Raised, and nothing hostile came at the player.</summary>
     Raised,
 
-    /// <summary>It blocked the first hostile card aimed at the player.</summary>
+    /// <summary>It blocked hostile cards aimed at the player, the first ones in resolution order.</summary>
     Blocked,
 }

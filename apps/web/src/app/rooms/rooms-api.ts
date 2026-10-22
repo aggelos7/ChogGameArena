@@ -83,6 +83,12 @@ export interface RoomMember {
    * photo of `avatarImageUrl`. The player list and the results draw it; the match character stays `character`.
    */
   avatar: Avatar;
+  /**
+   * In an active match played in rounds (STORY-070, DEC-081): the member has submitted an action this round, and has
+   * locked it. Never what they submitted. Absent from older servers.
+   */
+  hasSubmitted?: boolean;
+  hasLocked?: boolean;
 }
 
 /** `Cancelled`: closed before it started. `Abandoned`: started, then too many players left (DEC-025). */
@@ -123,6 +129,27 @@ export interface Room {
   unavailableAbilities?: RoomAbility[];
   /** Achievements this player unlocked with the completed match (STORY-058); empty otherwise and for everyone else's. */
   achievements: RoomAchievement[];
+  /** Whether the match is played in turns or in simultaneous rounds (STORY-070, DEC-081); absent from older servers. */
+  play?: 'Turns' | 'Rounds';
+  /**
+   * In an active match played in rounds: when the current round starts taking actions (ISO 8601); its deadline is
+   * `turnEndsAt`. Null otherwise.
+   */
+  roundOpensAt?: string | null;
+  /**
+   * The server's time when it built this snapshot (ISO 8601, STORY-083, DEC-093), so countdowns run on the server's clock
+   * whatever this device's says. Absent from older servers.
+   */
+  serverTime?: string;
+}
+
+/**
+ * How far the server's clock is ahead of this device's, in milliseconds, from a snapshot's `serverTime` (STORY-083); 0
+ * without one. Taken when the snapshot arrives, so the delivery time counts as clock drift, a fraction of a second.
+ */
+export function serverClockOffset(room: Room | null, now: number = Date.now()): number {
+  const server = room?.serverTime ? Date.parse(room.serverTime) : Number.NaN;
+  return Number.isNaN(server) ? 0 : server - now;
 }
 
 /** Mirrors `MatchCommandResponse`: the room's `version` after the command and whether it was a replayed retry. */
@@ -164,13 +191,18 @@ export type RoomErrorCode =
   | 'not_in_match'
   | 'unknown_command'
   | 'command_rejected'
-  | 'action_conflict';
+  | 'action_conflict'
+  | 'round_not_open'
+  | 'round_closed'
+  | 'action_locked';
 
 /** A room error from the server, or `unknown` for anything else (network, 5xx). */
 export interface RoomError {
   code: RoomErrorCode | 'rate_limited' | 'unknown';
   /** For `already_in_room`: the room the player is already in. */
   roomCode?: string;
+  /** For `command_rejected`: the game's stable reason, such as `card_not_in_hand`. */
+  reason?: string;
 }
 
 /** Room codes are six characters without look-alikes (no 0, O, 1, I or L); case does not matter. */
@@ -185,9 +217,10 @@ export function toRoomError(error: unknown): RoomError {
     if (error.status === 429) {
       return { code: 'rate_limited' };
     }
-    const body = error.error as { code?: unknown; roomCode?: unknown } | null;
+    const body = error.error as { code?: unknown; roomCode?: unknown; reason?: unknown } | null;
     if (typeof body?.code === 'string') {
-      return { code: body.code as RoomErrorCode, roomCode: typeof body.roomCode === 'string' ? body.roomCode : undefined };
+      const roomError: RoomError = { code: body.code as RoomErrorCode, roomCode: typeof body.roomCode === 'string' ? body.roomCode : undefined };
+      return typeof body.reason === 'string' ? { ...roomError, reason: body.reason } : roomError;
     }
   }
   return { code: 'unknown' };
@@ -218,12 +251,29 @@ const ROOM_ERROR_MESSAGES: Record<RoomError['code'], string> = {
   unknown_command: 'That move doesn’t exist in this game.',
   command_rejected: 'That move isn’t allowed right now.',
   action_conflict: 'That move was already sent differently. Try again.',
+  round_not_open: 'The round hasn’t opened yet. Wait for the countdown.',
+  round_closed: 'Time’s up for this round: it’s being revealed.',
+  action_locked: 'Your action is locked in for this round.',
   rate_limited: 'Too many tries in a short time. Wait a minute and try again.',
   unknown: 'Something went wrong. Try again.',
 };
 
+/** What a refused game command's reason means, where the player can do something about it (Chog Royale, DEC-083, DEC-091). */
+const REASON_MESSAGES: Record<string, string> = {
+  card_not_in_hand: 'That card isn’t in your hand any more.',
+  target_required: 'Choose a player to aim this card at.',
+  invalid_target: 'You can’t aim at that player.',
+  invalid_action: 'That action isn’t valid.',
+  already_submitted: 'You already chose that action.',
+  no_pump: 'You need a Pump in your hand to use Double Pump.',
+  last_round: 'There’s no next round to leak.',
+  ability_used_up: 'You’ve already used your ability.',
+  ability_not_now: 'Your ability can’t be used right now.',
+};
+
 export function roomErrorMessage(error: RoomError): string {
-  return ROOM_ERROR_MESSAGES[error.code] ?? ROOM_ERROR_MESSAGES.unknown;
+  const reason = error.code === 'command_rejected' && error.reason ? REASON_MESSAGES[error.reason] : undefined;
+  return reason ?? ROOM_ERROR_MESSAGES[error.code] ?? ROOM_ERROR_MESSAGES.unknown;
 }
 
 /** The host and members always come from the session cookie; nothing here identifies the player. */

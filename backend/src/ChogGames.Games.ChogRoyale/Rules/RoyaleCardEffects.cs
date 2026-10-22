@@ -1,7 +1,8 @@
 namespace ChogGames.Games.ChogRoyale.Rules;
 
 /// <summary>
-/// What the cards do, in whole MON (STORY-075, STORY-076, ROYALE-025, DEC-086, DEC-087).
+/// What the cards do, in whole MON (STORY-075, STORY-076, ROYALE-025, DEC-086, DEC-087), and since rules version 2 what
+/// Chaos and a successful Whale Swap pay their player (STORY-079, DEC-090).
 /// </summary>
 /// <param name="Pump">Pump's gain before market modifiers.</param>
 /// <param name="RugPull">The most a Rug Pull steals, never more than the victim holds.</param>
@@ -10,8 +11,10 @@ namespace ChogGames.Games.ChogRoyale.Rules;
 /// <param name="SwapCap">The most MON a Whale Swap moves each way.</param>
 /// <param name="AirdropMin">Airdrop's smallest gain.</param>
 /// <param name="AirdropMax">Airdrop's largest gain.</param>
+/// <param name="ChaosGain">What every Chaos gains its player, whether or not it drew the round's modifier.</param>
+/// <param name="SwapBonus">What a successful Whale Swap gains its player on top of the exchange.</param>
 public sealed record RoyaleCardEffects(
-    int Pump, int RugPull, int DiamondHands, int SwapPercent, int SwapCap, int AirdropMin, int AirdropMax)
+    int Pump, int RugPull, int DiamondHands, int SwapPercent, int SwapCap, int AirdropMin, int AirdropMax, int ChaosGain = 0, int SwapBonus = 0)
 {
     /// <summary>The most MON any one card effect or market amount may name.</summary>
     public const int Limit = 100;
@@ -22,13 +25,13 @@ public sealed record RoyaleCardEffects(
     internal void Check()
     {
         if (new[] { Pump, RugPull, SwapCap, AirdropMin }.Any(value => value is < 1 or > Limit)
-            || DiamondHands is < 0 or > Limit
+            || new[] { DiamondHands, ChaosGain, SwapBonus }.Any(value => value is < 0 or > Limit)
             || SwapPercent is < 1 or > 100
             || AirdropMax < AirdropMin
             || AirdropMax > Limit)
         {
             throw new ArgumentException(
-                $"Card effects gain or move 1 to {Limit} MON (Diamond Hands from 0), a swap 1 to 100 percent, and Airdrop's range is ordered.",
+                $"Card effects gain or move 1 to {Limit} MON (Diamond Hands, Chaos and the swap bonus from 0), a swap 1 to 100 percent, and Airdrop's range is ordered.",
                 "effects");
         }
     }

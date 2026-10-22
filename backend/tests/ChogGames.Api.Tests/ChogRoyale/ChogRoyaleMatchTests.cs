@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Channels;
+using ChogGames.Api.ChogRoyale;
 using ChogGames.Api.Matches;
 using ChogGames.Api.Realtime;
 using ChogGames.Core.Matches;
@@ -9,6 +10,7 @@ using ChogGames.Core.Rooms;
 using ChogGames.Infrastructure.Matches;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,10 +18,13 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ChogGames.Api.Tests.ChogRoyale;
 
 /// <summary>
-/// Chog Royale end to end with the real rules (STORY-071–078, DEC-082–089): a match starts with 100 MON and three private
+/// Chog Royale end to end with the real rules (STORY-071–078, DEC-082–089), version 2 since STORY-079 (DEC-090): a match starts with 100 MON and three private
 /// cards each and plays five rounds to its end even with nobody acting; actions are hidden from everyone else over REST and
 /// live until the round resolves, idle players HODL, and a round resolves once however often it is retried. The cards
 /// move MON under the round's market event, and the finished match is ranked and counted in profiles, XP and the Ladder.
+/// Guests choose from every ability and a use stays private until the reveal (STORY-080, DEC-091); a player who drops
+/// comes back to their round, pending action and the deadline on the server's clock, and outsiders see nothing
+/// (STORY-083, DEC-093).
 /// </summary>
 public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -53,6 +58,7 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
             {
                 services.AddSingleton<IRandomSource>(_random);
                 services.AddSingleton<TimeProvider>(_clock);
+                services.AddChogRoyaleAbilities();
                 foreach (var worker in services.Where(d => d.ImplementationType == typeof(TurnTimeoutWorker)).ToList())
                 {
                     services.Remove(worker);
@@ -183,8 +189,15 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         return (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString()!;
     }
 
-    /// <summary>A started match, players joining a second apart so they are seated in join order; returns its code.</summary>
-    private async Task<string> StartedAsync(params Guest[] players)
+    /// <summary>
+    /// A started match, players joining a second apart so they are seated in join order, each with Stop Loss; returns its
+    /// code.
+    /// </summary>
+    private Task<string> StartedAsync(params Guest[] players) =>
+        StartedWithAsync([.. players.Select(_ => "stop_loss")], players);
+
+    /// <summary>A started match whose players lock the given abilities, in seat order (STORY-080).</summary>
+    private async Task<string> StartedWithAsync(string[] abilities, params Guest[] players)
     {
         var code = await CreatedAsync(players[0]);
         foreach (var player in players[1..])
@@ -193,8 +206,10 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
             (await player.Client.PostAsync($"/api/rooms/{code}/join", null)).Dispose();
         }
 
-        foreach (var player in players)
+        foreach (var (player, ability) in players.Zip(abilities))
         {
+            using var chosen = await player.Client.PutAsJsonAsync($"/api/rooms/{code}/ability", new { abilityId = ability });
+            Assert.Equal(HttpStatusCode.OK, chosen.StatusCode);
             using var ready = await player.Client.PutAsJsonAsync($"/api/rooms/{code}/ready", new { ready = true });
             Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
         }
@@ -207,7 +222,13 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
     private async Task<Guest[]> GuestsAsync(int count) =>
         await Task.WhenAll(Enumerable.Range(1, count).Select(i => GuestAsync($"Player {i}")));
 
-    private static async Task<HttpResponseMessage> SubmitAsync(Guest guest, string code, object payload, Guid? actionId = null)
+    private static Task<HttpResponseMessage> SubmitAsync(Guest guest, string code, object payload, Guid? actionId = null) =>
+        CommandAsync(guest, code, "SUBMIT_ACTION", payload, actionId);
+
+    private static Task<HttpResponseMessage> UseAbilityAsync(Guest guest, string code, string abilityId) =>
+        CommandAsync(guest, code, "USE_ABILITY", new { abilityId });
+
+    private static async Task<HttpResponseMessage> CommandAsync(Guest guest, string code, string type, object payload, Guid? actionId = null)
     {
         var room = await ViewAsync(guest, code);
         return await guest.Client.PostAsJsonAsync(
@@ -217,7 +238,7 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
                 actionId = actionId ?? Guid.NewGuid(),
                 matchId = room.GetProperty("matchId").GetGuid(),
                 expectedVersion = room.GetProperty("version").GetInt64(),
-                type = "SUBMIT_ACTION",
+                type,
                 payload,
             });
     }
@@ -291,16 +312,16 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
 
         var first = await ViewAsync(players[0], code);
         Assert.Equal(("Rounds", 1), (first.GetProperty("play").GetString(), first.GetProperty("turnNumber").GetInt32()));
-        Assert.Equal((1, 1, 5), (State(first).GetProperty("rulesVersion").GetInt32(), State(first).GetProperty("round").GetInt32(), State(first).GetProperty("rounds").GetInt32()));
+        Assert.Equal((2, 1, 5), (State(first).GetProperty("rulesVersion").GetInt32(), State(first).GetProperty("round").GetInt32(), State(first).GetProperty("rounds").GetInt32()));
         Assert.All(State(first).GetProperty("players").EnumerateArray(), p => Assert.Equal((100, 3), (p.GetProperty("mon").GetInt32(), p.GetProperty("cards").GetInt32())));
         Assert.Equal(3, HandIds(first).Length);
 
-        // 5 s announcement, then each round: 15 s to decide, resolved by the sweep, 20 s to the next one.
+        // 5 s announcement, then each round: 25 s to decide, resolved by the sweep, 20 s to the next one (version 2).
         ToFirstRound();
         for (var round = 1; round <= 5; round++)
         {
             Assert.Equal(RoomStatus.Active, (await StoredAsync(code)).Status);
-            _clock.Advance(TimeSpan.FromSeconds(15));
+            _clock.Advance(TimeSpan.FromSeconds(25));
             Assert.Single(await SweepAsync());
             _clock.Advance(TimeSpan.FromSeconds(20));
         }
@@ -358,7 +379,7 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         await OkAsync(SubmitAsync(alice, code, new { card = hand[0] }));
         await OkAsync(SubmitAsync(alice, code, new { hodl = true }));
         await OkAsync(SubmitAsync(alice, code, new { card = hand[2] }));
-        _clock.Advance(TimeSpan.FromSeconds(15));
+        _clock.Advance(TimeSpan.FromSeconds(25));
         Assert.Single(await SweepAsync());
 
         var after = await ViewAsync(alice, code);
@@ -399,7 +420,7 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         }
 
         await RefusedAsync(SubmitAsync(alice, code, new { hodl = true }), "action_locked");
-        _clock.Advance(TimeSpan.FromSeconds(15));
+        _clock.Advance(TimeSpan.FromSeconds(25));
         await RefusedAsync(SubmitAsync(bob, code, new { hodl = true }), "round_closed");
         Assert.Equal(locked, (await StoredAsync(code)).Version);
     }
@@ -421,7 +442,7 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
             Assert.True((await retry.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("replayed").GetBoolean());
         }
 
-        _clock.Advance(TimeSpan.FromSeconds(15));
+        _clock.Advance(TimeSpan.FromSeconds(25));
         Assert.Empty(await SweepAsync());
 
         var stored = await StoredAsync(code);
@@ -516,5 +537,172 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         var version = (await StoredAsync(code)).Version;
         await RefusedAsync(SubmitAsync(alice, code, new { hodl = true }), "room_closed");
         Assert.Equal(version, (await StoredAsync(code)).Version);
+    }
+
+    // STORY-080: abilities.
+
+    /// <summary>A member's ability as the snapshot shows it.</summary>
+    private static JsonElement AbilityOf(JsonElement room, string displayName) =>
+        room.GetProperty("members").EnumerateArray().Single(m => m.GetProperty("displayName").GetString() == displayName).GetProperty("ability");
+
+    [PostgresFact]
+    public async Task Guests_choose_from_all_four_abilities_and_a_use_stays_private_until_the_reveal()
+    {
+        // Six Pumps dealt, then round 1's event Calm Market (0), and Alpha Leak's early draw for round 2: Meme Hype (30).
+        _random.Enqueue(0, 0, 0, 0, 0, 0, 0, 30);
+        var (alice, bob) = (await GuestAsync("Alice"), await GuestAsync("Bob"));
+        var code = await CreatedAsync(alice);
+        (await bob.Client.PostAsync($"/api/rooms/{code}/join", null)).Dispose();
+        foreach (var guest in new[] { alice, bob })
+        {
+            var offered = (await ViewAsync(guest, code)).GetProperty("abilities").EnumerateArray().Select(a => a.GetProperty("id").GetString()!).ToArray();
+            Assert.Equal(["diamond_hands_plus", "alpha_leak", "double_pump", "stop_loss"], offered);
+        }
+
+        foreach (var (guest, ability) in new[] { (alice, "alpha_leak"), (bob, "stop_loss") })
+        {
+            (await guest.Client.PutAsJsonAsync($"/api/rooms/{code}/ability", new { abilityId = ability })).Dispose();
+            (await guest.Client.PutAsJsonAsync($"/api/rooms/{code}/ready", new { ready = true })).Dispose();
+        }
+
+        (await alice.Client.PostAsync($"/api/rooms/{code}/start", null)).Dispose();
+        await RefusedAsync(UseAbilityAsync(alice, code, "alpha_leak"), "round_not_open");
+        ToFirstRound();
+
+        await OkAsync(UseAbilityAsync(alice, code, "alpha_leak"));
+
+        var mine = await ViewAsync(alice, code);
+        Assert.Equal(("MemeHype", "alpha_leak", 0), (State(mine).GetProperty("nextEvent").GetString(), State(mine).GetProperty("ability").GetString(), AbilityOf(mine, "Alice").GetProperty("usesLeft").GetInt32()));
+        var theirs = await ViewAsync(bob, code);
+        Assert.False(State(theirs).TryGetProperty("nextEvent", out _));
+        Assert.False(State(theirs).TryGetProperty("ability", out _));
+        Assert.Equal(1, AbilityOf(theirs, "Alice").GetProperty("usesLeft").GetInt32());
+        await RefusedAsync(UseAbilityAsync(alice, code, "alpha_leak"), "command_rejected", "ability_used_up");
+
+        // The reveal shows the use to everyone, and round 2 plays the leaked event.
+        _clock.Advance(TimeSpan.FromSeconds(25));
+        Assert.Single(await SweepAsync());
+        var revealed = await ViewAsync(bob, code);
+        Assert.Equal(0, AbilityOf(revealed, "Alice").GetProperty("usesLeft").GetInt32());
+        Assert.Equal("alpha_leak", State(revealed).GetProperty("ledger")[0].GetProperty("entries")[0].GetProperty("ability").GetString());
+        Assert.Equal("MemeHype", State(revealed).GetProperty("event").GetString());
+    }
+
+    // STORY-083: reconnect and AFK.
+
+    [PostgresFact]
+    public async Task A_player_who_drops_mid_decision_returns_to_their_pending_action_and_the_real_remaining_time()
+    {
+        var (alice, bob) = (await GuestAsync("Alice"), await GuestAsync("Bob"));
+        var code = await StartedAsync(alice, bob);
+        var aliceLive = await ConnectAsync(alice, code);
+        ToFirstRound();
+        var hand = HandIds(await ViewAsync(alice, code));
+        await OkAsync(SubmitAsync(alice, code, new { card = hand[0] }));
+        await OkAsync(UseAbilityAsync(alice, code, "stop_loss"));
+        await aliceLive.DisposeAsync();
+
+        // Six seconds later she comes back on a new connection, with only her cookie.
+        _clock.Advance(TimeSpan.FromSeconds(6));
+        var returned = await GuestBackAsync(alice);
+        using (var current = await returned.Client.GetAsync("/api/rooms/current"))
+        {
+            Assert.Equal(code, (await current.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString());
+        }
+
+        var back = await ConnectAsync(returned, code);
+        var snapshot = await back.SubscribeAsync(code);
+        foreach (var seen in new[] { snapshot, await ViewAsync(returned, code) })
+        {
+            Assert.Equal((1, "Rounds"), (State(seen).GetProperty("round").GetInt32(), seen.GetProperty("play").GetString()));
+            Assert.Equal(hand[0], State(seen).GetProperty("action").GetProperty("card").GetString());
+            Assert.Equal("stop_loss", State(seen).GetProperty("ability").GetString());
+            Assert.Equal(hand, HandIds(seen));
+            var left = seen.GetProperty("turnEndsAt").GetDateTimeOffset() - seen.GetProperty("serverTime").GetDateTimeOffset();
+            Assert.Equal(TimeSpan.FromSeconds(19), left);
+            var bobSeen = seen.GetProperty("members").EnumerateArray().Single(m => m.GetProperty("displayName").GetString() == "Bob");
+            Assert.False(bobSeen.GetProperty("hasSubmitted").GetBoolean());
+        }
+
+        // Bob, who never acted, sees none of it.
+        var bobs = await ViewAsync(bob, code);
+        Assert.False(State(bobs).TryGetProperty("action", out _));
+        Assert.DoesNotContain($"\"{hand[0]}\"", bobs.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [PostgresFact]
+    public async Task A_player_who_returns_after_the_deadline_sees_the_rounds_result_and_afk_players_hodl_every_round()
+    {
+        var (alice, bob) = (await GuestAsync("Alice"), await GuestAsync("Bob"));
+        var code = await StartedAsync(alice, bob);
+        ToFirstRound();
+        var hand = HandIds(await ViewAsync(alice, code));
+        await OkAsync(SubmitAsync(alice, code, new { card = hand[0] }));
+
+        // Alice drops; the round resolves at its deadline without her, and Bob stays AFK for two rounds.
+        _clock.Advance(TimeSpan.FromSeconds(25));
+        Assert.Single(await SweepAsync());
+        _clock.Advance(TimeSpan.FromSeconds(20 + 25));
+        Assert.Single(await SweepAsync());
+
+        var back = await ViewAsync(await GuestBackAsync(alice), code);
+        Assert.Equal(3, State(back).GetProperty("round").GetInt32());
+        Assert.False(State(back).TryGetProperty("action", out _));
+        var ledger = State(back).GetProperty("ledger");
+        Assert.Equal(("Pump", 120), (ledger[0].GetProperty("entries")[0].GetProperty("card").GetString(), ledger[0].GetProperty("entries")[0].GetProperty("balance").GetInt32()));
+        Assert.All(ledger.EnumerateArray(), round => Assert.True(round.GetProperty("entries")[1].GetProperty("byDefault").GetBoolean()));
+        Assert.True(ledger[1].GetProperty("entries")[0].GetProperty("byDefault").GetBoolean());
+
+        // Missed rounds never forfeit (DEC-081): both still play.
+        var stored = await StoredAsync(code);
+        Assert.Equal(RoomStatus.Active, stored.Status);
+        Assert.Equal([1, 2], stored.Members.OrderBy(m => m.Seat).Select(m => m.MissedTurns));
+        Assert.All(stored.Members, m => Assert.False(m.HasLeft));
+    }
+
+    [PostgresFact]
+    public async Task Outsiders_get_no_match_state_over_rest_or_live()
+    {
+        var (alice, bob, mallory) = (await GuestAsync("Alice"), await GuestAsync("Bob"), await GuestAsync("Mallory"));
+        var code = await StartedAsync(alice, bob);
+        ToFirstRound();
+
+        using (var response = await mallory.Client.GetAsync($"/api/rooms/{code}"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal("room_not_found", (await response.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString());
+        }
+
+        var server = _factory.Server;
+        var connection = new HubConnectionBuilder()
+            .WithUrl(new Uri($"https://localhost{RoomHub.Path}"), HttpTransportType.WebSockets, options =>
+            {
+                options.SkipNegotiation = true;
+                options.WebSocketFactory = async (context, cancellationToken) =>
+                {
+                    var client = server.CreateWebSocketClient();
+                    client.ConfigureRequest = request => request.Headers.Cookie = mallory.Cookie;
+                    return await client.ConnectAsync(context.Uri, cancellationToken);
+                };
+            })
+            .Build();
+        var malloryLive = new Listener(connection);
+        _disposables.Add(malloryLive);
+        await malloryLive.StartAsync();
+        await Assert.ThrowsAsync<HubException>(() => malloryLive.SubscribeAsync(code));
+        using (var current = await mallory.Client.GetAsync("/api/rooms/current"))
+        {
+            Assert.NotEqual(HttpStatusCode.OK, current.StatusCode);
+        }
+    }
+
+    /// <summary>The same guest in a new browser: a new client with only their cookie.</summary>
+    private Task<Guest> GuestBackAsync(Guest guest)
+    {
+        var client = _factory.CreateClient(
+            new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
+        _disposables.Add(new DisposableClient(client));
+        client.DefaultRequestHeaders.Add("Cookie", guest.Cookie);
+        return Task.FromResult(guest with { Client = client });
     }
 }

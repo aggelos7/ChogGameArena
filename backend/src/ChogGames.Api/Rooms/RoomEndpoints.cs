@@ -135,6 +135,10 @@ public static class RoomEndpoints
     /// In an active match played in rounds: when the current round starts taking actions; its deadline is
     /// <paramref name="TurnEndsAt"/>. Null otherwise.
     /// </param>
+    /// <param name="ServerTime">
+    /// The server's time when the snapshot was built, so a client counts down to <paramref name="TurnEndsAt"/> and
+    /// <paramref name="RoundOpensAt"/> on the server's clock, whatever its own says (STORY-083, DEC-093).
+    /// </param>
     public sealed record RoomResponse(
         string Code,
         Guid MatchId,
@@ -153,7 +157,8 @@ public static class RoomEndpoints
         RoomAchievementResponse[] Achievements,
         RoomAbilityResponse[] UnavailableAbilities,
         MatchPlay Play = MatchPlay.Turns,
-        DateTimeOffset? RoundOpensAt = null);
+        DateTimeOffset? RoundOpensAt = null,
+        DateTimeOffset? ServerTime = null);
 
     /// <summary>An achievement the viewer unlocked with this completed match (STORY-058, DEC-063).</summary>
     public sealed record RoomAchievementResponse(string Id, string Name, string Description);

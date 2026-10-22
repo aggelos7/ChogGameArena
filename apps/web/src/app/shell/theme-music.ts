@@ -21,7 +21,7 @@ export const MUSIC_TRACK = new InjectionToken<(url: string) => MusicTrack>('MUSI
 /** Each game's own music during a live match, by game type; a game without one is silent (DEC-076). */
 export const GAME_MUSIC_URLS = new InjectionToken<Readonly<Record<string, string>>>('GAME_MUSIC_URLS', {
   providedIn: 'root',
-  factory: () => ({ 'chog-life': 'audio/chog-life.mp3', 'chog-race': 'audio/chog-race.mp3' }),
+  factory: () => ({ 'chog-life': 'audio/chog-life.mp3', 'chog-race': 'audio/chog-race.mp3', 'chog-royale': 'audio/chog-royale.mp3' }),
 });
 
 /**

@@ -1220,7 +1220,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-079 — Royale simulations and balancing
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Seeded tests that play many full two- and six-player matches with legal random actions, checking no balance goes negative and no round stalls, and reporting balance spreads, card win rates and match length (ROYALE-063, 065). Proposed tuning is a decision and a new rules version, never a silent change, like `docs/games/chog-life-balancing.md`.
@@ -1233,7 +1233,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-080 — Royale abilities
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** A Chog Royale ability catalog for the shared ability pool, once per match each, with timing windows (ROYALE-039–044): `diamond_hands_plus`, `alpha_leak` (next round's event shown only to its player), `double_pump`, and `last_second_exit` or its replacement, since actions are already revisable until the deadline. Guests and holders get the same choices; NFTs and traits give no advantage (ROYALE-037, 066).
@@ -1249,7 +1249,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-081 — Royale game screen
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** The Chog Royale board in the room page, live through the room hub: market event, your three cards, opponents with balances and submitted marks, round counter and countdown; choosing a card, a target (only valid ones), HODL, lock and an ability (ROYALE-045–048, 051). Fits a 375px phone without sideways scrolling; keyboard usable; server errors shown without optimistic balance changes.
@@ -1262,7 +1262,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-082 — Reveal, round history and results
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Each round's reveal shows who played what at whom, blocks and swaps, the market effect and each player's MON change, within its time budget and shortened under reduced motion; the results show standings with ties and a readable round-by-round history (ROYALE-049, 051).
@@ -1275,7 +1275,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-083 — Royale reconnect and AFK
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** A reconnecting player gets the current round, phase, remaining server deadline, their own pending action and the public state, never others' hands or actions (ROYALE-050, 052). AFK players HODL each round under the missed-round rule decided in STORY-070.

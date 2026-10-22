@@ -333,7 +333,9 @@ public sealed class ReconnectTests(MigratedPostgresDatabase database) : IClassFi
         await ViewAsync(reloaded, code);
         var after = await SubscribeAsync(await ConnectAsync(reloaded), code);
 
-        Assert.Equal(JsonSerializer.Serialize(before), JsonSerializer.Serialize(after));
+        // Only the server's time moved on (STORY-083).
+        Assert.Equal(WithoutServerTime(before), WithoutServerTime(after));
+        Assert.Equal(_clock.Now, after.GetProperty("serverTime").GetDateTimeOffset());
         Assert.Equal(_clock.Now + TimeSpan.FromSeconds(5), after.GetProperty("turnEndsAt").GetDateTimeOffset());
 
         // The original deadline still holds: once it passes, her command is refused and the turn times out as usual.
@@ -342,6 +344,14 @@ public sealed class ReconnectTests(MigratedPostgresDatabase database) : IClassFi
         Assert.Single(await SweepAsync());
         var next = await ViewAsync(reloaded, code);
         Assert.Equal((2, "Bob", Version(before) + 1), (next.GetProperty("turnNumber").GetInt32(), TurnOf(next), Version(next)));
+    }
+
+    /// <summary>The snapshot as JSON without its <c>serverTime</c>, which every snapshot sets to when it was built.</summary>
+    private static string WithoutServerTime(JsonElement snapshot)
+    {
+        var room = System.Text.Json.Nodes.JsonNode.Parse(snapshot.GetRawText())!.AsObject();
+        room.Remove("serverTime");
+        return room.ToJsonString();
     }
 
     [PostgresFact]

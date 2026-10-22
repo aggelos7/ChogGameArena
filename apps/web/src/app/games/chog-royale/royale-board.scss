@@ -1,0 +1,378 @@
+// Dark glass panels with light text over the page's night picture, like the results' clear panels; the dialogs stay
+// white with dark ink, so they stand out.
+:host {
+  --ink: #1a1a1a;
+  --gain: #116329;
+  --loss: #8a1c1c;
+  --panel: rgb(24 12 82 / 0.8);
+  --panel-line: #b9a6f2; // the lavender of the picture's balloons and signs
+  --on-panel: #fff;
+  --muted: #d9d0ff;
+  --gold: #f5c542;
+  --alert: #ffb4ab;
+
+  display: block;
+}
+
+.royale {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.round-bar,
+.event,
+.players,
+.decide,
+.history {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--panel-line);
+  border-radius: 0.75rem;
+  color: var(--on-panel);
+  text-shadow: none;
+  background: var(--panel);
+  backdrop-filter: blur(4px);
+}
+
+.round-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+
+  p {
+    margin: 0;
+  }
+
+  .round {
+    font-weight: 700;
+  }
+
+  .timer {
+    font-variant-numeric: tabular-nums;
+  }
+
+  &.urgent .timer {
+    font-weight: 700;
+    color: var(--alert);
+  }
+}
+
+.event p {
+  margin: 0;
+}
+
+.event .label {
+  margin-right: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.event .event-text {
+  display: block;
+}
+
+.event .leak {
+  margin-top: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  background: rgb(185 166 242 / 0.25);
+}
+
+.decide h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.reveal-lines {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+  padding-left: 1.25rem;
+
+  li {
+    animation: reveal-in 0.3s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.4s);
+  }
+
+  .gain {
+    color: var(--gain);
+  }
+
+  .loss {
+    color: var(--loss);
+  }
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+  }
+}
+
+.players ul {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.players li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  background: rgb(255 255 255 / 0.08);
+
+  &.you {
+    box-shadow: inset 0 0 0 2px var(--gold);
+  }
+
+  &.left {
+    opacity: 0.6;
+  }
+}
+
+.players .name {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.players .mon {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.players .state {
+  grid-column: 1 / -1;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.tag {
+  margin-left: 0.25rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  background: rgb(185 166 242 / 0.3);
+}
+
+// Three cards and HODL: two to a row on a phone, four on wider screens.
+.hand {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+@media (min-width: 40rem) {
+  .hand {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.card {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.5rem;
+  border: 2px solid rgb(185 166 242 / 0.6);
+  border-radius: 0.625rem;
+  text-align: left;
+  color: var(--on-panel);
+  background: rgb(255 255 255 / 0.06);
+
+  &.picked {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 2px var(--gold);
+    background: rgb(245 197 66 / 0.18);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+}
+
+.card-icon {
+  font-size: 1.25rem;
+}
+
+.card-name {
+  font-weight: 700;
+}
+
+.card-text {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.targets {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #c9c2e0;
+  border-radius: 0.5rem;
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: var(--tap-target);
+    overflow-wrap: anywhere;
+  }
+
+  .disabled {
+    color: #a99fd0;
+  }
+}
+
+.send {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.pending {
+  margin: 0.5rem 0 0;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0.375rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.ability {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+}
+
+.ability-used {
+  margin: 0.75rem 0 0;
+}
+
+.history summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.history h4 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.9375rem;
+}
+
+.history ol {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+// The round's announcement and reveal, over the board: big, centred and unmissable.
+.round-dialog {
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  padding: 1.5rem 1.25rem;
+  border: 3px solid #f5c542;
+  border-radius: 1rem;
+  text-align: center;
+  color: var(--ink);
+  text-shadow: none;
+  background: #fff;
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 0.5);
+
+  &[open] {
+    animation: announce-in 0.35s ease-out both;
+  }
+
+  &::backdrop {
+    background: rgb(12 6 40 / 0.7);
+  }
+
+  h3 {
+    display: grid;
+    justify-items: center;
+    gap: 0.25rem;
+    margin: 0.25rem 0 0.5rem;
+    font-size: 2rem;
+    line-height: 1.15;
+  }
+
+  button {
+    margin-top: 1rem;
+  }
+}
+
+.announcement-round {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+.announcement-icon {
+  font-size: 3.5rem;
+}
+
+.announcement-text {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.announcement-timer {
+  margin: 0.75rem 0 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.reveal-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+
+  h3 {
+    font-size: 1.5rem;
+  }
+
+  .reveal-lines {
+    margin-top: 0.75rem;
+    text-align: left;
+  }
+}
+
+.reveal-event {
+  margin: 0;
+  font-weight: 600;
+}
+
+// Your own line in a round, wherever it is listed.
+.yours {
+  font-weight: 700;
+}
+
+@keyframes announce-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-lines li,
+  .round-dialog[open] {
+    animation: none;
+  }
+}

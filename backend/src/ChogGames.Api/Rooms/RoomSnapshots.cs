@@ -20,14 +20,18 @@ namespace ChogGames.Api.Rooms;
 /// locked, everyone sees its uses left and each member's seat, which ability targets name (DEC-036). Achievements a
 /// completed match unlocked are shown only to the player who earned them (DEC-063). Each member shows their cosmetic
 /// collector badge, never how many Chogs they hold (DEC-065). A photo that reports hid shows only to its owner (DEC-070).
-/// In a match played in rounds, others see only whether a member has submitted and locked, never what (DEC-081).
+/// In a match played in rounds, others see only whether a member has submitted and locked, never what (DEC-081), and an
+/// ability used in the round in play counts against its uses for them only once the round resolves (ROYALE-060, DEC-091).
+/// Every snapshot carries the server's time, so a client counts down to a deadline on the server's clock, also after a
+/// reconnect (STORY-083, DEC-093).
 /// </summary>
 public sealed class RoomSnapshots(
     ChogGamesDbContext db,
     IEnumerable<IMatchRules> rules,
     AbilityEngine abilityEngine,
     AbilityPool abilityPool,
-    LobbyCharacters lobbyCharacters)
+    LobbyCharacters lobbyCharacters,
+    TimeProvider timeProvider)
 {
     private readonly Dictionary<string, IMatchRules> _rulesByGame = rules.ToDictionary(r => r.GameType, StringComparer.Ordinal);
 
@@ -66,10 +70,20 @@ public sealed class RoomSnapshots(
             ? await lobbyCharacters.ForEachAsync([.. viewerIds.Where(players.ContainsKey).Select(id => players[id])], cancellationToken)
             : new Dictionary<Guid, CharacterSnapshot>();
 
+        // Abilities used in the round in play: the actions since it began (DEC-091).
+        var roundAbilities = room.Status == RoomStatus.Active && room.Play == MatchPlay.Rounds && room.RoundVersion is { } since
+            ? (await db.MatchActions.AsNoTracking()
+                .Where(a => a.RoomId == room.Id && a.Type == MatchCommand.UseAbility && a.Version > since)
+                .Select(a => a.PlayerId)
+                .ToListAsync(cancellationToken))
+                .GroupBy(id => id)
+                .ToDictionary(g => g.Key, g => g.Count())
+            : [];
+
         using var state = room.State is not null && _rulesByGame.ContainsKey(room.GameType) ? JsonDocument.Parse(room.State) : null;
         return viewerIds.Distinct().ToDictionary(
             viewerId => viewerId,
-            viewerId => Build(room, players, hiddenImages, lobby, state, viewerId, unlocked?[viewerId] ?? []));
+            viewerId => Build(room, players, hiddenImages, lobby, state, viewerId, unlocked?[viewerId] ?? [], roundAbilities));
     }
 
     private RoomResponse Build(
@@ -79,7 +93,8 @@ public sealed class RoomSnapshots(
         IReadOnlyDictionary<Guid, CharacterSnapshot> lobby,
         JsonDocument? state,
         Guid viewerId,
-        IEnumerable<string> unlocked)
+        IEnumerable<string> unlocked,
+        IReadOnlyDictionary<Guid, int> roundAbilities)
     {
         var members = room.Members
             .OrderBy(m => m.JoinedAt)
@@ -88,6 +103,11 @@ public sealed class RoomSnapshots(
             {
                 var player = players[m.PlayerId];
                 var ability = AbilityOf(room, m, lobby);
+                if (ability is { UsesLeft: { } left } && m.PlayerId != viewerId && roundAbilities.TryGetValue(m.PlayerId, out var used))
+                {
+                    ability = ability with { UsesLeft = left + used };
+                }
+
                 var photo = player.AvatarImageId is { } imageId && (m.PlayerId == viewerId || !hiddenImages.Contains(imageId))
                     ? imageId
                     : (Guid?)null;
@@ -135,7 +155,8 @@ public sealed class RoomSnapshots(
             [.. Achievement.All.Where(a => unlocked.Contains(a.Id)).Select(a => new RoomAchievementResponse(a.Id, a.Name, a.Description))],
             UnavailableAbilities(room, options),
             room.Play,
-            room.RoundOpensAt);
+            room.RoundOpensAt,
+            timeProvider.GetUtcNow());
     }
 
     private static JsonElement? ResultOf(RoomMember member)
