@@ -5,7 +5,7 @@ import { Router, provideRouter } from '@angular/router';
 import { Subject } from 'rxjs';
 import { RoomLiveEvent, RoomLiveUpdates } from '../../rooms/room-live-updates';
 import { Room, RoomAbility, RoomMember } from '../../rooms/rooms-api';
-import { CATALOGUE, FORK_BOARD, RACE_BOARD, lifePawn, lifeResult } from '../../testing';
+import { CATALOGUE, FORK_BOARD, RACE_BOARD, lifePawn, lifeResult, royaleState } from '../../testing';
 import { SoundEffects } from '../../shell/sound-effects';
 import { ThemeMusic } from '../../shell/theme-music';
 import { DIE_MS } from '../../games/rolling-die';
@@ -1295,6 +1295,183 @@ describe('Room page', () => {
       expect(element().querySelector('[data-closed] a')?.getAttribute('href')).toBe('/');
       expect(maybeButton('Leave room')).toBeUndefined();
       expect(maybeButton('I’m ready')).toBeUndefined();
+    });
+  });
+
+  describe('Chog Royale', () => {
+    /** Bob's view of round 2, open for 3 s more than the server's clock says it has been, deciding for 15 s. */
+    function royale(overrides: Partial<Room> = {}): Room {
+      const now = Date.now();
+      return {
+        ...room,
+        gameType: 'chog-royale',
+        status: 'Active',
+        play: 'Rounds',
+        version: 9,
+        turnNumber: 2,
+        roundOpensAt: new Date(now - 3_000).toISOString(),
+        turnEndsAt: new Date(now + 12_000).toISOString(),
+        turnSeconds: 15,
+        serverTime: new Date(now).toISOString(),
+        members: [member('Alice', { isHost: true, seat: 1, hasSubmitted: true }), member('Bob', { isYou: true, seat: 2 })],
+        state: royaleState(),
+        ...overrides,
+      };
+    }
+
+    const royaleCard = (name: string) => (element().querySelector(`[data-card="${name}"]`) as HTMLButtonElement);
+
+    it('shows the board live and sends the chosen action, locked in', () => {
+      load(royale());
+
+      expect(element().querySelector('[data-royale-board]')).not.toBeNull();
+      expect(element().querySelector('[data-list="members"]')).toBeNull();
+      expect(element().querySelector('[data-seat="1"] [data-status]')?.getAttribute('data-status')).toBe('submitted');
+
+      royaleCard('RugPull').click();
+      fixture.detectChanges();
+      (element().querySelector('[data-target="1"]') as HTMLInputElement).click();
+      fixture.detectChanges();
+      (element().querySelector('[data-choose]') as HTMLButtonElement).click();
+
+      const submit = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(submit.request.body).toEqual({
+        actionId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        matchId: room.matchId,
+        expectedVersion: 9,
+        type: 'SUBMIT_ACTION',
+        payload: { card: 'c2', target: 1, lock: true },
+      });
+      submit.flush({ actionId: submit.request.body.actionId, type: 'SUBMIT_ACTION', version: 10, currentVersion: 10, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush(
+        royale({ version: 10, state: royaleState({ action: { hodl: false, card: 'c2', target: 1 } }), members: [member('Alice', { isHost: true, seat: 1, hasSubmitted: true }), member('Bob', { isYou: true, seat: 2, hasSubmitted: true, hasLocked: true })] }),
+      );
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-pending]')?.textContent?.trim()).toBe('You chose Rug Pull at Alice.');
+    });
+
+    it('holds with HODL, chosen and locked in one step', () => {
+      load(royale());
+
+      royaleCard('Hodl').click();
+      fixture.detectChanges();
+      (element().querySelector('[data-choose]') as HTMLButtonElement).click();
+
+      const submit = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect(submit.request.body.payload).toEqual({ hodl: true, lock: true });
+      submit.flush({ actionId: submit.request.body.actionId, type: 'SUBMIT_ACTION', version: 10, currentVersion: 10, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush(royale({ version: 10 }));
+    });
+
+    it('shows the server’s reason for a refused action, and balances only as the server has them', () => {
+      load(royale());
+
+      royaleCard('Pump').click();
+      fixture.detectChanges();
+      (element().querySelector('[data-choose]') as HTMLButtonElement).click();
+      http.expectOne('/api/rooms/K7QF3M/commands').flush({ code: 'command_rejected', reason: 'card_not_in_hand' }, { status: 409, statusText: 'Conflict' });
+      http.expectOne('/api/rooms/K7QF3M').flush(royale());
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-error="action"]')?.textContent?.trim()).toBe('That card isn’t in your hand any more.');
+      expect(Array.from(element().querySelectorAll('[data-mon]')).map((mon) => mon.textContent?.trim())).toEqual(['115 MON', '85 MON']);
+    });
+
+    it('uses the locked ability with USE_ABILITY', () => {
+      const ability: RoomAbility = { id: 'alpha_leak', name: 'Alpha Leak', description: 'Leak.', target: 'None', maxUses: 1, values: {}, usesLeft: 1 };
+      load(royale({ members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, ability, hasAbility: true })] }));
+
+      (element().querySelector('[data-use-ability]') as HTMLButtonElement).click();
+
+      const use = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect([use.request.body.type, use.request.body.payload]).toEqual(['USE_ABILITY', { abilityId: 'alpha_leak' }]);
+      use.flush({ actionId: use.request.body.actionId, type: 'USE_ABILITY', version: 10, currentVersion: 10, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush(royale({ version: 10 }));
+    });
+
+    it('counts down on the server’s clock after a reconnect, even when this device’s clock is off', () => {
+      // The server's clock is 60 s ahead of this device's: its deadline is under 12 s away for it, not 72 s.
+      const now = Date.now();
+      load(royale({ serverTime: new Date(now + 60_000).toISOString(), roundOpensAt: new Date(now + 57_000).toISOString(), turnEndsAt: new Date(now + 71_500).toISOString() }));
+
+      expect(element().querySelector('[data-timer]')?.textContent?.trim()).toBe('12s left to decide');
+    });
+
+    /** The completed match as it arrives live while you play it: Alice won, and round 1 was the last. */
+    const ended = () =>
+      royale({
+        status: 'Completed',
+        version: 12,
+        roundOpensAt: null,
+        turnEndsAt: null,
+        state: royaleState({ round: 1 }),
+        members: [
+          member('Alice', { isHost: true, seat: 1, rank: 1, result: { mon: 115, change: 15, lost: 0, successfulCards: 1 } }),
+          member('Bob', { isYou: true, seat: 2, rank: 2, result: { mon: 85, change: -15, lost: 15, successfulCards: 0 } }),
+        ],
+      });
+
+    it('reveals the last round like any other before showing the results', () => {
+      load(royale());
+      live.events.next({ type: 'snapshot', room: ended() });
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-royale-board]')).not.toBeNull();
+      expect(element().querySelector('[data-reveal] h3')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Round 1 revealed · the last round');
+      expect(element().querySelector('[data-results]')).toBeNull();
+      expect(element().querySelector('[data-result]')).toBeNull();
+      expect(maybeButton('Leave game')).toBeUndefined();
+
+      (element().querySelector('[data-see-results]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+
+      expect(element().querySelector('[data-royale-board]')).toBeNull();
+      expect(element().querySelector('[data-results] [data-winner]')?.textContent?.trim()).toBe('Alice wins with 115 MON!');
+    });
+
+    it('shows the results by itself once the last reveal has had its time', () => {
+      vi.useFakeTimers();
+      try {
+        load(royale());
+        live.events.next({ type: 'snapshot', room: ended() });
+        fixture.detectChanges();
+        expect(element().querySelector('[data-results]')).toBeNull();
+
+        vi.advanceTimersByTime(9_000);
+        fixture.detectChanges();
+        expect(element().querySelector('[data-results]')).toBeNull();
+
+        vi.advanceTimersByTime(1_000);
+        fixture.detectChanges();
+        expect(element().querySelector('[data-results]')).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('goes straight to the results when the match had already ended on arrival', () => {
+      load(ended());
+
+      expect(element().querySelector('[data-royale-board]')).toBeNull();
+      expect(element().querySelector('[data-results]')).not.toBeNull();
+    });
+
+    it('shows the standings and every round once the match is over', () => {
+      load(
+        royale({
+          status: 'Completed',
+          members: [
+            member('Alice', { isHost: true, seat: 1, rank: 1, result: { mon: 115, change: 15, lost: 0, successfulCards: 1 } }),
+            member('Bob', { isYou: true, seat: 2, rank: 2, result: { mon: 85, change: -15, lost: 15, successfulCards: 0 } }),
+          ],
+        }),
+      );
+
+      expect(element().querySelector('[data-royale-board]')).toBeNull();
+      expect(element().querySelector('[data-results] [data-winner]')?.textContent?.trim()).toBe('Alice wins with 115 MON!');
+      expect(element().querySelector('[data-history-round]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Round 1 · Calm Market');
+      expect(element().querySelector('[data-result]')?.textContent).toContain('you finished 2nd');
     });
   });
 });

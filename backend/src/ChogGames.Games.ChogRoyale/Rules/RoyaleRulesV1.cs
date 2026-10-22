@@ -7,7 +7,8 @@ namespace ChogGames.Games.ChogRoyale.Rules;
 /// DEC-084); Pump 20, Rug Pull up to 15, Diamond Hands 5 (STORY-075, DEC-086); Whale Swap 20% up to 20 each way, Airdrop
 /// 5–25 (STORY-076, DEC-087); market events weighted Calm Market 30, Meme Hype 20 (Pump 150%), Market Crash 20 (Pump 50%),
 /// Whale Incoming 15 (Rug Pull +5), Community Airdrop 15 (+5 each), and Chaos drawing any modifier but the round's own with
-/// equal weights (STORY-077, DEC-087, DEC-088). These are initial defaults to be balanced later (ROYALE-063, STORY-079); any change means version 2.
+/// equal weights (STORY-077, DEC-087, DEC-088). Balanced in <see cref="RoyaleRulesV2"/> (STORY-079, DEC-090); kept so a
+/// match started with it plays on.
 /// </summary>
 public static class RoyaleRulesV1
 {

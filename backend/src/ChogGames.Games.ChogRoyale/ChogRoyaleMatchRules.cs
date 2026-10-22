@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ChogGames.Core.Games;
 using ChogGames.Core.Matches;
 using ChogGames.Core.Rooms;
+using ChogGames.Games.ChogRoyale.Abilities;
 using ChogGames.Games.ChogRoyale.Rules;
 
 namespace ChogGames.Games.ChogRoyale;
@@ -19,7 +20,8 @@ namespace ChogGames.Games.ChogRoyale;
 /// ledger entry per player (STORY-074, ROYALE-026–032, DEC-085); a played card is replaced afterwards, except after the
 /// last round. The cards move MON (STORY-075, STORY-076, DEC-086, DEC-087) under a shared market event drawn and shown
 /// before each round's decisions (STORY-077, DEC-088). The match ends after its last round, or when its time cap is up,
-/// ranked by MON, then fewer MON lost to opponents, then more successful cards (STORY-078, ROYALE-009, DEC-089).
+/// ranked by MON, then fewer MON lost to opponents, then more successful cards (STORY-078, ROYALE-009, DEC-089). Each
+/// player may use the ability they locked once, while deciding (STORY-080, DEC-091).
 /// </summary>
 public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
 {
@@ -133,8 +135,9 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
 
     /// <summary>
     /// What one player sees (ROYALE-048, ROYALE-050, ROYALE-060): the round and its market event (ROYALE-021), every
-    /// player still playing with their MON and how many cards they hold, the ledger, and only their own hand and pending
-    /// action. A player who left sees no hand. Null for a state this server can't read.
+    /// player still playing with their MON and how many cards they hold, the ledger, and only their own hand, pending
+    /// action and the ability they used this round, with the next round's event if it was Alpha Leak (DEC-091). A player
+    /// who left sees no hand. Null for a state this server can't read.
     /// </summary>
     public JsonElement? ViewFor(MatchViewContext context)
     {
@@ -154,12 +157,23 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
             [.. state.Players.Where(p => playing.Contains(p.Seat)).Select(p => new RoyalePlayerView(p.Seat, p.Mon, p.Hand.Length))],
             viewer?.Hand ?? [],
             viewer?.Action,
-            state.Ledger));
+            state.Ledger,
+            viewer?.Ability?.Id,
+            viewer?.Ability?.Id == RoyaleAbilities.AlphaLeak ? state.NextEvent : null));
     }
 
-    /// <summary>What a player sees of the match (DEC-083).</summary>
+    /// <summary>What a player sees of the match (DEC-083, DEC-091).</summary>
     private sealed record RoyaleView(
-        int RulesVersion, int Round, int Rounds, RoyaleMarketEvent Event, RoyalePlayerView[] Players, RoyaleHandCard[] Hand, RoyaleAction? Action, RoyaleRoundLedger[] Ledger);
+        int RulesVersion,
+        int Round,
+        int Rounds,
+        RoyaleMarketEvent Event,
+        RoyalePlayerView[] Players,
+        RoyaleHandCard[] Hand,
+        RoyaleAction? Action,
+        RoyaleRoundLedger[] Ledger,
+        string? Ability,
+        RoyaleMarketEvent? NextEvent);
 
     /// <summary>Another player as everyone sees them: never their cards, only how many.</summary>
     private sealed record RoyalePlayerView(int Seat, int Mon, int Cards);
@@ -250,7 +264,8 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
         && state.Round == match.TurnNumber
         && state.Round <= rules.Rounds
         && Enum.IsDefined(state.Event)
-        && state.Players.All(p => p.Mon >= 0 && p.Mon <= rules.MaxMon && p.Hand.Length <= rules.HandSize)
+        && (state.NextEvent is null || Enum.IsDefined(state.NextEvent.Value))
+        && state.Players.All(p => p.Mon >= 0 && p.Mon <= rules.MaxMon && p.Hand.Length <= rules.HandSize && p.Ability is null or { Value: >= 0 })
             ? (state, rules)
             : null;
 
