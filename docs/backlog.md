@@ -1300,7 +1300,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-093 — Chog Royale holder abilities: Fresh Mint and Insider Info
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Holder advantage in Chog Royale as in the other games (DEC-077, DEC-095, revising DEC-091's parity and ROYALE-037/066): 2 standard abilities (Diamond Hands+, Stop Loss) and 4 holder-only ones (Alpha Leak, Double Pump and two new), catalog version 2, with Tier values for all six in `Abilities:Holder` (Base for guests, standard Chogs and Common holders). **Fresh Mint:** used while deciding, before locking; the player's whole hand is replaced with new cards drawn from the rules version's weighted deck with match-unique ids, at once and only in their own view. **Insider Info:** used while deciding on an opponent still playing; the player sees that opponent's hand (never their pending action) for the rest of the round, only in their own view; others learn of the use at the reveal, as with every Royale ability (DEC-091). Both show on the board like the other abilities, with the lobby's holder grouping and badge (DEC-078). STORY-084's guest/holder parity tests become holder-advantage tests.
@@ -1309,3 +1309,27 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: non-holders can't choose holder-only abilities, and use outside the decision window, after locking, beyond the Tier's uses, or Insider Info on the player themselves or a player who left is refused with a stable code; no other player's view shows the minted hand or the revealed hand.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; Tier values are settled before coding.
+
+#### STORY-094 — Royale table: seats and visual cards
+
+- **Status:** Todo
+- **Priority:** P2
+- **Epic:** E10
+- **Implementation:** A visual Chog Royale board at the product owner's request: the players sit around a table and play cards that look like cards. Web only, from the room view the server already sends (`players`, `hand`, members' avatars and chosen/locked status, ROYALE-045–048); no API, rules or dependency change. **Table:** an oval felt with a seat per player for 2 to 6, you always at the bottom; each seat shows its avatar (STORY-085), name, MON, its cards face down (from `cards`, never their faces) and "Deciding…", "Chosen" or "Locked in"; a player who left is greyed out. The round, countdown and market event sit in the middle of the table. **Your hand:** your cards drawn as cards (frame, icon, name, effect text from `CARD_INFO`), fanned below the table, plus HODL; tapping one picks it, a targeted card (Rug Pull, Whale Swap) then asks for a target by tapping an opponent's seat, and Choose sends it locked as today (DEC-092). Your ability, Alpha Leak's next event and Insider Info's peeked hand (DEC-096) stay on the table view. **Phones:** fits a 375px screen with six players (opponents in an arc across the top, your hand below), no horizontal scroll. **Accessibility:** every pick stays a real button or radio with labels, so the board stays keyboard and screen-reader usable; dialogs, history and results stay as they are. Whether the table replaces the current board or is a toggle, the card art (CSS and icons, or illustrations) and the table's look are settled before coding.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** two to six players see themselves at the bottom of the table and the others around it with avatar, MON, face-down cards and their decision status, and can pick a card, aim it by tapping a seat and choose it, with the same commands and results as the current board.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: no opponent's card faces or pending action appear anywhere in the page, seats of players who left can't be targeted, nothing can be picked outside the decision window or after choosing, and a refused command shows the server's reason with the room as the server has it.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; no reveal animation (STORY-095), no server change, no new dependency.
+
+#### STORY-095 — Royale table: animated reveal
+
+- **Status:** Todo
+- **Priority:** P2
+- **Epic:** E10
+- **Implementation:** The round's reveal played out on STORY-094's table, from the resolved round's ledger entry (card, target, outcome, amount, defense, lost, market, ability and `abilityTarget`, DEC-085–091, DEC-096). In resolution order, within the 10 s reveal (DEC-092's pacing, under 3 s for six players): each played card flips face up at its seat; a Rug Pull or Whale Swap travels to its target, and a block, Stop Loss or a seat that left is shown where it lands; gains and the market show as MON changes counting to the server's balance at each seat; abilities show by name, Insider Info with its target. Nothing changes a balance before the server's snapshot; the animation only replays what the ledger says. Under reduced motion everything appears at once. The text lines of the reveal stay, as the accessible version, and a reconnect or reload mid-reveal shows the final state without replaying. How much motion (flips only, or travelling cards and counting numbers too) is settled before coding.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** each round's reveal plays on the table in resolution order and ends with every seat showing the server's balance, for two to six players and within the reveal window.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: an unknown card, outcome or ability in the ledger shows the text line without animation, reduced motion shows the result at once, and the next round's announcement or a new snapshot replaces the animation instead of queuing behind it.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; no server change, no new dependency, no sound effects.

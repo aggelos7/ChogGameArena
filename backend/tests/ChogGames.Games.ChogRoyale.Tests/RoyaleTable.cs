@@ -37,7 +37,8 @@ public sealed class Draws(params int[] values) : IRandomSource
 /// A Chog Royale match played through the shared engine's round mode, as the API plays it: submissions go through the
 /// rules and <see cref="GameRoom.ApplySubmission"/>, rounds through the rules and <see cref="GameRoom.ResolveRound"/>,
 /// abilities through the <see cref="AbilityEngine"/> and <see cref="GameRoom.ApplyAbility"/>. Players are seated in the
-/// order given, each with the ability given for their seat, if any, at its catalog values.
+/// order given, each with the ability given for their seat, if any, at its catalog values or as <c>tier</c> gives it, as
+/// the holder strategy would for a Tier (DEC-077, DEC-095).
 /// </summary>
 public sealed class RoyaleTable
 {
@@ -45,8 +46,14 @@ public sealed class RoyaleTable
 
     private static readonly Guid MatchId = Guid.NewGuid();
 
-    public RoyaleTable(int players, IRandomSource? random = null, ChogRoyaleMatchRules? rules = null, string?[]? abilities = null)
+    public RoyaleTable(
+        int players,
+        IRandomSource? random = null,
+        ChogRoyaleMatchRules? rules = null,
+        string?[]? abilities = null,
+        Func<AbilityDefinition, AbilityDefinition>? tier = null)
     {
+        tier ??= ability => ability;
         Rules = rules ?? new ChogRoyaleMatchRules([RoyaleRulesV1.Rules]);
         Catalog = RoyaleAbilities.Catalog(Rules);
         Abilities = new AbilityEngine([Catalog]);
@@ -79,7 +86,7 @@ public sealed class RoyaleTable
             Players
                 .Select((player, i) => (player.Id, Ability: abilities?.ElementAtOrDefault(i)))
                 .Where(p => p.Ability is not null)
-                .ToDictionary(p => p.Id, p => AbilitySnapshot.Lock(Catalog, Catalog.Definitions.Single(d => d.Id == p.Ability))),
+                .ToDictionary(p => p.Id, p => AbilitySnapshot.Lock(Catalog, tier(Catalog.Definitions.Single(d => d.Id == p.Ability)))),
             startState: room => Rules.StartState(new MatchStartContext(room, Random))!.Value.GetRawText(),
             timeLimit: Rules.TimeLimit,
             rounds: Rules.RoundTiming);
@@ -128,13 +135,14 @@ public sealed class RoyaleTable
     public MatchRuleDecision Hodl(int seat, bool locks = false) => Submit(seat, new { hodl = true, @lock = locks });
 
     /// <summary>
-    /// Sends <c>USE_ABILITY</c> for the player in <paramref name="seat"/>; a used one is applied. Returns the engine's
+    /// Sends <c>USE_ABILITY</c> for the player in <paramref name="seat"/>, at <paramref name="target"/>'s seat if given; a used one is applied. Returns the engine's
     /// refusal, as the API's <c>reason</c>, or the room's own problem, such as a locked action, by name.
     /// </summary>
-    public string? UseAbility(int seat, string abilityId)
+    public string? UseAbility(int seat, string abilityId, int? target = null)
     {
         var playerId = Seat(seat);
-        var command = new MatchCommand(Guid.NewGuid(), Match.Id, Match.Version, MatchCommand.UseAbility, JsonSerializer.SerializeToElement(new { abilityId }));
+        var payload = target is null ? JsonSerializer.SerializeToElement(new { abilityId }) : JsonSerializer.SerializeToElement(new { abilityId, target });
+        var command = new MatchCommand(Guid.NewGuid(), Match.Id, Match.Version, MatchCommand.UseAbility, payload);
         if (Match.CheckCommand(playerId, command, Now) is { } problem)
         {
             return problem.ToString();

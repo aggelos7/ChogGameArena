@@ -113,7 +113,8 @@ public sealed partial class ChogRoyaleMatchRules
                 work.Market.GetValueOrDefault(play.Seat),
                 balances[play.Seat] - work.Snapshot[play.Seat],
                 balances[play.Seat],
-                playing.Single(p => p.Seat == play.Seat).Ability?.Id))
+                playing.Single(p => p.Seat == play.Seat).Ability?.Id,
+                playing.Single(p => p.Seat == play.Seat).Ability?.Target))
             .ToArray();
 
         var last = state.Round >= rules.Rounds;

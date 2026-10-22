@@ -1390,6 +1390,18 @@ describe('Room page', () => {
       http.expectOne('/api/rooms/K7QF3M').flush(royale({ version: 10 }));
     });
 
+    it('uses Insider Info on the opponent picked with USE_ABILITY and their seat', () => {
+      const ability: RoomAbility = { id: 'insider_info', name: 'Insider Info', description: 'Look.', target: 'Opponent', maxUses: 1, values: {}, usesLeft: 1, holderOnly: true };
+      load(royale({ members: [member('Alice', { isHost: true, seat: 1 }), member('Bob', { isYou: true, seat: 2, ability, hasAbility: true })] }));
+
+      (element().querySelector('[data-use-ability="1"]') as HTMLButtonElement).click();
+
+      const use = http.expectOne('/api/rooms/K7QF3M/commands');
+      expect([use.request.body.type, use.request.body.payload]).toEqual(['USE_ABILITY', { abilityId: 'insider_info', target: 1 }]);
+      use.flush({ actionId: use.request.body.actionId, type: 'USE_ABILITY', version: 10, currentVersion: 10, replayed: false });
+      http.expectOne('/api/rooms/K7QF3M').flush(royale({ version: 10 }));
+    });
+
     it('counts down on the server’s clock after a reconnect, even when this device’s clock is off', () => {
       // The server's clock is 60 s ahead of this device's: its deadline is under 12 s away for it, not 72 s.
       const now = Date.now();

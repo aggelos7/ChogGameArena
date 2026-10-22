@@ -28,9 +28,10 @@ public sealed record RoyalePlayer(int Seat, int Mon, RoyaleHandCard[] Hand, Roya
 
 /// <summary>
 /// An ability used in the round (STORY-080, DEC-091): its id and the value it acts with, locked at the start: Diamond
-/// Hands+'s extra blocks, Double Pump's percent, Stop Loss's most MON lost; 0 for Alpha Leak.
+/// Hands+'s extra blocks, Double Pump's percent, Stop Loss's most MON lost; 0 for the others.
 /// </summary>
-public sealed record RoyaleAbilityUse(string Id, int Value);
+/// <param name="Target">The seat Insider Info looked at (STORY-093, DEC-095); null for the other abilities.</param>
+public sealed record RoyaleAbilityUse(string Id, int Value, int? Target = null);
 
 /// <summary>One card in a hand: its match-unique instance id (<c>c1</c>, <c>c2</c>, …) and which card it is.</summary>
 public sealed record RoyaleHandCard(string Id, RoyaleCard Card);
@@ -62,6 +63,7 @@ public sealed record RoyaleRoundLedger(
 /// <param name="Change">The player's MON change over the round, after the clamp.</param>
 /// <param name="Balance">The player's MON after the round.</param>
 /// <param name="Ability">The ability the player used this round, shown from its reveal on (STORY-080, DEC-091).</param>
+/// <param name="AbilityTarget">The seat whose hand the player's Insider Info showed them (STORY-093, DEC-095).</param>
 public sealed record RoyaleLedgerEntry(
     int Seat,
     RoyaleCard? Card,
@@ -74,7 +76,8 @@ public sealed record RoyaleLedgerEntry(
     int Market,
     int Change,
     int Balance,
-    string? Ability = null);
+    string? Ability = null,
+    int? AbilityTarget = null);
 
 /// <summary>What became of a played card (DEC-086, DEC-087). Only <see cref="Applied"/> counts as a successful card.</summary>
 public enum RoyaleOutcome

@@ -182,8 +182,32 @@
           <p class="ability-used" role="status" data-ability-used>You used {{ used }} this round. The others see it at the reveal.</p>
         } @else if (ability(); as mine) {
           <div class="ability" data-ability-panel>
-            <button type="button" [disabled]="!canAct()" (click)="useAbility.emit(mine.id)" data-use-ability>Use {{ mine.name }}</button>
+            <p class="ability-name">
+              <strong>{{ mine.name }}</strong>
+              @if (mine.holderOnly) {
+                <app-holder-badge />
+              }
+              <span class="hint" data-uses-left>{{ mine.usesLeft }}/{{ mine.maxUses }} left</span>
+            </p>
+            <div class="ability-plays" role="group" [attr.aria-label]="'Use ' + mine.name">
+              @for (play of abilityPlays(); track play.label) {
+                <button type="button" [disabled]="!canAct()" (click)="useAbility.emit(play.use)" [attr.data-use-ability]="play.use.target ?? ''">
+                  {{ play.label }}
+                </button>
+              }
+            </div>
             <span class="hint">{{ mine.description }} Use it before you choose.</span>
+          </div>
+        }
+        @if (insider(); as peek) {
+          <div class="insider" role="status" data-insider>
+            <p><span aria-hidden="true">🕵️</span> Insider Info: <strong>{{ peek.name }}</strong> holds</p>
+            <ul>
+              @for (card of peek.cards; track $index) {
+                <li><span aria-hidden="true">{{ card.icon }}</span> {{ card.name }}</li>
+              }
+            </ul>
+            <p class="hint">Only you can see this, until the round ends. Not what they chose.</p>
           </div>
         }
       </section>

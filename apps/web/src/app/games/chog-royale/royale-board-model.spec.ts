@@ -6,7 +6,7 @@ describe('Chog Royale board model', () => {
   const name = (seat: number) => names[seat];
 
   function entry(extra: Partial<RoyaleLedgerEntry>): RoyaleLedgerEntry {
-    return { seat: 1, card: null, target: null, byDefault: false, outcome: null, amount: 0, defense: null, lost: 0, market: 0, change: 0, balance: 100, ability: null, ...extra };
+    return { seat: 1, card: null, target: null, byDefault: false, outcome: null, amount: 0, defense: null, lost: 0, market: 0, change: 0, balance: 100, ability: null, abilityTarget: null, ...extra };
   }
 
   it('reads the view the server sends, with nulls for what it leaves out', () => {
@@ -62,6 +62,18 @@ describe('Chog Royale board model', () => {
     expect(describeEntry(entry({ ability: 'stop_loss', card: 'RugPull', target: 3, outcome: 'Stopped' }), name)).toBe(
       'Alice used Stop Loss and played Rug Pull at Carol, but Stop Loss stopped it: ±0 MON, now 100 MON.',
     );
+  });
+
+  it('reads the hand Insider Info shows and whom a reveal says was looked at', () => {
+    const insider = { seat: 1, hand: [{ id: 'c4', card: 'RugPull' }] };
+    expect(toRoyaleBoard(royaleState({ ability: 'insider_info', insider }))?.insider).toEqual(insider);
+    expect(toRoyaleBoard(royaleState())?.insider).toBeNull();
+    expect(toRoyaleBoard(royaleState({ insider: { seat: 1, hand: [{ id: 'c4', card: 'Joker' }] } }))).toBeNull();
+    expect(toRoyaleBoard(royaleState({ insider: { seat: 0, hand: [] } }))).toBeNull();
+
+    const name = (seat: number) => ['', 'Alice', 'Bob', 'Carol'][seat];
+    expect(describeEntry(entry({ ability: 'insider_info', abilityTarget: 3 }), name)).toBe('Alice used Insider Info on Carol and held (HODL): ±0 MON, now 100 MON.');
+    expect(describeEntry(entry({ ability: 'fresh_mint' }), name)).toBe('Alice used Fresh Mint and held (HODL): ±0 MON, now 100 MON.');
   });
 
   it('signs MON changes', () => {
