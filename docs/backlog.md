@@ -1288,7 +1288,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-084 — Royale cross-game regression and release
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Like STORY-057: a Chog Royale match played beside Chog Life and Chog Race at once with each room isolated, cross-game commands refused, and guest and holder parity (ROYALE-064, 066); `release:verify` plays a two-player Chog Royale match; the release checklist gains a Chog Royale section; matches are timed against the five-minute target (ROYALE-003, 065). `CHOG_ROYALE_STATUS` is `Available` on staging and in `deploy:verify`. No new production service.
@@ -1297,3 +1297,15 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: another game's commands, match ids and rooms are refused, and turning Chog Royale off leaves the other games playable.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+#### STORY-093 — Chog Royale holder abilities: Fresh Mint and Insider Info
+
+- **Status:** Todo
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Holder advantage in Chog Royale as in the other games (DEC-077, DEC-095, revising DEC-091's parity and ROYALE-037/066): 2 standard abilities (Diamond Hands+, Stop Loss) and 4 holder-only ones (Alpha Leak, Double Pump and two new), catalog version 2, with Tier values for all six in `Abilities:Holder` (Base for guests, standard Chogs and Common holders). **Fresh Mint:** used while deciding, before locking; the player's whole hand is replaced with new cards drawn from the rules version's weighted deck with match-unique ids, at once and only in their own view. **Insider Info:** used while deciding on an opponent still playing; the player sees that opponent's hand (never their pending action) for the rest of the round, only in their own view; others learn of the use at the reveal, as with every Royale ability (DEC-091). Both show on the board like the other abilities, with the lobby's holder grouping and badge (DEC-078). STORY-084's guest/holder parity tests become holder-advantage tests.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a holder can lock and use any of the six abilities with their Tier's values, Fresh Mint deals a new hand and Insider Info shows the chosen opponent's hand to that holder only, and a guest is offered the two standard ones with Base values.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: non-holders can't choose holder-only abilities, and use outside the decision window, after locking, beyond the Tier's uses, or Insider Info on the player themselves or a player who left is refused with a stable code; no other player's view shows the minted hand or the revealed hand.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; Tier values are settled before coding.

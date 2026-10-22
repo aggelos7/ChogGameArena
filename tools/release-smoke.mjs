@@ -6,8 +6,9 @@
 // the wrong turn, a stale version and outsiders without any change; a player's forfeit; a dropped live connection
 // reconnecting and catching up; a six-player and a two-player match played over match commands to the finish, with
 // ranks, profile stats, achievements (STORY-058), XP and leaderboards (STORY-059); and (STORY-057, DEC-061) a two-player Chog Race match played at the same time as the
-// two-player Chog Life one, with commands meant for the other game or match refused. It creates eight guests and three
-// rooms on the target and leaves them there, so it is never run against production. Wallet sign-in with a real
+// two-player Chog Life one, with commands meant for the other game or match refused; and (STORY-084, DEC-094) a
+// two-player Chog Royale match played in rounds beside them, within its five-minute target. It creates eight guests and
+// four rooms on the target and leaves them there, so it is never run against production. Wallet sign-in with a real
 // wallet, choosing a real Chog NFT, the mobile UI and the deployment rollback are the manual part of
 // docs/release-checklist.md.
 //
@@ -24,6 +25,9 @@ import { connectHub } from './hub-client.mjs';
 
 const GAME = 'chog-life';
 const RACE = 'chog-race';
+const ROYALE = 'chog-royale';
+// Chog Royale's target length (ROYALE-003): rounds version 2 take at most 3 min 30 s (DEC-090), its time cap 5 minutes.
+const ROYALE_MINUTES = 5;
 const HUB_PATH = '/api/hubs/rooms';
 // Guest creation is limited per client address (GuestSessions:CreatePerMinutePerClient, 10 by default).
 const GUESTS = 8;
@@ -222,6 +226,44 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
   };
 
   /**
+   * Plays an active Chog Royale match to its end (STORY-084): in every round, once it takes actions, each player who
+   * hasn't submitted plays the first card in their own hand, locked, a Rug Pull or Whale Swap at the richest other
+   * player, so the round resolves as soon as both have chosen. Waits for each round to open on the server's clock
+   * (`serverTime`, DEC-093). Ends Completed after the last round, or at the time cap.
+   */
+  const playRoyale = async (watcher, players) => {
+    const byName = new Map(players.map((guest) => [guest.name, guest]));
+    const deadline = Date.now() + (ROYALE_MINUTES + 1) * 60_000;
+    let room = watcher.latest;
+    let actions = 0;
+    while (room.status === 'Active') {
+      check(Date.now() < deadline, `the Chog Royale match did not end within ${ROYALE_MINUTES + 1} minutes`);
+      const opensIn = Date.parse(room.roundOpensAt) - Date.parse(room.serverTime);
+      if (opensIn > 0) {
+        await sleep(opensIn + 100);
+        room = await roomOf(players[0], room.code);
+        continue;
+      }
+      for (const member of room.members.filter((m) => !m.hasLeft && !m.hasSubmitted)) {
+        const player = byName.get(member.displayName);
+        const own = await roomOf(player, room.code);
+        const card = own.state.hand[0];
+        const target = ['RugPull', 'WhaleSwap'].includes(card?.card)
+          ? own.state.players.filter((p) => p.seat !== member.seat).sort((a, b) => b.mon - a.mon || a.seat - b.seat)[0].seat
+          : undefined;
+        const response = await command(player, own, 'SUBMIT_ACTION', card ? { card: card.id, target, lock: true } : { hodl: true, lock: true });
+        if (response.status === 200) {
+          actions++;
+        } else if (!(response.status === 409 && ['round_closed', 'round_not_open', 'action_locked', 'room_closed'].includes(response.json?.code))) {
+          throw new Error(`SUBMIT_ACTION as ${player.name} returned ${response.status}: ${response.text.slice(0, 300)}`);
+        }
+      }
+      room = await watcher.next(room.version, 5);
+    }
+    return { room, actions };
+  };
+
+  /**
    * A room request that waits out the per-player limit (`Rooms:RequestsPerMinutePerPlayer`): match commands count
    * towards it, so a long match can leave a player's minute used up. Retries for just over one window.
    */
@@ -276,6 +318,8 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     check(game?.status === 'Available', `${GAME} must be Available in the catalog (set CHOG_LIFE_STATUS=Available on staging)`);
     const race = games.json.find((g) => g.id === RACE);
     check(race?.status === 'Available', `${RACE} must be Available in the catalog (set CHOG_RACE_STATUS=Available on staging)`);
+    const royale = games.json.find((g) => g.id === ROYALE);
+    check(royale?.status === 'Available', `${ROYALE} must be Available in the catalog (set CHOG_ROYALE_STATUS=Available on staging)`);
 
     step('calls without a session are refused');
     expectStatus(await send('GET', '/api/me'), 401, 'GET /api/me without a session');
@@ -415,10 +459,12 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     expectProblem(await command(host, sixPlayer.room, 'ROLL'), 409, 'room_closed', 'rolling after the end');
     await watcher.hub.close();
 
-    step('a two-player Chog Life match and a two-player Chog Race match, played at the same time');
-    // The leaver and the refused seventh player play Chog Life; two players of the six-player match play Chog Race.
+    step('a two-player Chog Life, Chog Race and Chog Royale match, played at the same time');
+    // The leaver and the refused seventh player play Chog Life; four players of the six-player match play Chog Race and
+    // Chog Royale.
     const duo = [leaver, seventh];
     const racers = [table[1], table[2]];
+    const royals = [table[3], table[4]];
     const startPair = async ([first, partner], gameType) => {
       const pair = await first.post('/api/rooms', { gameType });
       expectStatus(pair, 201, `creating a ${gameType} room`);
@@ -434,6 +480,12 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     const duoWatcher = await startPair(duo, GAME);
     const raceWatcher = await startPair(racers, RACE);
     check(raceWatcher.latest.state?.tiles?.length > 0, 'the Chog Race match shows its track');
+    const royaleStarted = Date.now();
+    const royaleWatcher = await startPair(royals, ROYALE);
+    check(
+      royaleWatcher.latest.play === 'Rounds' && royaleWatcher.latest.state?.players?.every((p) => p.mon === 100 && p.cards === 3),
+      'the Chog Royale match plays in rounds, everyone with 100 MON and three cards',
+    );
 
     step('commands meant for the other game or match are refused and change nothing');
     const lifeNow = await roomOf(leaver, duoWatcher.latest.code);
@@ -443,10 +495,30 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     expectProblem(await command(racer, raceNow, 'ROLL', undefined, { matchId: lifeNow.matchId }), 404, 'room_not_found', 'the Chog Life match id in Chog Race');
     expectProblem(await command(leaver, raceNow, 'ROLL'), 404, 'room_not_found', 'a Chog Life player rolling in Chog Race');
     check((await roomOf(leaver, lifeNow.code)).version === lifeNow.version, 'refused commands must not change the Chog Life match');
+    const royaleNow = await roomOf(royals[0], royaleWatcher.latest.code);
+    expectProblem(await command(racer, raceNow, 'SUBMIT_ACTION', { hodl: true }), 400, 'unknown_command', 'a Chog Royale command in Chog Race');
+    expectProblem(await command(royals[0], royaleNow, 'SUBMIT_ACTION', { hodl: true }, { matchId: raceNow.matchId }), 404, 'room_not_found', 'the Chog Race match id in Chog Royale');
+    expectProblem(await command(racer, royaleNow, 'SUBMIT_ACTION', { hodl: true }), 404, 'room_not_found', 'a Chog Race player acting in Chog Royale');
+    expectProblem(await command(royals[0], lifeNow, 'ROLL'), 404, 'room_not_found', 'a Chog Royale player rolling in Chog Life');
+    expectProblem(await royals[0].get(`/api/rooms/${lifeNow.code}`), 404, 'room_not_found', 'a Chog Royale player reading the Chog Life room');
+    check((await roomOf(leaver, lifeNow.code)).version === lifeNow.version, 'refused commands must not change the Chog Life match');
     check((await roomOf(racer, raceNow.code)).version === raceNow.version, 'refused commands must not change the Chog Race match');
+    check((await roomOf(royals[0], royaleNow.code)).version === royaleNow.version, 'refused commands must not change the Chog Royale match');
 
-    const [twoPlayer, racePlayed] = await Promise.all([playToEnd(duoWatcher, duo), playToEnd(raceWatcher, racers)]);
+    const [twoPlayer, racePlayed, royalePlayed] = await Promise.all([
+      playToEnd(duoWatcher, duo),
+      playToEnd(raceWatcher, racers),
+      playRoyale(royaleWatcher, royals).then((played) => ({ ...played, seconds: Math.round((Date.now() - royaleStarted) / 1000) })),
+    ]);
     step(`the two-player Chog Life match finished after ${twoPlayer.turns} turns, the Chog Race match after ${racePlayed.turns}`);
+    step(`the Chog Royale match finished after ${royalePlayed.actions} actions in ${royalePlayed.seconds} s`);
+    check(royalePlayed.seconds <= ROYALE_MINUTES * 60, `the Chog Royale match took ${royalePlayed.seconds} s, over its ${ROYALE_MINUTES}-minute target`);
+    await checkResults(royalePlayed.room, royals, 'the Chog Royale match');
+    check(royalePlayed.room.state.ledger.length === 5, 'the Chog Royale match played all five rounds');
+    check(
+      royalePlayed.room.members.every((m) => ['mon', 'change', 'lost', 'successfulCards'].every((key) => Number.isInteger(m.result?.[key]))),
+      'every Chog Royale player gets a result with MON, change, MON lost and successful cards',
+    );
     await checkResults(twoPlayer.room, duo, 'the two-player match');
     await checkResults(racePlayed.room, racers, 'the Chog Race match');
     check(racePlayed.room.members.every((m) => m.result && Number.isInteger(m.result.tile)), 'every Chog Race player gets a result');
@@ -469,8 +541,15 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
       }
     }
     expectProblem(await racers[0].get('/api/leaderboards?game=chog-poker'), 400, 'unknown_game', 'a board for an unknown game');
+    for (const guest of royals) {
+      check((await unlockedAchievements(guest)).includes('explorer'), `${guest.name} played Chog Life and Chog Royale and must have unlocked Explorer`);
+      const board = await guest.get('/api/leaderboards?game=chog-royale&period=all-time');
+      expectStatus(board, 200, `GET /api/leaderboards?game=chog-royale as ${guest.name}`);
+      check(board.json.you?.isYou === true && board.json.you.xp > 0, `${guest.name} must have a place on the Chog Royale board`);
+    }
     await duoWatcher.hub.close();
     await raceWatcher.hub.close();
+    await royaleWatcher.hub.close();
     log('Release smoke test passed.');
   } finally {
     // A failed run leaves connections open; they would keep the process alive.
