@@ -160,10 +160,12 @@ All three games share the same sessions, Chogs, rooms, profiles and live updates
 checks only what is Chog Royale's own. Time the match from the start to the results.
 
 - [ ] The home page lists Chog Royale as playable (`CHOG_ROYALE_STATUS=Available`); creating a Chog Royale room
-      offers its four abilities, the same for the wallet holding a Chog as for a guest.
+      offers a guest its two standard abilities, with the four holder ones locked, and the wallet playing as a Chog
+      it holds all six with its Tier's values and the "♛ Holder" badge (DEC-095, DEC-096).
 - [ ] Play a two-player Chog Royale match on the phone and the desktop: each round's announcement with its market
       event, choosing a card (a Rug Pull or Whale Swap at the other player) or HODL, "Chosen" on the other screen,
-      an ability used once, and each reveal. Both screens agree on every balance.
+      an ability used once (Insider Info on the other player shows their hand only on its screen), and each reveal.
+      Both screens agree on every balance.
 - [ ] Let one round run out without choosing on one screen: that player HODLs and the match goes on.
 - [ ] Reload one screen while deciding: it comes back to the same round, its chosen card and the real time left.
 - [ ] While it runs, a Chog Life or Chog Race match on two other devices plays normally; no board shows another's

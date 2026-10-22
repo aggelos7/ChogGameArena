@@ -99,7 +99,7 @@ Chog Royale is a mobile-first, simultaneous-action, multiplayer card-battle game
 | ROYALE-034 | Show all eligible NFTs owned by the connected wallet; select exactly one character per match. |
 | ROYALE-035 | Guests and nonholders can choose a default Chog character with equal gameplay access. |
 | ROYALE-036 | Verify ownership at match start and snapshot chosen NFT identity, metadata and traits for that match. |
-| ROYALE-037 | NFT ownership, rarity and traits do not increase card odds, starting MON or ability power in MVP. |
+| ROYALE-037 | NFT ownership, rarity and traits do not increase card odds or starting MON. Revised by DEC-095 (STORY-093): a holder's Tier makes their ability stronger, as in the other games (DEC-077). |
 | ROYALE-038 | No NFT staking, transfer or wallet signature is required during a round. |
 
 ## 8. Ability system
@@ -107,11 +107,11 @@ Chog Royale is a mobile-first, simultaneous-action, multiplayer card-battle game
 | Requirement | Description |
 |---|---|
 | ROYALE-039 | Reuse the shared `IAbilityAssignmentStrategy` design and use `SharedAbilityPoolStrategy` for MVP; keep future `TraitBasedAbilityStrategy` extensibility. |
-| ROYALE-040 | Every player chooses one Royale-specific ability from the same pool before match start, independently of NFT ownership. |
-| ROYALE-041 | Each ability may be activated once per match, with a validated timing window and explicit use feedback. |
+| ROYALE-040 | Every player chooses one Royale-specific ability before match start. Revised by DEC-095 (STORY-093): everyone may choose the 2 standard abilities, holders all 6. |
+| ROYALE-041 | Each ability may be activated once per match, or as often as the holder's Tier allows but once a round (DEC-096), with a validated timing window and explicit use feedback. |
 | ROYALE-042 | Initial abilities: `diamond_hands_plus` (block one additional eligible attack in a selected round), `alpha_leak` (preview next round's market event after current reveal), `double_pump` (+50% to one Pump gain), and `last_second_exit` (one extra action revision before deadline; no revisions after lock). |
 | ROYALE-043 | Abilities are game-specific implementations of the shared ability execution interface and do not require changes to Chog Life or Chog Race. |
-| ROYALE-044 | All abilities must be available to NFT holders and guests on equal terms. |
+| ROYALE-044 | Revised by DEC-095 (STORY-093): Diamond Hands+ and Stop Loss are available to everyone; Alpha Leak, Double Pump, Fresh Mint and Insider Info only to holders, with Tier values (DEC-096). |
 
 **Balancing note:** `last_second_exit` is primarily a tactical UX advantage; test its value against other choices before public release. An alternative is a once-per-match reroll of one hand card before submitting an action.
 
@@ -150,7 +150,7 @@ Chog Royale is a mobile-first, simultaneous-action, multiplayer card-battle game
 | ROYALE-063 | Unit-test every card, market modifier, ability, conflict rule, clamp and tie-break. |
 | ROYALE-064 | Integration-test 2-player and 6-player matches, early locks, deadlines, reconnects, duplicate commands and simultaneous attacks. |
 | ROYALE-065 | Run automated full-match simulations to verify no stalled states and that matches meet the five-minute target under expected conditions. |
-| ROYALE-066 | Verify NFT holder and guest gameplay parity. |
+| ROYALE-066 | Verify that guests and holders start alike and that only the holder advantage of DEC-095 differs (STORY-093). |
 
 ## 12. MVP acceptance criteria
 

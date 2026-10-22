@@ -6,7 +6,7 @@ using ChogGames.Games.ChogRoyale.Rules;
 namespace ChogGames.Games.ChogRoyale;
 
 /// <summary>
-/// Chog Royale's abilities on the match state (STORY-080, ROYALE-039–044, DEC-091). The shared engine has already checked
+/// Chog Royale's abilities on the match state (STORY-080, STORY-093, ROYALE-039–044, DEC-091, DEC-095). The shared engine has already checked
 /// the player locked the ability, has a use left and the round is open with their action not locked (DEC-081); a use is
 /// recorded on the player for the round's resolution, which applies it and shows it in the ledger.
 /// </summary>
@@ -40,7 +40,9 @@ public sealed partial class ChogRoyaleMatchRules
 
     /// <summary>
     /// The state with the ability recorded on its player for the round, with its locked value; Alpha Leak also draws the
-    /// next round's event now, from the server's randomness (DEC-091).
+    /// next round's event now, from the server's randomness (DEC-091). Fresh Mint deals the player a new hand of as many
+    /// cards now, one weighted draw each, and drops an unlocked card choice, which named a card no longer held; Insider
+    /// Info records whom it looks at (STORY-093, DEC-095).
     /// </summary>
     public JsonElement Use(AbilityContext context)
     {
@@ -53,9 +55,20 @@ public sealed partial class ChogRoyaleMatchRules
             RoyaleAbilities.StopLoss => context.Ability.Parameters[RoyaleAbilities.Mon],
             _ => 0,
         };
-        var players = state.Players.Select(p => p.Seat == player.Seat ? p with { Ability = new RoyaleAbilityUse(id, (int)value) } : p).ToArray();
+        var used = player with { Ability = new RoyaleAbilityUse(id, (int)value, id == RoyaleAbilities.InsiderInfo ? context.Target!.Seat : null) };
+        var nextCard = state.NextCard;
+        if (id == RoyaleAbilities.FreshMint)
+        {
+            used = used with
+            {
+                Hand = Deal(rules, player.Hand.Length, ref nextCard, context.Random),
+                Action = player.Action is { Card: not null } ? null : player.Action,
+            };
+        }
+
+        var players = state.Players.Select(p => p.Seat == player.Seat ? used : p).ToArray();
         var nextEvent = id == RoyaleAbilities.AlphaLeak ? state.NextEvent ?? DrawEvent(rules, context.Random) : state.NextEvent;
-        return Serialize(state with { Players = players, NextEvent = nextEvent });
+        return Serialize(state with { Players = players, NextCard = nextCard, NextEvent = nextEvent });
     }
 
     /// <summary>A playable state with the ability's player in it, still playing and without an ability used this round.</summary>

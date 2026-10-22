@@ -274,7 +274,7 @@
                 [busy]="busy()"
                 [finalRevealUntil]="finale() ? finalRevealUntil() : null"
                 (act)="submitRoyale($event)"
-                (useAbility)="useAbility($event)"
+                (useAbility)="useRoyaleAbility($event)"
                 (seeResults)="boardSettled()"
               >
                 <div class="game-header" boardHeader>

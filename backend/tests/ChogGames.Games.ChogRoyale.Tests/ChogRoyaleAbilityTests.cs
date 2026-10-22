@@ -11,9 +11,10 @@ using ChogGames.Games.ChogRoyale.Rules;
 namespace ChogGames.Games.ChogRoyale.Tests;
 
 /// <summary>
-/// Chog Royale's abilities (STORY-080, ROYALE-039–044, DEC-091): each has its effect at the round's resolution, Alpha
-/// Leak's preview reaches only its player, a used ability or one outside its window is refused unchanged, and guests and
-/// holders are offered the same four with the same values.
+/// Chog Royale's abilities (STORY-080, STORY-093, ROYALE-039–044, DEC-091, DEC-095): each has its effect at the round's
+/// resolution, Alpha Leak's preview, Fresh Mint's hand and Insider Info's look reach only their player, a used ability or
+/// one outside its window is refused unchanged, Tier values and uses apply, and holders are offered all six abilities
+/// where guests get the two standard ones.
 /// </summary>
 public class ChogRoyaleAbilityTests
 {
@@ -254,22 +255,208 @@ public class ChogRoyaleAbilityTests
         Assert.Equal(AbilityRefusal.NotYourAbility, table.UseAbility(2, RoyaleAbilities.StopLoss));
     }
 
-    // Catalog and parity.
+    // Fresh Mint.
 
     [Fact]
-    public void The_catalog_has_the_four_abilities_once_per_match_while_deciding()
+    public void Fresh_mint_deals_a_new_hand_that_only_its_player_sees()
     {
-        var catalog = RoyaleAbilities.Catalog(new ChogRoyaleMatchRules([RoyaleRulesV1.Rules]));
+        var table = Dealt([RoyaleAbilities.FreshMint, null], Pump, Pump);
+        ((Draws)table.Random).Enqueue(Rug, Diamond, Whale);
 
-        Assert.Equal(GameDefinition.ChogRoyale, catalog.GameType);
+        Assert.Null(table.UseAbility(1, RoyaleAbilities.FreshMint));
+
         Assert.Equal(
-            [RoyaleAbilities.DiamondHandsPlus, RoyaleAbilities.AlphaLeak, RoyaleAbilities.DoublePump, RoyaleAbilities.StopLoss],
-            catalog.Definitions.Select(d => d.Id));
-        Assert.All(catalog.Definitions, d => Assert.Equal((1, AbilityTargetKind.None, RoyaleAbilities.Deciding), (d.MaxUses, d.Target, d.Windows.Single())));
+            [("c7", RoyaleCard.RugPull), ("c8", RoyaleCard.DiamondHands), ("c9", RoyaleCard.WhaleSwap)],
+            table.Hand(1).Select(c => (c.Id, c.Card)));
+        Assert.Equal(10, table.Stored.NextCard);
+        Assert.Equal(["c7", "c8", "c9"], table.ViewOf(1).GetProperty("hand").EnumerateArray().Select(c => c.GetProperty("id").GetString()));
+        var theirs = table.ViewOf(2);
+        Assert.DoesNotContain("c7", theirs.GetRawText(), StringComparison.Ordinal);
+        Assert.False(theirs.TryGetProperty("ability", out _));
+        Assert.Equal(3, theirs.GetProperty("players")[0].GetProperty("cards").GetInt32());
+
+        table.Play(1, 0, target: 2);
+        table.Resolve();
+
+        Assert.Equal([115, 85], Balances(table));
+        Assert.Equal(RoyaleAbilities.FreshMint, Entry(table, 1).Ability);
     }
 
     [Fact]
-    public void Guests_and_holders_of_any_tier_are_offered_the_same_abilities()
+    public void Fresh_mint_drops_an_unlocked_card_choice_and_the_old_cards_are_gone()
+    {
+        var table = Dealt([RoyaleAbilities.FreshMint, RoyaleAbilities.FreshMint], Pump, Pump);
+        var old = table.Hand(1)[0].Id;
+        table.Play(1, 0);
+        table.Hodl(2);
+
+        Assert.Null(table.UseAbility(1, RoyaleAbilities.FreshMint));
+        Assert.Null(table.UseAbility(2, RoyaleAbilities.FreshMint));
+
+        Assert.Null(table.Stored.Players[0].Action);
+        Assert.Equal(new RoyaleAction(Hodl: true), table.Stored.Players[1].Action);
+        var refused = table.Rules.Apply(new MatchCommandContext(
+            table.Match, table.Seat(1), ChogRoyaleMatchRules.SubmitAction, JsonSerializer.SerializeToElement(new { card = old }), table.State, table.Random));
+        Assert.Equal("card_not_in_hand", refused.Reason);
+    }
+
+    // Insider Info.
+
+    [Fact]
+    public void Insider_info_shows_the_opponents_hand_but_not_their_action_to_its_player_only()
+    {
+        var table = Dealt([RoyaleAbilities.InsiderInfo, null, null], Pump, Rug, Pump);
+        table.Play(2, 0, target: 3);
+
+        Assert.Null(table.UseAbility(1, RoyaleAbilities.InsiderInfo, target: 2));
+
+        var insider = table.ViewOf(1).GetProperty("insider");
+        Assert.Equal(2, insider.GetProperty("seat").GetInt32());
+        Assert.Equal(table.Hand(2).Select(c => c.Id), insider.GetProperty("hand").EnumerateArray().Select(c => c.GetProperty("id").GetString()));
+        Assert.DoesNotContain("target", insider.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("action", insider.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        foreach (var seat in new[] { 2, 3 })
+        {
+            var view = table.ViewOf(seat);
+            Assert.False(view.TryGetProperty("insider", out _));
+            Assert.False(view.TryGetProperty("ability", out _));
+        }
+
+        Assert.DoesNotContain(table.Hand(2)[1].Id, table.ViewOf(3).GetRawText(), StringComparison.Ordinal);
+
+        table.Resolve();
+
+        Assert.Equal((RoyaleAbilities.InsiderInfo, 2), (Entry(table, 1).Ability, Entry(table, 1).AbilityTarget!.Value));
+        Assert.Null(Entry(table, 2).AbilityTarget);
+        Assert.False(table.ViewOf(1).TryGetProperty("insider", out _));
+    }
+
+    [Fact]
+    public void Insider_info_shows_a_hand_its_opponent_mints_afterwards()
+    {
+        var table = Dealt([RoyaleAbilities.InsiderInfo, RoyaleAbilities.FreshMint], Pump, Pump);
+        Assert.Null(table.UseAbility(1, RoyaleAbilities.InsiderInfo, target: 2));
+        ((Draws)table.Random).Enqueue(Rug, Rug, Rug);
+
+        Assert.Null(table.UseAbility(2, RoyaleAbilities.FreshMint));
+
+        Assert.Equal(["c7", "c8", "c9"], table.ViewOf(1).GetProperty("insider").GetProperty("hand").EnumerateArray().Select(c => c.GetProperty("id").GetString()));
+    }
+
+    [Fact]
+    public void Insider_info_is_refused_on_the_player_a_player_who_left_or_without_a_target()
+    {
+        var table = Dealt([RoyaleAbilities.InsiderInfo, null, null], Pump, Pump, Pump);
+        table.Match.Leave(table.Seat(3), table.Now);
+        var version = table.Match.Version;
+
+        Assert.Equal(AbilityRefusal.InvalidTarget, table.UseAbility(1, RoyaleAbilities.InsiderInfo, target: 1));
+        Assert.Equal(AbilityRefusal.InvalidTarget, table.UseAbility(1, RoyaleAbilities.InsiderInfo, target: 3));
+        Assert.Equal(AbilityRefusal.InvalidTarget, table.UseAbility(1, RoyaleAbilities.InsiderInfo));
+        Assert.Equal(AbilityRefusal.InvalidTarget, table.UseAbility(1, RoyaleAbilities.InsiderInfo, target: 9));
+        Assert.Equal((version, 1), (table.Match.Version, UsesLeft(table, 1)));
+    }
+
+    [Fact]
+    public void Insider_info_stops_showing_an_opponent_who_leaves()
+    {
+        var table = Dealt([RoyaleAbilities.InsiderInfo, null, null], Pump, Pump, Pump);
+        Assert.Null(table.UseAbility(1, RoyaleAbilities.InsiderInfo, target: 2));
+
+        table.Match.Leave(table.Seat(2), table.Now);
+
+        Assert.False(table.ViewOf(1).TryGetProperty("insider", out _));
+    }
+
+    // Tier values and uses (DEC-077, DEC-095).
+
+    private static Func<AbilityDefinition, AbilityDefinition> Tier(string name, decimal value) =>
+        ability => ability.WithValues(new Dictionary<string, decimal> { [name] = value }, ability.MaxUses);
+
+    private static AbilityDefinition Twice(AbilityDefinition ability) => ability.WithValues(ability.Parameters, 2);
+
+    [Fact]
+    public void A_legendary_stop_loss_lets_nothing_through()
+    {
+        var table = new RoyaleTable(2, new Draws([Rug, Rug, Rug, Pump, Pump, Pump, Calm]), abilities: [null, RoyaleAbilities.StopLoss], tier: Tier(RoyaleAbilities.Mon, 0));
+        Assert.Null(table.UseAbility(2, RoyaleAbilities.StopLoss));
+        table.Play(1, 0, target: 2);
+
+        table.Resolve();
+
+        Assert.Equal([100, 100], Balances(table));
+        Assert.Equal(RoyaleOutcome.Stopped, Entry(table, 1).Outcome);
+    }
+
+    [Fact]
+    public void A_legendary_double_pump_doubles_a_pump()
+    {
+        var table = new RoyaleTable(2, new Draws([Pump, Pump, Pump, Pump, Pump, Pump, Calm]), abilities: [RoyaleAbilities.DoublePump], tier: Tier(RoyaleAbilities.Percent, 100));
+        Assert.Null(table.UseAbility(1, RoyaleAbilities.DoublePump));
+        table.Play(1, 0);
+
+        table.Resolve();
+
+        Assert.Equal(140, table.Mon(1));
+    }
+
+    [Fact]
+    public void A_legendary_diamond_hands_plus_blocks_three_attacks()
+    {
+        var table = new RoyaleTable(4, new Draws([.. Enumerable.Repeat(Rug, 9), Pump, Pump, Pump, Calm]), abilities: [null, null, null, RoyaleAbilities.DiamondHandsPlus], tier: Tier(RoyaleAbilities.Blocks, 3));
+        Assert.Null(table.UseAbility(4, RoyaleAbilities.DiamondHandsPlus));
+        foreach (var seat in new[] { 1, 2, 3 })
+        {
+            table.Play(seat, 0, target: 4);
+        }
+
+        table.Resolve();
+
+        Assert.All(new[] { 1, 2, 3 }, seat => Assert.Equal(RoyaleOutcome.Blocked, Entry(table, seat).Outcome));
+        Assert.Equal(100, table.Mon(4));
+    }
+
+    [Theory]
+    [InlineData(RoyaleAbilities.FreshMint)]
+    [InlineData(RoyaleAbilities.AlphaLeak)]
+    [InlineData(RoyaleAbilities.InsiderInfo)]
+    public void An_epic_ability_with_two_uses_is_used_once_a_round(string ability)
+    {
+        var table = new RoyaleTable(2, new Draws([Pump, Pump, Pump, Pump, Pump, Pump, Calm]), abilities: [ability], tier: Twice);
+        int? target = ability == RoyaleAbilities.InsiderInfo ? 2 : null;
+
+        Assert.Null(table.UseAbility(1, ability, target));
+        Assert.Equal(AbilityRefusal.NotNow, table.UseAbility(1, ability, target));
+        table.Resolve();
+        Assert.Null(table.UseAbility(1, ability, target));
+        Assert.Equal(0, UsesLeft(table, 1));
+        table.Resolve();
+        Assert.Equal(AbilityRefusal.UsedUp, table.UseAbility(1, ability, target));
+        Assert.Equal([ability, ability], table.Stored.Ledger.Select(round => round.Entries[0].Ability));
+    }
+
+    // Catalog and holders.
+
+    [Fact]
+    public void The_catalog_has_six_abilities_once_per_match_while_deciding()
+    {
+        var catalog = RoyaleAbilities.Catalog(new ChogRoyaleMatchRules([RoyaleRulesV1.Rules]));
+
+        Assert.Equal((GameDefinition.ChogRoyale, 2), (catalog.GameType, catalog.Version));
+        Assert.Equal(
+            [
+                RoyaleAbilities.DiamondHandsPlus, RoyaleAbilities.AlphaLeak, RoyaleAbilities.DoublePump, RoyaleAbilities.StopLoss,
+                RoyaleAbilities.FreshMint, RoyaleAbilities.InsiderInfo,
+            ],
+            catalog.Definitions.Select(d => d.Id));
+        Assert.All(catalog.Definitions, d => Assert.Equal((1, RoyaleAbilities.Deciding), (d.MaxUses, d.Windows.Single())));
+        Assert.Equal(
+            [RoyaleAbilities.InsiderInfo],
+            catalog.Definitions.Where(d => d.Target == AbilityTargetKind.Opponent).Select(d => d.Id));
+    }
+
+    [Fact]
+    public void Guests_get_the_two_standard_abilities_and_holders_all_six_with_their_tiers_values()
     {
         var rules = new ChogRoyaleMatchRules([RoyaleRulesV1.Rules]);
         var engine = new AbilityEngine([RoyaleAbilities.Catalog(rules)]);
@@ -277,7 +464,16 @@ public class ChogRoyaleAbilityTests
             "Tier",
             new Dictionary<string, HolderGameRules>
             {
-                ["chog-life"] = new(new HashSet<string> { "reward_boost" }, new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, decimal>>>()),
+                [GameDefinition.ChogRoyale] = new(
+                    new HashSet<string> { RoyaleAbilities.DiamondHandsPlus, RoyaleAbilities.StopLoss },
+                    new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyDictionary<string, decimal>>>
+                    {
+                        ["legendary"] = new Dictionary<string, IReadOnlyDictionary<string, decimal>>
+                        {
+                            [RoyaleAbilities.StopLoss] = new Dictionary<string, decimal> { [RoyaleAbilities.Mon] = 0 },
+                            [RoyaleAbilities.FreshMint] = new Dictionary<string, decimal> { [AbilityDefinition.Uses] = 2 },
+                        },
+                    }),
             });
         var pool = new AbilityPool(engine, new HolderAbilityStrategy(holderRules));
         var guest = CharacterSnapshot.Standard(DefaultAvatar.Classic, RoyaleTable.Start);
@@ -285,8 +481,15 @@ public class ChogRoyaleAbilityTests
             CharacterKind.Nft, "7", "Chog #7", null, [new NftTrait("Tier", "Legendary")], "0x00000000000000000000000000000000000000c7", RoyaleTable.Start);
 
         var offeredToGuest = pool.For(GameDefinition.ChogRoyale, guest);
-        Assert.Equal(4, offeredToGuest.Count);
-        Assert.Equal(offeredToGuest, pool.For(GameDefinition.ChogRoyale, legendary));
-        Assert.All(offeredToGuest, a => Assert.False(pool.IsHolderOnly(GameDefinition.ChogRoyale, a.Id)));
+        var offeredToHolder = pool.For(GameDefinition.ChogRoyale, legendary);
+
+        Assert.Equal([RoyaleAbilities.DiamondHandsPlus, RoyaleAbilities.StopLoss], offeredToGuest.Select(a => a.Id));
+        Assert.Equal(5m, offeredToGuest.Single(a => a.Id == RoyaleAbilities.StopLoss).Parameters[RoyaleAbilities.Mon]);
+        Assert.Equal(6, offeredToHolder.Count);
+        Assert.Equal(0m, offeredToHolder.Single(a => a.Id == RoyaleAbilities.StopLoss).Parameters[RoyaleAbilities.Mon]);
+        Assert.Equal(2, offeredToHolder.Single(a => a.Id == RoyaleAbilities.FreshMint).MaxUses);
+        Assert.Equal(
+            [RoyaleAbilities.AlphaLeak, RoyaleAbilities.DoublePump, RoyaleAbilities.FreshMint, RoyaleAbilities.InsiderInfo],
+            offeredToHolder.Where(a => pool.IsHolderOnly(GameDefinition.ChogRoyale, a.Id)).Select(a => a.Id));
     }
 }

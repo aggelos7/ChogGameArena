@@ -33,7 +33,7 @@ public class ChogRoyaleRegistrationTests
 
         Assert.Same(services.GetRequiredService<ChogRoyaleMatchRules>(), Assert.Single(services.GetServices<IMatchRules>()));
         var catalog = Assert.Single(services.GetServices<AbilityCatalog>());
-        Assert.Equal(("chog-royale", RoyaleAbilities.Version, 4), (catalog.GameType, catalog.Version, catalog.Definitions.Count));
+        Assert.Equal(("chog-royale", RoyaleAbilities.Version, 6), (catalog.GameType, catalog.Version, catalog.Definitions.Count));
     }
 
     [Fact]

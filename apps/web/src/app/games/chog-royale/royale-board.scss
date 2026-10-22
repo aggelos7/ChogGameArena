@@ -261,8 +261,38 @@
   margin-top: 0.75rem;
 }
 
+.ability-name {
+  margin: 0;
+}
+
+.ability-plays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .ability-used {
   margin: 0.75rem 0 0;
+}
+
+.insider {
+  margin-top: 0.75rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  background: rgb(185 166 242 / 0.25);
+}
+
+.insider p {
+  margin: 0;
+}
+
+.insider ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.25rem 0;
+  padding: 0;
+  list-style: none;
 }
 
 .history summary {

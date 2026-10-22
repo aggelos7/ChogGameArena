@@ -31,12 +31,14 @@ export const EVENT_INFO: Record<RoyaleMarketEvent, { name: string; text: string;
   CommunityAirdrop: { name: 'Community Airdrop', text: 'Everyone gains 5 MON after the cards.', icon: '🎁' },
 };
 
-/** The abilities' names, for the reveal (STORY-080, DEC-091). */
+/** The abilities' names, for the reveal (STORY-080, STORY-093, DEC-091, DEC-095). */
 export const ABILITY_NAMES: Record<string, string> = {
   diamond_hands_plus: 'Diamond Hands+',
   alpha_leak: 'Alpha Leak',
   double_pump: 'Double Pump',
   stop_loss: 'Stop Loss',
+  fresh_mint: 'Fresh Mint',
+  insider_info: 'Insider Info',
 };
 
 export interface RoyaleHandCard {
@@ -72,6 +74,8 @@ export interface RoyaleLedgerEntry {
   change: number;
   balance: number;
   ability: string | null;
+  /** The seat whose hand the player's Insider Info showed them (STORY-093, DEC-095). */
+  abilityTarget: number | null;
 }
 
 /** A resolved round: its event, the modifier Chaos added, the seat priority it resolved in and every player's line. */
@@ -97,6 +101,13 @@ export interface RoyaleBoard {
   ability: string | null;
   /** The next round's event, only when you used Alpha Leak this round. */
   nextEvent: RoyaleMarketEvent | null;
+  /** The opponent your Insider Info looks at this round and their hand as it is now, never their action (DEC-095). */
+  insider: RoyaleInsider | null;
+}
+
+export interface RoyaleInsider {
+  seat: number;
+  hand: RoyaleHandCard[];
 }
 
 type Json = Record<string, unknown>;
@@ -122,6 +133,7 @@ function toEntry(value: unknown): RoyaleLedgerEntry | null {
   const outcome = optional(value['outcome'], isOutcome);
   const defense = optional(value['defense'], isDefense);
   const ability = optional(value['ability'], isString);
+  const abilityTarget = optional(value['abilityTarget'], isSeat);
   if (
     !isSeat(value['seat']) ||
     card === undefined ||
@@ -129,6 +141,7 @@ function toEntry(value: unknown): RoyaleLedgerEntry | null {
     outcome === undefined ||
     defense === undefined ||
     ability === undefined ||
+    abilityTarget === undefined ||
     typeof value['byDefault'] !== 'boolean' ||
     !isInt(value['amount']) ||
     !isCount(value['lost']) ||
@@ -151,6 +164,7 @@ function toEntry(value: unknown): RoyaleLedgerEntry | null {
     change: value['change'],
     balance: value['balance'],
     ability,
+    abilityTarget,
   };
 }
 
@@ -178,25 +192,39 @@ function toAction(value: unknown): RoyaleAction | null | undefined {
   return card === undefined || target === undefined ? undefined : { hodl: value['hodl'] === true, card, target };
 }
 
+const isHand = (value: unknown): value is RoyaleHandCard[] =>
+  Array.isArray(value) && value.every((c) => isObject(c) && isString(c['id']) && isCard(c['card']));
+
+function toInsider(value: unknown): RoyaleInsider | null | undefined {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return isObject(value) && isSeat(value['seat']) && isHand(value['hand'])
+    ? { seat: value['seat'], hand: value['hand'].map((c) => ({ id: c.id, card: c.card })) }
+    : undefined;
+}
+
 /** The Chog Royale view in a room's `state`, or null when it isn't one this client understands. */
 export function toRoyaleBoard(state: unknown): RoyaleBoard | null {
   if (!isObject(state) || !isSeat(state['rulesVersion']) || !isSeat(state['round']) || !isSeat(state['rounds']) || !isEvent(state['event'])) {
     return null;
   }
   const players = Array.isArray(state['players']) ? state['players'] : null;
-  const hand = Array.isArray(state['hand']) ? state['hand'] : null;
+  const hand = isHand(state['hand']) ? state['hand'] : null;
   const ledger = Array.isArray(state['ledger']) ? state['ledger'].map(toRound) : null;
   const action = toAction(state['action']);
   const ability = optional(state['ability'], isString);
   const nextEvent = optional(state['nextEvent'], isEvent);
+  const insider = toInsider(state['insider']);
   if (
     !players?.every((p) => isObject(p) && isSeat(p['seat']) && isCount(p['mon']) && isCount(p['cards'])) ||
-    !hand?.every((c) => isObject(c) && isString(c['id']) && isCard(c['card'])) ||
+    !hand ||
     !ledger ||
     ledger.some((round) => round === null) ||
     action === undefined ||
     ability === undefined ||
-    nextEvent === undefined
+    nextEvent === undefined ||
+    insider === undefined
   ) {
     return null;
   }
@@ -206,11 +234,12 @@ export function toRoyaleBoard(state: unknown): RoyaleBoard | null {
     rounds: state['rounds'],
     event: state['event'],
     players: players.map((p) => ({ seat: p['seat'], mon: p['mon'], cards: p['cards'] }) as RoyalePlayer),
-    hand: hand.map((c) => ({ id: c['id'], card: c['card'] }) as RoyaleHandCard),
+    hand: hand.map((c) => ({ id: c.id, card: c.card })),
     action,
     ledger: ledger as RoyaleRound[],
     ability,
     nextEvent,
+    insider,
   };
 }
 
@@ -226,7 +255,8 @@ export function signedMon(change: number): string {
 export function describeEntry(entry: RoyaleLedgerEntry, name: (seat: number) => string): string {
   const parts: string[] = [];
   if (entry.ability) {
-    parts.push(`used ${ABILITY_NAMES[entry.ability] ?? entry.ability}`);
+    const on = entry.abilityTarget !== null ? ` on ${name(entry.abilityTarget)}` : '';
+    parts.push(`used ${ABILITY_NAMES[entry.ability] ?? entry.ability}${on}`);
   }
   if (!entry.card) {
     parts.push(entry.byDefault ? 'didn’t act, so held (HODL)' : 'held (HODL)');

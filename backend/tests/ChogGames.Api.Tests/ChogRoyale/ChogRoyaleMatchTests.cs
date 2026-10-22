@@ -22,7 +22,8 @@ namespace ChogGames.Api.Tests.ChogRoyale;
 /// cards each and plays five rounds to its end even with nobody acting; actions are hidden from everyone else over REST and
 /// live until the round resolves, idle players HODL, and a round resolves once however often it is retried. The cards
 /// move MON under the round's market event, and the finished match is ranked and counted in profiles, XP and the Ladder.
-/// Guests choose from every ability and a use stays private until the reveal (STORY-080, DEC-091); a player who drops
+/// Without holder rules guests choose from every ability, and a use, Fresh Mint's new hand and the hand Insider Info shows
+/// stay private until the reveal (STORY-080, STORY-093, DEC-091, DEC-095); a player who drops
 /// comes back to their round, pending action and the deadline on the server's clock, and outsiders see nothing
 /// (STORY-083, DEC-093).
 /// </summary>
@@ -227,6 +228,9 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
 
     private static Task<HttpResponseMessage> UseAbilityAsync(Guest guest, string code, string abilityId) =>
         CommandAsync(guest, code, "USE_ABILITY", new { abilityId });
+
+    private static Task<HttpResponseMessage> UseAbilityAsync(Guest guest, string code, string abilityId, int target) =>
+        CommandAsync(guest, code, "USE_ABILITY", new { abilityId, target });
 
     private static async Task<HttpResponseMessage> CommandAsync(Guest guest, string code, string type, object payload, Guid? actionId = null)
     {
@@ -546,7 +550,7 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         room.GetProperty("members").EnumerateArray().Single(m => m.GetProperty("displayName").GetString() == displayName).GetProperty("ability");
 
     [PostgresFact]
-    public async Task Guests_choose_from_all_four_abilities_and_a_use_stays_private_until_the_reveal()
+    public async Task Without_holder_rules_guests_choose_from_all_six_abilities_and_a_use_stays_private_until_the_reveal()
     {
         // Six Pumps dealt, then round 1's event Calm Market (0), and Alpha Leak's early draw for round 2: Meme Hype (30).
         _random.Enqueue(0, 0, 0, 0, 0, 0, 0, 30);
@@ -556,7 +560,7 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         foreach (var guest in new[] { alice, bob })
         {
             var offered = (await ViewAsync(guest, code)).GetProperty("abilities").EnumerateArray().Select(a => a.GetProperty("id").GetString()!).ToArray();
-            Assert.Equal(["diamond_hands_plus", "alpha_leak", "double_pump", "stop_loss"], offered);
+            Assert.Equal(["diamond_hands_plus", "alpha_leak", "double_pump", "stop_loss", "fresh_mint", "insider_info"], offered);
         }
 
         foreach (var (guest, ability) in new[] { (alice, "alpha_leak"), (bob, "stop_loss") })
@@ -586,6 +590,44 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         Assert.Equal(0, AbilityOf(revealed, "Alice").GetProperty("usesLeft").GetInt32());
         Assert.Equal("alpha_leak", State(revealed).GetProperty("ledger")[0].GetProperty("entries")[0].GetProperty("ability").GetString());
         Assert.Equal("MemeHype", State(revealed).GetProperty("event").GetString());
+    }
+
+    [PostgresFact]
+    public async Task Fresh_mints_hand_and_the_hand_insider_info_shows_reach_only_their_player_over_rest_and_live()
+    {
+        // STORY-093, DEC-095. Nine Pumps dealt (c1–c9) and round 1's Calm Market, then Bob's Fresh Mint draws three Rug Pulls.
+        _random.Enqueue(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 30, 30);
+        var (alice, bob, carol) = (await GuestAsync("Alice"), await GuestAsync("Bob"), await GuestAsync("Carol"));
+        var code = await StartedWithAsync(["insider_info", "fresh_mint", "stop_loss"], alice, bob, carol);
+        var carolLive = await ConnectAsync(carol, code);
+        ToFirstRound();
+
+        await RefusedAsync(UseAbilityAsync(alice, code, "insider_info", 1), "command_rejected", "invalid_target");
+        await OkAsync(UseAbilityAsync(alice, code, "insider_info", 2));
+        await OkAsync(UseAbilityAsync(bob, code, "fresh_mint"));
+
+        var bobs = await ViewAsync(bob, code);
+        Assert.Equal(["c10", "c11", "c12"], HandIds(bobs));
+        Assert.False(State(bobs).TryGetProperty("insider", out _));
+        var insider = State(await ViewAsync(alice, code)).GetProperty("insider");
+        Assert.Equal(2, insider.GetProperty("seat").GetInt32());
+        Assert.Equal(["c10", "c11", "c12"], insider.GetProperty("hand").EnumerateArray().Select(c => c.GetProperty("id").GetString()));
+        foreach (var seen in new[] { await ViewAsync(carol, code), await carolLive.SubscribeAsync(code) })
+        {
+            Assert.False(State(seen).TryGetProperty("insider", out _));
+            Assert.All(new[] { "c4", "c10", "c11", "c12" }, id => Assert.DoesNotContain($"\"{id}\"", seen.GetRawText(), StringComparison.Ordinal));
+            Assert.Equal((1, 1), (AbilityOf(seen, "Alice").GetProperty("usesLeft").GetInt32(), AbilityOf(seen, "Bob").GetProperty("usesLeft").GetInt32()));
+        }
+
+        // The reveal shows both uses, and whom Alice looked at.
+        _clock.Advance(TimeSpan.FromSeconds(25));
+        Assert.Single(await SweepAsync());
+        var entries = State(await ViewAsync(carol, code)).GetProperty("ledger")[0].GetProperty("entries");
+        Assert.Equal(("insider_info", 2), (entries[0].GetProperty("ability").GetString(), entries[0].GetProperty("abilityTarget").GetInt32()));
+        Assert.Equal("fresh_mint", entries[1].GetProperty("ability").GetString());
+        Assert.False(entries[1].TryGetProperty("abilityTarget", out _));
+        Assert.False(State(await ViewAsync(alice, code)).TryGetProperty("insider", out _));
+        await carolLive.DisposeAsync();
     }
 
     // STORY-083: reconnect and AFK.

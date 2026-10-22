@@ -29,7 +29,7 @@ import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
 import { RaceAbilityPlay, RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
 import { RACE_END_TURN, RACE_PASS, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
-import { RoyaleBoardView, RoyaleSubmission } from '../../games/chog-royale/royale-board';
+import { RoyaleAbilityUse, RoyaleBoardView, RoyaleSubmission } from '../../games/chog-royale/royale-board';
 import { ROYALE_SUBMIT, toRoyaleBoard } from '../../games/chog-royale/royale-board-model';
 import { RoyaleResultsView, toRoyaleResult } from '../../games/chog-royale/royale-results';
 
@@ -339,6 +339,11 @@ export class RoomPage implements OnInit {
 
   /** Uses the player's locked Chog Race ability, on an opponent for Card Steal and Freeze (STORY-055, STORY-092); refusals as for a roll. */
   protected useRaceAbility(use: RaceAbilityPlay): void {
+    this.command(USE_ABILITY, use.target === undefined ? { abilityId: use.abilityId } : { abilityId: use.abilityId, target: use.target });
+  }
+
+  /** Uses your locked Chog Royale ability while deciding, on an opponent for Insider Info (STORY-093); refusals as for a roll. */
+  protected useRoyaleAbility(use: RoyaleAbilityUse): void {
     this.command(USE_ABILITY, use.target === undefined ? { abilityId: use.abilityId } : { abilityId: use.abilityId, target: use.target });
   }
 

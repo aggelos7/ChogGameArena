@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RoomAbility, RoomMember } from '../../rooms/rooms-api';
 import { royaleState } from '../../testing';
-import { RoyaleBoardView, RoyaleSubmission } from './royale-board';
+import { RoyaleAbilityUse, RoyaleBoardView, RoyaleSubmission } from './royale-board';
 import { RoyaleBoard, toRoyaleBoard } from './royale-board-model';
 
 describe('Chog Royale board', () => {
@@ -43,7 +43,7 @@ describe('Chog Royale board', () => {
   let fixture: ComponentFixture<RoyaleBoardView>;
   let page: HTMLElement;
   let sent: RoyaleSubmission[];
-  let used: string[];
+  let used: RoyaleAbilityUse[];
 
   /** Renders the board: the round opened `opened` seconds ago (negative: opens later) and decides for 15 s. */
   function render(state: Record<string, unknown> = royaleState(), members: RoomMember[] = defaultMembers(), opened = 3, offset = 0): void {
@@ -73,7 +73,7 @@ describe('Chog Royale board', () => {
     sent = [];
     used = [];
     fixture.componentInstance.act.subscribe((submission) => sent.push(submission));
-    fixture.componentInstance.useAbility.subscribe((id) => used.push(id));
+    fixture.componentInstance.useAbility.subscribe((use) => used.push(use));
   });
 
   afterEach(() => vi.useRealTimers());
@@ -313,7 +313,9 @@ describe('Chog Royale board', () => {
 
     expect(text('[data-ability-panel]')).toContain(stopLoss.description);
     button('[data-use-ability]').click();
-    expect(used).toEqual(['stop_loss']);
+    expect(used).toEqual([{ abilityId: 'stop_loss' }]);
+    expect(text('[data-uses-left]')).toBe('1/1 left');
+    expect(page.querySelector('[data-ability-panel] [data-holder-badge]')).toBeNull();
 
     render(royaleState({ ability: 'stop_loss' }), defaultMembers({ ability: { ...stopLoss, usesLeft: 0 } }));
     expect(text('[data-ability-used]')).toBe('You used Stop Loss this round. The others see it at the reveal.');
@@ -324,6 +326,49 @@ describe('Chog Royale board', () => {
     render(royaleState({ ability: 'alpha_leak', nextEvent: 'MarketCrash' }));
 
     expect(text('[data-next-event]')).toBe('🔮 Alpha Leak: next round is Market Crash. Only you can see this.');
+  });
+
+  const insiderInfo: RoomAbility = {
+    id: 'insider_info',
+    name: 'Insider Info',
+    description: 'Use while deciding. Only you see an opponent’s hand for the rest of the round; they learn you looked at the reveal. 2 uses per game, one a round.',
+    target: 'Opponent',
+    maxUses: 2,
+    values: {},
+    usesLeft: 2,
+    holderOnly: true,
+  };
+
+  it('aims Insider Info at an opponent still playing, with the holder badge and uses left', () => {
+    render(royaleState({ players: [{ seat: 1, mon: 115, cards: 3 }, { seat: 2, mon: 85, cards: 3 }] }), [
+      member('Alice', 1),
+      member('Bob', 2, { isYou: true, ability: insiderInfo }),
+      member('Carol', 3, { hasLeft: true }),
+    ]);
+
+    expect(text('[data-ability-panel] [data-holder-badge]')).toBe('♛ Holder');
+    expect(text('[data-uses-left]')).toBe('2/2 left');
+    const buttons = Array.from(page.querySelectorAll<HTMLButtonElement>('[data-use-ability]'));
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual(['Insider Info on Alice']);
+    buttons[0].click();
+    expect(used).toEqual([{ abilityId: 'insider_info', target: 1 }]);
+  });
+
+  it('shows the hand Insider Info looked at only from the server’s view of it', () => {
+    render(
+      royaleState({ ability: 'insider_info', insider: { seat: 1, hand: [{ id: 'c4', card: 'RugPull' }, { id: 'c5', card: 'WhaleSwap' }, { id: 'c6', card: 'Pump' }] } }),
+      defaultMembers({ ability: { ...insiderInfo, usesLeft: 1 } }),
+    );
+
+    expect(text('[data-insider] p')).toBe('🕵️ Insider Info: Alice holds');
+    expect(Array.from(page.querySelectorAll('[data-insider] li')).map((li) => li.textContent?.trim())).toEqual(['🪤 Rug Pull', '🐋 Whale Swap', '📈 Pump']);
+    expect(text('[data-insider] .hint')).toBe('Only you can see this, until the round ends. Not what they chose.');
+    expect(text('[data-ability-used]')).toBe('You used Insider Info on Alice this round. The others see it at the reveal.');
+    expect(page.querySelector('[data-use-ability]')).toBeNull();
+
+    render(royaleState(), defaultMembers({ ability: { ...insiderInfo, usesLeft: 1 } }));
+    expect(page.querySelector('[data-insider]')).toBeNull();
+    expect(text('[data-uses-left]')).toBe('1/2 left');
   });
 
   it('keeps every earlier round in its history', () => {

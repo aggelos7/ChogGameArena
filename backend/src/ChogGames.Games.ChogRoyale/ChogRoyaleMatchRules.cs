@@ -21,7 +21,8 @@ namespace ChogGames.Games.ChogRoyale;
 /// last round. The cards move MON (STORY-075, STORY-076, DEC-086, DEC-087) under a shared market event drawn and shown
 /// before each round's decisions (STORY-077, DEC-088). The match ends after its last round, or when its time cap is up,
 /// ranked by MON, then fewer MON lost to opponents, then more successful cards (STORY-078, ROYALE-009, DEC-089). Each
-/// player may use the ability they locked once, while deciding (STORY-080, DEC-091).
+/// player may use the ability they locked once, or as often as their Tier allows but once a round, while deciding
+/// (STORY-080, STORY-093, DEC-091, DEC-095).
 /// </summary>
 public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
 {
@@ -136,8 +137,9 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
     /// <summary>
     /// What one player sees (ROYALE-048, ROYALE-050, ROYALE-060): the round and its market event (ROYALE-021), every
     /// player still playing with their MON and how many cards they hold, the ledger, and only their own hand, pending
-    /// action and the ability they used this round, with the next round's event if it was Alpha Leak (DEC-091). A player
-    /// who left sees no hand. Null for a state this server can't read.
+    /// action and the ability they used this round, with the next round's event if it was Alpha Leak (DEC-091), or the
+    /// hand of the opponent their Insider Info looks at while that opponent plays on, never their action (STORY-093,
+    /// DEC-095). A player who left sees no hand. Null for a state this server can't read.
     /// </summary>
     public JsonElement? ViewFor(MatchViewContext context)
     {
@@ -159,7 +161,12 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
             viewer?.Action,
             state.Ledger,
             viewer?.Ability?.Id,
-            viewer?.Ability?.Id == RoyaleAbilities.AlphaLeak ? state.NextEvent : null));
+            viewer?.Ability?.Id == RoyaleAbilities.AlphaLeak ? state.NextEvent : null,
+            viewer?.Ability is { Id: RoyaleAbilities.InsiderInfo, Target: { } seat }
+            && playing.Contains(seat)
+            && state.Players.FirstOrDefault(p => p.Seat == seat) is { } looked
+                ? new RoyaleInsiderView(seat, looked.Hand)
+                : null));
     }
 
     /// <summary>What a player sees of the match (DEC-083, DEC-091).</summary>
@@ -173,7 +180,11 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
         RoyaleAction? Action,
         RoyaleRoundLedger[] Ledger,
         string? Ability,
-        RoyaleMarketEvent? NextEvent);
+        RoyaleMarketEvent? NextEvent,
+        RoyaleInsiderView? Insider);
+
+    /// <summary>The opponent the viewer's Insider Info looks at this round, and their hand as it is now (DEC-095).</summary>
+    private sealed record RoyaleInsiderView(int Seat, RoyaleHandCard[] Hand);
 
     /// <summary>Another player as everyone sees them: never their cards, only how many.</summary>
     private sealed record RoyalePlayerView(int Seat, int Mon, int Cards);

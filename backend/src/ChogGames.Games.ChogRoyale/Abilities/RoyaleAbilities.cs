@@ -5,9 +5,9 @@ using ChogGames.Core.Games;
 namespace ChogGames.Games.ChogRoyale.Abilities;
 
 /// <summary>
-/// Chog Royale's abilities (STORY-080, ROYALE-039–044, DEC-091), one of which each player locks for a match and uses once,
-/// while the round's decisions are open and before they lock their action. Using one is private: others learn of it at
-/// the round's reveal, where the ledger shows it.
+/// Chog Royale's abilities (STORY-080, STORY-093, ROYALE-039–044, DEC-091, DEC-095), one of which each player locks for a
+/// match and uses once, or as often as their Tier allows but once a round, while the round's decisions are open and before
+/// they lock their action. Using one is private: others learn of it at the round's reveal, where the ledger shows it.
 /// <list type="bullet">
 /// <item>Diamond Hands+ raises a shield for the round that blocks <c>blocks</c> more hostile cards aimed at its player (1),
 /// besides any Diamond Hands card they play, with no MON of its own.</item>
@@ -17,18 +17,25 @@ namespace ChogGames.Games.ChogRoyale.Abilities;
 /// once. Used while holding a Pump; it is spent whether or not a Pump is played.</item>
 /// <item>Stop Loss: other players' cards take at most <c>mon</c> MON (5) from its player this round, Rug Pulls first in
 /// resolution order, then swaps. It replaces <c>last_second_exit</c>, since actions are revisable until the lock.</item>
+/// <item>Fresh Mint replaces its player's whole hand at once with new cards from the rules version's weighted deck, with
+/// match-unique ids, which only they see; a card they had chosen and not locked is dropped (STORY-093, DEC-095).</item>
+/// <item>Insider Info, on an opponent still playing: its player sees that opponent's hand as it is, never their action,
+/// for the rest of the round; the reveal shows whom they looked at (STORY-093, DEC-095).</item>
 /// </list>
-/// Guests and holders choose from all four with the same values (ROYALE-037, ROYALE-044): Chog Royale isn't in
-/// <c>Abilities:Holder</c>, so the holder strategy offers everyone the whole catalog.
+/// The values here are the Base Tier's. Version 2 (STORY-093, DEC-095) added Fresh Mint and Insider Info: Diamond Hands+
+/// and Stop Loss are standard, the other four holder-only, and rarer Tiers lock stronger values from
+/// <c>Abilities:Holder</c> (DEC-077), which replaced version 1's parity between guests and holders (ROYALE-037).
 /// </summary>
 public static class RoyaleAbilities
 {
-    public const int Version = 1;
+    public const int Version = 2;
 
     public const string DiamondHandsPlus = "diamond_hands_plus";
     public const string AlphaLeak = "alpha_leak";
     public const string DoublePump = "double_pump";
     public const string StopLoss = "stop_loss";
+    public const string FreshMint = "fresh_mint";
+    public const string InsiderInfo = "insider_info";
 
     /// <summary>The round's decision window, before the player locks their action.</summary>
     public const string Deciding = "deciding";
@@ -48,7 +55,7 @@ public static class RoyaleAbilities
 
     public const int MaxStopLoss = 50;
 
-    /// <summary>The catalog, version 1, whose handlers act on <paramref name="game"/>'s match states.</summary>
+    /// <summary>The catalog, version 2, whose handlers act on <paramref name="game"/>'s match states.</summary>
     public static AbilityCatalog Catalog(ChogRoyaleMatchRules game)
     {
         ArgumentNullException.ThrowIfNull(game);
@@ -61,6 +68,8 @@ public static class RoyaleAbilities
                 new Handler(game, AlphaLeak, []),
                 new Handler(game, DoublePump, [new AbilityParameter(Percent, 1, MaxPercent)]),
                 new Handler(game, StopLoss, [new AbilityParameter(Mon, 0, MaxStopLoss)]),
+                new Handler(game, FreshMint, []),
+                new Handler(game, InsiderInfo, []),
             ],
             new Timing(game));
     }
@@ -77,7 +86,7 @@ public static class RoyaleAbilities
         AbilityDefinition.Create(
             AlphaLeak,
             "Alpha Leak",
-            "Use while deciding, before the last round. Only you see the next round's market event, a round early.",
+            "Use while deciding, before the last round. Only you see the next round's market event, a round early. {uses|1 use|# uses} per game, one a round.",
             AbilityTargetKind.None,
             [Deciding]),
         AbilityDefinition.Create(
@@ -94,6 +103,18 @@ public static class RoyaleAbilities
             AbilityTargetKind.None,
             [Deciding],
             new Dictionary<string, decimal> { [Mon] = 5 }),
+        AbilityDefinition.Create(
+            FreshMint,
+            "Fresh Mint",
+            "Use while deciding. Your whole hand is swapped for new cards, which only you see. {uses|1 use|# uses} per game, one a round.",
+            AbilityTargetKind.None,
+            [Deciding]),
+        AbilityDefinition.Create(
+            InsiderInfo,
+            "Insider Info",
+            "Use while deciding. Only you see an opponent's hand for the rest of the round; they learn you looked at the reveal. {uses|1 use|# uses} per game, one a round.",
+            AbilityTargetKind.Opponent,
+            [Deciding]),
     ];
 
     private sealed class Handler(ChogRoyaleMatchRules game, string abilityId, IReadOnlyList<AbilityParameter> parameters) : IAbilityHandler

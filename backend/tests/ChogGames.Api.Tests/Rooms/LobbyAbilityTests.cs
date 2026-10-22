@@ -21,7 +21,8 @@ namespace ChogGames.Api.Tests.Rooms;
 /// catalog version. Chog Life gets a test catalog here, with no holder rules; Chog Race's is taken out, as by the test
 /// host. With trait-based abilities on (STORY-061, DEC-066) a holder's cached traits narrow their lobby pool and the live
 /// ones decide at start. With the shipped holder rules and Chog Life's real catalog (STORY-090, DEC-077) a guest gets the
-/// 2 standard abilities with Base values, a holder all 4 with their Tier's, which the live Tier at start locks.
+/// 2 standard abilities with Base values, a holder all 4 with their Tier's, which the live Tier at start locks; Chog Race
+/// and, since STORY-093 (DEC-095), Chog Royale split their six abilities the same way.
 /// </summary>
 public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -713,34 +714,52 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
     }
 
     [PostgresFact]
-    public async Task A_chog_royale_guest_and_a_legendary_holder_get_the_same_abilities_values_and_start()
+    public async Task A_chog_royale_guest_gets_the_two_standard_abilities_and_a_legendary_holder_all_six_with_legendary_values()
     {
-        // STORY-084, ROYALE-066, DEC-091: with the holder rules on, Chog Royale offers everyone its whole catalog.
+        // STORY-093, DEC-095 (revising STORY-084's parity, DEC-091): the shipped holder rules split Chog Royale as the other games.
         await UseHolderRulesAsync(game: "chog-royale");
         var (code, alice, bob) = await PairAsync("chog-royale", await TierHolderAsync("Bob", "Legendary"));
         using (alice)
         using (bob)
         {
-            string[] catalog = ["diamond_hands_plus: blocks=1 x1", "alpha_leak:  x1", "double_pump: percent=50 x1", "stop_loss: mon=5 x1"];
-            foreach (var player in new[] { alice, bob })
+            Assert.Equal(
+                ["diamond_hands_plus: blocks=1 x1", "stop_loss: mon=5 x1"],
+                Described((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Equal(
+                ["alpha_leak:  x1", "double_pump: percent=50 x1", "fresh_mint:  x1", "insider_info:  x1"],
+                Described((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray(), a => Assert.True(a.GetProperty("holderOnly").GetBoolean()));
+            var holders = (await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray().ToArray();
+            Assert.Equal(
+                [
+                    "diamond_hands_plus: blocks=3 x1", "alpha_leak:  x2", "double_pump: percent=100 x1", "stop_loss: mon=0 x1",
+                    "fresh_mint:  x2", "insider_info:  x2",
+                ],
+                Described(holders));
+            Assert.Equal([false, true, true, false, true, true], holders.Select(a => a.GetProperty("holderOnly").GetBoolean()));
+            Assert.Empty((await RawAsync(bob, code)).GetProperty("unavailableAbilities").EnumerateArray());
+
+            var before = await ViewAsync(alice, code);
+            foreach (var holderOnly in new[] { "alpha_leak", "double_pump", "fresh_mint", "insider_info" })
             {
-                var lobby = await RawAsync(player, code);
-                Assert.Equal(catalog, Described(lobby.GetProperty("abilities").EnumerateArray()));
-                Assert.All(lobby.GetProperty("abilities").EnumerateArray(), a => Assert.False(a.GetProperty("holderOnly").GetBoolean()));
-                Assert.Empty(lobby.GetProperty("unavailableAbilities").EnumerateArray());
+                await ProblemAsync(await ChooseAsync(alice, code, holderOnly), HttpStatusCode.BadRequest, "ability_unavailable");
             }
 
-            await ChosenAsync(alice, code, "double_pump");
-            await ChosenAsync(bob, code, "double_pump");
+            Assert.Equal(before.Version, (await ViewAsync(alice, code)).Version);
+
+            await ChosenAsync(alice, code, "stop_loss");
+            await ChosenAsync(bob, code, "insider_info");
             await ReadiedAsync(alice, code);
             await ReadiedAsync(bob, code);
             using var started = await StartAsync(alice, code);
             Assert.Equal(HttpStatusCode.OK, started.StatusCode);
 
-            // Both lock the same values and start alike: 100 MON and a hand of three.
+            // The abilities differ; the start doesn't: 100 MON and a hand of three each.
             var room = await RawAsync(bob, code);
-            Assert.Equal(Described([MemberAbility(room, "Alice")]), Described([MemberAbility(room, "Bob")]));
-            Assert.Equal(["double_pump: percent=50 x1"], Described([MemberAbility(room, "Bob")]));
+            Assert.Equal(["stop_loss: mon=5 x1"], Described([MemberAbility(room, "Alice")]));
+            Assert.Equal(["insider_info:  x2"], Described([MemberAbility(room, "Bob")]));
+            Assert.EndsWith("2 uses per game, one a round.", MemberAbility(room, "Bob").GetProperty("description").GetString());
+            Assert.True(MemberAbility(room, "Bob").GetProperty("holderOnly").GetBoolean());
             Assert.All(room.GetProperty("state").GetProperty("players").EnumerateArray(), p => Assert.Equal((100, 3), (p.GetProperty("mon").GetInt32(), p.GetProperty("cards").GetInt32())));
         }
     }

@@ -1,5 +1,6 @@
 import { Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { RoomAbility, RoomMember } from '../../rooms/rooms-api';
+import { HolderBadge } from '../holder-badge';
 import {
   CARD_INFO,
   EVENT_INFO,
@@ -30,6 +31,12 @@ export interface RoyaleSubmission {
   lock: boolean;
 }
 
+/** Your ability to use, on an opponent's seat for Insider Info (STORY-093, DEC-095). */
+export interface RoyaleAbilityUse {
+  abilityId: string;
+  target?: number;
+}
+
 /** One player as the board lists them. */
 interface RoyaleSeat {
   seat: number;
@@ -44,7 +51,8 @@ interface RoyaleSeat {
  * The Chog Royale board (STORY-081, ROYALE-045–048, 051): the round and its countdown on the server's clock (STORY-083),
  * the market event, every player with their MON, cards held and whether they have submitted or locked (never what), your
  * three cards, a target picker for targeted cards listing only players you can aim at, HODL, Choose, which is final
- * for the round, and your ability. Your pending action comes from the server's view, so after a reload or reconnect you see
+ * for the round, and your ability, with its uses left and a "Holder" badge for a holder-only one (DEC-078), aimed at an
+ * opponent for Insider Info, whose hand then shows only to you for the round (STORY-093, DEC-095). Your pending action comes from the server's view, so after a reload or reconnect you see
  * what you chose; nothing here changes a balance before the server says so. Between rounds the reveal (STORY-082,
  * ROYALE-049) lists what each player did, in resolution order, as text, playing in briefly unless motion is reduced.
  * Each round opens with its announcement in a dialog over the board: the round, its market event and the countdown to
@@ -57,6 +65,7 @@ interface RoyaleSeat {
   selector: 'app-royale-board',
   templateUrl: './royale-board.html',
   styleUrl: './royale-board.scss',
+  imports: [HolderBadge],
 })
 export class RoyaleBoardView {
   readonly board = input.required<RoyaleBoard>();
@@ -75,7 +84,7 @@ export class RoyaleBoardView {
   readonly finalRevealUntil = input<number | null>(null);
 
   readonly act = output<RoyaleSubmission>();
-  readonly useAbility = output<string>();
+  readonly useAbility = output<RoyaleAbilityUse>();
   /** Skip the last round's reveal and show the results now. */
   readonly seeResults = output<void>();
 
@@ -279,10 +288,35 @@ export class RoyaleBoardView {
     return ability && ability.usesLeft !== 0 ? ability : null;
   });
 
+  /**
+   * Your ability's buttons: one, or for an ability aimed at an opponent, such as Insider Info, one per opponent still
+   * playing (STORY-093, DEC-095).
+   */
+  protected readonly abilityPlays = computed<{ use: RoyaleAbilityUse; label: string }[]>(() => {
+    const ability = this.ability();
+    if (!ability) {
+      return [];
+    }
+    if (ability.target !== 'Opponent') {
+      return [{ use: { abilityId: ability.id }, label: `Use ${ability.name}` }];
+    }
+    return this.targets()
+      .filter((seat) => seat.status !== 'left')
+      .map((seat) => ({ use: { abilityId: ability.id, target: seat.seat }, label: `${ability.name} on ${seat.name}` }));
+  });
+
   protected readonly usedAbility = computed(() => {
     const used = this.board().ability;
     const mine = this.you()?.ability;
-    return used ? (mine?.id === used ? mine.name : used) : null;
+    const insider = this.board().insider;
+    const name = used ? (mine?.id === used ? mine.name : used) : null;
+    return name && insider ? `${name} on ${this.nameOf(insider.seat)}` : name;
+  });
+
+  /** The hand your Insider Info shows you this round, only you (STORY-093, DEC-095). */
+  protected readonly insider = computed(() => {
+    const insider = this.board().insider;
+    return insider ? { name: this.nameOf(insider.seat), cards: insider.hand.map((card) => CARD_INFO[card.card]) } : null;
   });
 
   protected pick(card: string): void {
