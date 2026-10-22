@@ -1,18 +1,52 @@
-import { Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
-import { RoomAbility, RoomMember } from '../../rooms/rooms-api';
-import { HolderBadge } from '../holder-badge';
 import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  Injector,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
+import { RoomAbility, RoomMember } from '../../rooms/rooms-api';
+import { reducedMotion } from '../chog-life/life-board';
+import { HolderBadge } from '../holder-badge';
+import { RoyaleSeat, RoyaleSeatView, SeatReveal, TableCard, TableSeat } from './royale-seat';
+import {
+  CARD_ACCENT,
   CARD_INFO,
   EVENT_INFO,
+  RevealStep,
   RoyaleBoard,
   RoyaleCard,
   RoyaleHandCard,
   RoyaleRound,
   describeEntry,
+  revealDuration,
+  revealSteps,
+  signedMon,
+  stepAt,
 } from './royale-board-model';
 
 /** A round's market event is announced this long before its decisions open (rules version 1 and 2, ROYALE-004). */
 export const ANNOUNCEMENT_MS = 5_000;
+
+/** A round resolves this long before the next one's announcement: its reveal and the transition (rules version 1 and 2). */
+export const REVEAL_AND_TRANSITION_MS = 15_000;
+
+/**
+ * A round is revealed on the table only when it reaches you this soon after it resolved: one that comes later, after a
+ * reconnect, shows its final state at once instead (STORY-095).
+ */
+export const REVEAL_FRESH_MS = 3_000;
+
+/** The table holds a reveal's final state this long before the reveal dialog opens, so the played cards can be read. */
+export const REVEAL_HOLD_MS = 2_500;
 
 /** The last seconds of a decision window, shown as urgent. */
 export const URGENT_SECONDS = 5;
@@ -37,14 +71,10 @@ export interface RoyaleAbilityUse {
   target?: number;
 }
 
-/** One player as the board lists them. */
-interface RoyaleSeat {
-  seat: number;
-  name: string;
-  isYou: boolean;
-  mon: number;
-  cards: number;
-  status: 'locked' | 'submitted' | 'deciding' | 'left' | 'final';
+function tableCard(card: RoyaleCard | null): TableCard {
+  return card
+    ? { id: card, name: CARD_INFO[card].name, icon: CARD_INFO[card].icon, accent: CARD_ACCENT[card] }
+    : { id: 'Hodl', name: 'HODL', icon: '✋', accent: CARD_ACCENT.Hodl };
 }
 
 /**
@@ -60,12 +90,20 @@ interface RoyaleSeat {
  * too, your own line in bold, until the next announcement. The last round is revealed like the others: when the match
  * has just ended, the room page keeps the board up with that reveal and a countdown to the results, which "See results"
  * skips.
+ *
+ * Since STORY-094 the players sit around a table (DEC-097): opponents in an arc across the top, you at the bottom, the
+ * round and market on the felt; seats show avatars, MON, face-down cards and the decision status, never a card's face but
+ * the ones your Insider Info shows you. Your hand is drawn as cards below the table, with your choice and ability in a panel
+ * beside them on wide screens, and a targeted card is aimed by tapping a seat, each of which is a labelled radio. A round watched live is revealed on the table first (STORY-095): in resolution order,
+ * cards flip at their seats, targeted ones fly to their targets, what they did shows where they land and balances count
+ * to the server's; the reveal dialog follows 2.5 s later. A reload, a late snapshot, one of a later round or reduced motion shows
+ * the final state at once.
  */
 @Component({
   selector: 'app-royale-board',
   templateUrl: './royale-board.html',
   styleUrl: './royale-board.scss',
-  imports: [HolderBadge],
+  imports: [HolderBadge, RoyaleSeatView],
 })
 export class RoyaleBoardView {
   readonly board = input.required<RoyaleBoard>();
@@ -89,14 +127,34 @@ export class RoyaleBoardView {
   readonly seeResults = output<void>();
 
   protected readonly cardInfo = CARD_INFO;
+  protected readonly cardAccent = CARD_ACCENT;
   protected readonly eventInfo = EVENT_INFO;
 
-  /** The server's time now, ticking four times a second. */
+  private readonly injector = inject(Injector);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  /** The server's time now, ticking four times a second, and every 50 ms while a reveal plays. */
   private readonly now = signal(Date.now());
+  private frames: ReturnType<typeof setInterval> | undefined;
 
   constructor() {
     const tick = setInterval(() => this.now.set(Date.now()), 250);
-    inject(DestroyRef).onDestroy(() => clearInterval(tick));
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(tick);
+      clearInterval(this.frames);
+    });
+    // A snapshot of another round ends a reveal in play; one that brings the round you were just playing, freshly
+    // resolved, starts its reveal on the table.
+    effect(() => {
+      const board = this.board();
+      untracked(() => this.follow(board));
+    });
+    effect(() => {
+      if (!this.animating() && this.frames !== undefined) {
+        clearInterval(this.frames);
+        this.frames = undefined;
+      }
+    });
     // The announcement and reveal dialogs are modal while they show: the board behind them takes no actions then anyway.
     effect(() => showModal(this.announcementDialog()?.nativeElement, this.announcing()));
     effect(() => showModal(this.revealDialog()?.nativeElement, this.revealing()));
@@ -130,7 +188,7 @@ export class RoyaleBoardView {
   /** A round's reveal is showing: between rounds, or the last one before the results, unless you closed it. */
   protected readonly revealing = computed(() => {
     const round = this.lastRound();
-    return this.phase() === 'reveal' && !!round && this.dismissedReveal() !== round.round;
+    return this.phase() === 'reveal' && !!round && this.dismissedReveal() !== round.round && !this.holding();
   });
 
   /**
@@ -232,6 +290,7 @@ export class RoyaleBoardView {
           seat,
           name: member.displayName,
           isYou: member.isYou,
+          avatar: member.avatar,
           mon: player?.mon ?? 0,
           cards: player?.cards ?? 0,
           status: member.hasLeft || !player
@@ -254,6 +313,12 @@ export class RoyaleBoardView {
   });
 
   protected readonly locked = computed(() => !!this.you()?.hasLocked);
+
+  /** Your cards and your round's panel are on show: you still play and the match goes on. */
+  protected readonly deciding = computed(() => {
+    const you = this.you();
+    return !!you && !you.hasLeft && !this.finished();
+  });
 
   /** The card id you have picked, `hodl`, or nothing yet. */
   protected readonly picked = signal<string | null>(null);
@@ -318,6 +383,170 @@ export class RoyaleBoardView {
     const insider = this.board().insider;
     return insider ? { name: this.nameOf(insider.seat), cards: insider.hand.map((card) => CARD_INFO[card.card]) } : null;
   });
+
+  /** The opponents around the top of the table, starting from the seat after yours, so turn order runs left to right. */
+  protected readonly opponents = computed<TableSeat[]>(() => {
+    const yours = this.yourSeat() ?? 0;
+    const others = this.seats().filter((seat) => !seat.isYou);
+    const ordered = [...others.filter((seat) => seat.seat > yours), ...others.filter((seat) => seat.seat < yours)];
+    const middle = (ordered.length - 1) / 2;
+    return ordered.map((seat, index) => this.toTableSeat(seat, middle > 0 ? Math.abs(index - middle) / middle : 0));
+  });
+
+  /** Your seat, at the bottom of the table. */
+  protected readonly mySeat = computed<TableSeat | null>(() => {
+    const mine = this.seats().find((seat) => seat.isYou);
+    return mine ? this.toTableSeat(mine, 0) : null;
+  });
+
+  /** A targeted card is picked: the opponents' seats take the aim. */
+  protected readonly aiming = computed(() => this.needsTarget());
+
+  /** The picked card's name while it needs a target, for the seats' aim. */
+  protected readonly aimWith = computed(() => {
+    const card = this.pickedCard();
+    return card && this.needsTarget() ? CARD_INFO[card.card].name : null;
+  });
+
+  private toTableSeat(seat: RoyaleSeat, arc: number): TableSeat {
+    const insider = this.board().insider;
+    return {
+      ...seat,
+      arc,
+      peek: insider?.seat === seat.seat && !this.revealRound() ? insider.hand.map((card) => tableCard(card.card)) : null,
+      ...this.revealAt(seat),
+    };
+  }
+
+  /** What a seat shows at this moment of the round's reveal, and its balance then; the server's after it. */
+  private revealAt(seat: RoyaleSeat): { reveal: SeatReveal | null; mon: number } {
+    const steps = this.shownSteps();
+    if (!this.revealRound()) {
+      return { reveal: null, mon: seat.mon };
+    }
+    const elapsed = this.elapsed();
+    const step = steps.find((s) => s.seat === seat.seat) ?? null;
+    const at = step ? stepAt(step, elapsed) : null;
+    const ability = step && at?.shown && step.ability ? step.ability + (step.abilityTarget !== null ? ` on ${this.nameOf(step.abilityTarget)}` : '') : null;
+    return {
+      mon: step && at ? at.mon : seat.mon,
+      reveal: {
+        card: step && at?.shown ? tableCard(step.card) : null,
+        ability,
+        impacts: steps.flatMap((s) => (s.target === seat.seat && s.impact && stepAt(s, elapsed).landed ? [s.impact] : [])),
+        change: step && at?.landed ? signedMon(step.change).replace(' MON', '') : null,
+        gain: !!step && step.change > 0,
+        loss: !!step && step.change < 0,
+      },
+    };
+  }
+
+  /** The previous snapshot's round and last resolved round, to tell a round you watched resolve from one you came back to. */
+  private watched: { round: number; resolved: number } | null = null;
+
+  /** The reveal playing on the table: its round, its steps and when it started on this device's clock. */
+  private readonly animation = signal<{ round: number; steps: RevealStep[]; duration: number; startedAt: number } | null>(null);
+
+  /** Every seat's centre on the table, measured when a reveal starts, for the cards that fly between them. */
+  private readonly seatCenters = signal(new Map<number, { x: number; y: number }>());
+
+  /** The round revealed on the table: the last one resolved, between rounds or after the last. */
+  protected readonly revealRound = computed(() => (this.phase() === 'reveal' ? this.lastRound() : null));
+
+  /** The reveal is still playing on the table. */
+  protected readonly animating = computed(() => this.onTable(0));
+
+  /** The reveal is playing on the table, or holding its final state there a moment; the reveal dialog waits for it. */
+  private readonly holding = computed(() => this.onTable(REVEAL_HOLD_MS));
+
+  private onTable(hold: number): boolean {
+    const animation = this.animation();
+    return !!animation && animation.round === this.revealRound()?.round && this.now() - animation.startedAt < animation.duration + hold;
+  }
+
+  /** How far into the reveal the table is; past its end when nothing plays, so everything shows at once. */
+  private readonly elapsed = computed(() => {
+    const animation = this.animation();
+    return this.animating() && animation ? this.now() - animation.startedAt : Number.POSITIVE_INFINITY;
+  });
+
+  private readonly shownSteps = computed<RevealStep[]>(() => {
+    const round = this.revealRound();
+    const animation = this.animation();
+    return !round ? [] : animation?.round === round.round ? animation.steps : revealSteps(round);
+  });
+
+  /** The cards in the air right now, from their player's seat towards their target's. */
+  protected readonly flying = computed(() => {
+    const elapsed = this.elapsed();
+    const centers = this.seatCenters();
+    return this.shownSteps().flatMap((step) => {
+      const from = centers.get(step.seat);
+      const to = step.target !== null ? centers.get(step.target) : undefined;
+      return step.card && from && to && stepAt(step, elapsed).flying
+        ? [{ seat: step.seat, card: tableCard(step.card), x: from.x, y: from.y, dx: to.x - from.x, dy: to.y - from.y }]
+        : [];
+    });
+  });
+
+  /**
+   * Takes in a new snapshot: one of another round ends a reveal in play rather than queuing behind it, and one that
+   * brings, freshly resolved, the round the previous snapshot was playing starts the table's reveal. A first snapshot,
+   * after a reload, has nothing to replay.
+   */
+  private follow(board: RoyaleBoard): void {
+    const last = board.ledger.length > 0 ? board.ledger[board.ledger.length - 1] : null;
+    const playing = this.animation();
+    if (playing && last?.round === playing.round && board.round === this.watched?.round) {
+      // Another snapshot of the same moment, such as someone leaving: the reveal plays on.
+      return;
+    }
+    this.animation.set(null);
+    const watched = this.watched;
+    this.watched = { round: board.round, resolved: last?.round ?? 0 };
+    if (!last || !watched || last.round <= watched.resolved || watched.round !== last.round || reducedMotion() || !this.fresh()) {
+      return;
+    }
+    const steps = revealSteps(last);
+    const duration = revealDuration(steps);
+    if (duration === 0) {
+      return;
+    }
+    this.now.set(Date.now());
+    this.animation.set({ round: last.round, steps, duration, startedAt: Date.now() });
+    clearInterval(this.frames);
+    this.frames = setInterval(() => this.now.set(Date.now()), 50);
+    afterNextRender(() => this.measureSeats(), { injector: this.injector });
+  }
+
+  /** The round just resolved reached you in time to replay it: the match's end, or within moments of the round's end. */
+  private fresh(): boolean {
+    if (this.finished()) {
+      return true;
+    }
+    const resolvedAt = this.opens() - ANNOUNCEMENT_MS - REVEAL_AND_TRANSITION_MS;
+    return this.serverNow() - resolvedAt <= REVEAL_FRESH_MS;
+  }
+
+  private measureSeats(): void {
+    const table = this.host.nativeElement.querySelector<HTMLElement>('[data-table]');
+    if (!table) {
+      return;
+    }
+    const origin = table.getBoundingClientRect();
+    const centers = new Map<number, { x: number; y: number }>();
+    table.querySelectorAll<HTMLElement>('[data-seat]').forEach((element) => {
+      const box = element.getBoundingClientRect();
+      centers.set(Number(element.dataset['seat']), { x: box.left + box.width / 2 - origin.left, y: box.top + box.height / 2 - origin.top });
+    });
+    this.seatCenters.set(centers);
+  }
+
+  /** A hand card's tilt and drop in the fan, from the middle outwards. */
+  protected fan(index: number, count: number): { tilt: number; drop: number } {
+    const offset = index - (count - 1) / 2;
+    return { tilt: offset * 4, drop: Math.abs(offset) * 0.375 };
+  }
 
   protected pick(card: string): void {
     if (this.picked() !== card) {

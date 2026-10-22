@@ -1,0 +1,222 @@
+// A seat at the Chog Royale table (STORY-094, DEC-097). The outer opponents sit lower (`--arc`), so they form an arc
+// around the felt.
+:host {
+  --ink: #1a1a1a;
+  --gain: #116329;
+  --loss: #8a1c1c;
+  --gold: #f5c542;
+  --alert: #ffb4ab;
+
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 0.125rem;
+  min-width: 0;
+  margin-top: calc(var(--arc, 0) * 1.5rem);
+  padding: 0.375rem 0.25rem;
+  border: 1px solid #b9a6f2;
+  border-radius: 0.75rem;
+  text-align: center;
+  color: #fff;
+  background: rgb(24 12 82 / 0.85);
+  backdrop-filter: blur(4px);
+}
+
+:host(.you) {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold);
+}
+
+:host(.left) {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+
+:host(.aimable) {
+  cursor: pointer;
+  border-color: var(--alert);
+  box-shadow: 0 0 0 2px rgb(255 180 171 / 0.6);
+}
+
+:host(.aimed) {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px var(--gold);
+  background: rgb(120 70 0 / 0.85);
+}
+
+:host(:has(input:focus-visible)) {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+
+.name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mon {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.state {
+  font-size: 0.6875rem;
+  color: #d9d0ff;
+}
+
+// The whole seat takes the tap while aiming; the radio itself is there for the keyboard and screen readers.
+.aim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  cursor: pointer;
+
+  input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+:host(.left) .aim {
+  cursor: not-allowed;
+}
+
+.tag {
+  margin-left: 0.25rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  background: rgb(185 166 242 / 0.3);
+}
+
+// Small cards on the seats: backs for cards held, faces only for what the server shows you.
+.hand-minis {
+  display: flex;
+  justify-content: center;
+
+  .mini-card + .mini-card {
+    margin-left: -0.375rem;
+  }
+}
+
+.mini-card {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1.375rem;
+  border-radius: 0.1875rem;
+  font-size: 0.6875rem;
+  line-height: 1;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+
+  &.back {
+    border: 1px solid #f5c542;
+    background:
+      radial-gradient(circle at 50% 50%, #f5c542 0 0.125rem, transparent 0.15rem),
+      repeating-linear-gradient(45deg, #4b1fb0 0 0.1875rem, #6a3fd6 0.1875rem 0.375rem);
+  }
+
+  &.face {
+    color: var(--ink);
+    border: 1px solid #fff;
+    border-top: 0.1875rem solid var(--accent, #5c5470);
+    background: #fffdf7;
+  }
+}
+
+.peek .mini-card {
+  width: 1.25rem;
+  height: 1.75rem;
+  font-size: 0.875rem;
+  box-shadow: 0 0 0 1px var(--gold);
+}
+
+// What a seat played, during the reveal, and what landed on it.
+.played {
+  display: grid;
+  justify-items: center;
+  gap: 0.125rem;
+
+  .mini-card {
+    width: 3.25rem;
+    height: auto;
+    min-height: 2.5rem;
+    padding: 0.125rem;
+    font-size: 1rem;
+  }
+
+  .mini-name {
+    font-size: 0.5625rem;
+    overflow-wrap: normal;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .flip {
+    animation: flip-up 0.35s ease-out both;
+  }
+}
+
+.chip {
+  max-width: 100%;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  animation: pop-in 0.25s ease-out both;
+
+  &.impact {
+    color: #fff;
+    background: #8a1c1c;
+  }
+
+  &.ability-chip {
+    color: var(--ink);
+    background: var(--gold);
+  }
+
+  &.change {
+    font-size: 0.75rem;
+    white-space: nowrap;
+    color: var(--ink);
+    background: #fff;
+
+    &.gain {
+      color: var(--gain);
+    }
+
+    &.loss {
+      color: var(--loss);
+    }
+  }
+}
+
+@keyframes flip-up {
+  from {
+    transform: rotateY(90deg);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .played .flip,
+  .chip {
+    animation: none;
+  }
+}

@@ -1312,7 +1312,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-094 — Royale table: seats and visual cards
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E10
 - **Implementation:** A visual Chog Royale board at the product owner's request: the players sit around a table and play cards that look like cards. Web only, from the room view the server already sends (`players`, `hand`, members' avatars and chosen/locked status, ROYALE-045–048); no API, rules or dependency change. **Table:** an oval felt with a seat per player for 2 to 6, you always at the bottom; each seat shows its avatar (STORY-085), name, MON, its cards face down (from `cards`, never their faces) and "Deciding…", "Chosen" or "Locked in"; a player who left is greyed out. The round, countdown and market event sit in the middle of the table. **Your hand:** your cards drawn as cards (frame, icon, name, effect text from `CARD_INFO`), fanned below the table, plus HODL; tapping one picks it, a targeted card (Rug Pull, Whale Swap) then asks for a target by tapping an opponent's seat, and Choose sends it locked as today (DEC-092). Your ability, Alpha Leak's next event and Insider Info's peeked hand (DEC-096) stay on the table view. **Phones:** fits a 375px screen with six players (opponents in an arc across the top, your hand below), no horizontal scroll. **Accessibility:** every pick stays a real button or radio with labels, so the board stays keyboard and screen-reader usable; dialogs, history and results stay as they are. Whether the table replaces the current board or is a toggle, the card art (CSS and icons, or illustrations) and the table's look are settled before coding.
@@ -1324,7 +1324,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-095 — Royale table: animated reveal
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E10
 - **Implementation:** The round's reveal played out on STORY-094's table, from the resolved round's ledger entry (card, target, outcome, amount, defense, lost, market, ability and `abilityTarget`, DEC-085–091, DEC-096). In resolution order, within the 10 s reveal (DEC-092's pacing, under 3 s for six players): each played card flips face up at its seat; a Rug Pull or Whale Swap travels to its target, and a block, Stop Loss or a seat that left is shown where it lands; gains and the market show as MON changes counting to the server's balance at each seat; abilities show by name, Insider Info with its target. Nothing changes a balance before the server's snapshot; the animation only replays what the ledger says. Under reduced motion everything appears at once. The text lines of the reveal stay, as the accessible version, and a reconnect or reload mid-reveal shows the final state without replaying. How much motion (flips only, or travelling cards and counting numbers too) is settled before coding.

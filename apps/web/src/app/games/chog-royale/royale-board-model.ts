@@ -308,3 +308,110 @@ function outcomeText(entry: RoyaleLedgerEntry): string {
 function joinParts(parts: string[]): string {
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
 }
+
+/** Each player's part of the table's reveal starts this long after the previous one's (STORY-095): six settle in 2.8 s. */
+export const REVEAL_STEP_MS = 420;
+
+/** A card takes this long to fly to its target, and a balance as long to count to the server's (STORY-095). */
+export const REVEAL_MOVE_MS = 350;
+
+/** A card's colour on the table, so cards tell apart at a glance; the name and icon say the same. */
+export const CARD_ACCENT: Record<RoyaleCard | 'Hodl', string> = {
+  Pump: '#13703a',
+  RugPull: '#b3261e',
+  DiamondHands: '#0a6c8f',
+  WhaleSwap: '#1d4fbf',
+  Airdrop: '#b4400b',
+  Chaos: '#7b2fbe',
+  Hodl: '#5c5470',
+};
+
+/** What a played card did where it landed, shown on the target's seat (DEC-086, DEC-087, DEC-091). */
+const IMPACT: Record<RoyaleOutcome, string> = {
+  Applied: 'Hit',
+  Blocked: '🛡️ Blocked',
+  TargetLeft: 'Left',
+  Taken: 'Too late',
+  Empty: 'Empty',
+  Stopped: 'Stop Loss',
+};
+
+/** One player's part of a round's reveal on the table, in the order the round resolved (STORY-095, DEC-085). */
+export interface RevealStep {
+  seat: number;
+  /** When it starts, in milliseconds from the reveal's start. */
+  at: number;
+  /** The card played, or null for HODL. */
+  card: RoyaleCard | null;
+  /** The seat a targeted card flies to, and what it did there. */
+  target: number | null;
+  impact: string | null;
+  /** The ability used, by name, and the seat it was used on. */
+  ability: string | null;
+  abilityTarget: number | null;
+  /** The player's balance before the round and the server's after it. */
+  from: number;
+  to: number;
+  change: number;
+  /** False for a line this client doesn't know how to draw: it shows at once, as its text line does. */
+  animated: boolean;
+}
+
+/**
+ * A round's reveal on the table (STORY-095): one step per ledger entry in resolution order, `REVEAL_STEP_MS` apart. It
+ * replays only what the ledger says; an entry with an unknown card, outcome or ability isn't animated.
+ */
+export function revealSteps(round: RoyaleRound): RevealStep[] {
+  const order = (seat: number) => {
+    const index = round.priority.indexOf(seat);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  let next = 0;
+  return [...round.entries]
+    .sort((a, b) => order(a.seat) - order(b.seat))
+    .map((entry) => {
+      const animated =
+        (entry.card === null || entry.card in CARD_INFO) &&
+        (entry.outcome === null || entry.outcome in IMPACT) &&
+        (entry.ability === null || entry.ability in ABILITY_NAMES);
+      const at = animated ? next : 0;
+      if (animated) {
+        next += REVEAL_STEP_MS;
+      }
+      const targeted = animated && entry.card !== null && CARD_INFO[entry.card].targeted && entry.target !== null;
+      return {
+        seat: entry.seat,
+        at,
+        card: entry.card,
+        target: targeted ? entry.target : null,
+        impact: targeted && entry.outcome ? IMPACT[entry.outcome] : null,
+        ability: entry.ability ? (ABILITY_NAMES[entry.ability] ?? entry.ability) : null,
+        abilityTarget: entry.abilityTarget,
+        from: entry.balance - entry.change,
+        to: entry.balance,
+        change: entry.change,
+        animated,
+      };
+    });
+}
+
+/** How long a reveal takes from its first step to every balance settled; 0 with nothing to animate. */
+export function revealDuration(steps: RevealStep[]): number {
+  const last = Math.max(-1, ...steps.filter((step) => step.animated).map((step) => step.at));
+  return last < 0 ? 0 : last + 2 * REVEAL_MOVE_MS;
+}
+
+/**
+ * A step `elapsed` milliseconds into the reveal: whether its card is face up yet, whether the card is still in the air
+ * (`flying`) or has landed, and the balance shown, counting from the old to the server's once the card has landed.
+ */
+export function stepAt(step: RevealStep, elapsed: number): { shown: boolean; flying: boolean; landed: boolean; mon: number } {
+  const t = step.animated ? elapsed - step.at : Number.POSITIVE_INFINITY;
+  const counted = Math.min(1, Math.max(0, (t - REVEAL_MOVE_MS) / REVEAL_MOVE_MS));
+  return {
+    shown: t >= 0,
+    flying: step.target !== null && t >= 0 && t < REVEAL_MOVE_MS,
+    landed: t >= REVEAL_MOVE_MS,
+    mon: Math.round(step.from + (step.to - step.from) * counted),
+  };
+}

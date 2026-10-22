@@ -1,5 +1,16 @@
 import { royaleState } from '../../testing';
-import { RoyaleLedgerEntry, describeEntry, signedMon, toRoyaleBoard } from './royale-board-model';
+import {
+  REVEAL_MOVE_MS,
+  REVEAL_STEP_MS,
+  RoyaleLedgerEntry,
+  RoyaleRound,
+  describeEntry,
+  revealDuration,
+  revealSteps,
+  signedMon,
+  stepAt,
+  toRoyaleBoard,
+} from './royale-board-model';
 
 describe('Chog Royale board model', () => {
   const names: Record<number, string> = { 1: 'Alice', 2: 'You', 3: 'Carol' };
@@ -78,5 +89,66 @@ describe('Chog Royale board model', () => {
 
   it('signs MON changes', () => {
     expect([signedMon(5), signedMon(-5), signedMon(0)]).toEqual(['+5 MON', '−5 MON', '±0 MON']);
+  });
+  describe('table reveal (STORY-095)', () => {
+    const round = (entries: RoyaleLedgerEntry[], priority: number[]): RoyaleRound => ({ round: 1, event: 'CalmMarket', chaos: null, priority, entries });
+
+    it('steps through the ledger in resolution order, flying targeted cards to their targets', () => {
+      const steps = revealSteps(
+        round(
+          [
+            entry({ seat: 1, card: 'Pump', outcome: 'Applied', amount: 20, change: 20, balance: 120 }),
+            entry({ seat: 2, card: 'RugPull', target: 3, outcome: 'Blocked', change: 0, balance: 100 }),
+            entry({ seat: 3, card: 'DiamondHands', outcome: 'Applied', defense: 'Blocked', amount: 5, change: 5, balance: 105, ability: 'stop_loss' }),
+          ],
+          [3, 2, 1],
+        ),
+      );
+
+      expect(steps.map((step) => [step.seat, step.at, step.target, step.impact, step.from, step.to])).toEqual([
+        [3, 0, null, null, 100, 105],
+        [2, REVEAL_STEP_MS, 3, '🛡️ Blocked', 100, 100],
+        [1, 2 * REVEAL_STEP_MS, null, null, 100, 120],
+      ]);
+      expect(steps[0].ability).toBe('Stop Loss');
+    });
+
+    it('counts a balance to the server’s once the card has landed', () => {
+      const [step] = revealSteps(round([entry({ seat: 1, card: 'RugPull', target: 2, outcome: 'Applied', amount: 15, change: 15, balance: 115 })], [1]));
+
+      expect(stepAt(step, -1)).toEqual({ shown: false, flying: false, landed: false, mon: 100 });
+      expect(stepAt(step, 0)).toEqual({ shown: true, flying: true, landed: false, mon: 100 });
+      expect(stepAt(step, REVEAL_MOVE_MS + REVEAL_MOVE_MS / 2).mon).toBe(108);
+      expect(stepAt(step, Number.POSITIVE_INFINITY)).toEqual({ shown: true, flying: false, landed: true, mon: 115 });
+    });
+
+    it('plays six players in under 3 s, within the reveal', () => {
+      const six = [1, 2, 3, 4, 5, 6].map((seat) => entry({ seat }));
+      expect(revealDuration(revealSteps(round(six, [1, 2, 3, 4, 5, 6])))).toBeLessThan(3_000);
+      expect(revealDuration([])).toBe(0);
+    });
+
+    it('doesn’t animate an unknown card, outcome or ability: it shows at once', () => {
+      const steps = revealSteps(
+        round(
+          [
+            entry({ seat: 1, ability: 'time_travel' }),
+            entry({ seat: 2, card: 'Joker' as RoyaleLedgerEntry['card'] }),
+            entry({ seat: 3, card: 'Pump', outcome: 'Vanished' as RoyaleLedgerEntry['outcome'] }),
+            entry({ seat: 4, card: 'Pump', outcome: 'Applied' }),
+          ],
+          [1, 2, 3, 4],
+        ),
+      );
+
+      expect(steps.map((step) => [step.animated, step.at])).toEqual([
+        [false, 0],
+        [false, 0],
+        [false, 0],
+        [true, 0],
+      ]);
+      expect(stepAt(steps[0], 0)).toEqual({ shown: true, flying: false, landed: true, mon: 100 });
+      expect(revealDuration(steps)).toBe(2 * REVEAL_MOVE_MS);
+    });
   });
 });

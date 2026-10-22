@@ -45,7 +45,10 @@
           You left this game. <a routerLink="/">Find another game</a>
         </p>
       } @else if (shownStatus() === 'Active') {
-        <p class="started" [class.visually-hidden]="boardShown()" role="status" data-started>The game has started.</p>
+        <!-- While a board shows, it says the game is on; the line stays only without one. -->
+        @if (!boardShown()) {
+          <p class="started" role="status" data-started>The game has started.</p>
+        }
       } @else if (shownStatus() === 'Completed') {
         <p class="started" role="status" data-result>
           @if (you()?.rank === 1) {
