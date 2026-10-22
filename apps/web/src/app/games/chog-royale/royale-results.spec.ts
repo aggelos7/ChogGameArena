@@ -33,8 +33,24 @@ describe('Chog Royale result model', () => {
     expect(toRoyaleResult(result(130, 15, 3))).toEqual({ mon: 130, change: 30, lost: 15, successfulCards: 3 });
   });
 
+  it('reads a result with its Degen Score (STORY-096), and one stored before without it', () => {
+    const scored = { ...result(130, 15, 3), degenScore: 40, degenScoreVersion: 1 };
+    expect(toRoyaleResult(scored)).toEqual(scored);
+    expect(toRoyaleResult(result(130))?.degenScore).toBeUndefined();
+  });
+
   it('refuses anything else', () => {
-    for (const bad of [null, 'nope', { mon: 100 }, { ...result(100), mon: -1 }, { ...result(100), lost: '2' }, { ...result(100), successfulCards: 1.5 }]) {
+    for (const bad of [
+      null,
+      'nope',
+      { mon: 100 },
+      { ...result(100), mon: -1 },
+      { ...result(100), lost: '2' },
+      { ...result(100), successfulCards: 1.5 },
+      { ...result(100), degenScore: '10', degenScoreVersion: 1 },
+      { ...result(100), degenScore: -10, degenScoreVersion: 1 },
+      { ...result(100), degenScore: 10 },
+    ]) {
       expect(toRoyaleResult(bad)).toBeNull();
     }
   });
@@ -103,5 +119,23 @@ describe('Chog Royale results', () => {
       'You played Chaos and shook the market (+10 MON) and got 5 MON from the market: +15 MON, now 100 MON.',
       'Alice played Pump (+30 MON) and got 5 MON from the market: +35 MON, now 150 MON.',
     ]);
+  });
+
+  it('shows each player’s Degen Score first among their statistics, with a note that it doesn’t rank (STORY-096)', () => {
+    render([
+      member('Alice', 1, 1, { ...result(140, 0, 2), degenScore: 50, degenScoreVersion: 1 }),
+      member('Bob', 2, 2, { ...result(60, 40, 0), degenScore: 0, degenScoreVersion: 1 }, { isYou: true }),
+    ]);
+
+    expect(lines('[data-stat="degen-score"]')).toEqual(['50/100', '0/100']);
+    expect(page.querySelector('.stats div')?.classList).toContain('degen');
+    expect(page.querySelector('.hint')?.textContent).toContain('The Degen Score counts the attacks and Chaos each player played: it doesn’t count towards the ranking.');
+  });
+
+  it('shows a match from before the Degen Score without one', () => {
+    render([member('Alice', 1, 1, result(140, 0, 2)), member('Bob', 2, 2, result(60, 40, 0))]);
+
+    expect(page.querySelector('[data-stat="degen-score"]')).toBeNull();
+    expect(page.querySelector('.hint')?.textContent).not.toContain('Degen Score');
   });
 });

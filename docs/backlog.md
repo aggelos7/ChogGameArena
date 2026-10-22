@@ -1333,3 +1333,15 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: an unknown card, outcome or ability in the ledger shows the text line without animation, reduced motion shows the result at once, and the next round's announcement or a new snapshot replaces the animation instead of queuing behind it.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; no server change, no new dependency, no sound effects.
+
+#### STORY-096 — Chog Royale Degen Score
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E10
+- **Implementation:** A Degen Score for Chog Royale at the product owner's request, like Chog Life's and Chog Race's (DEC-046, DEC-062), revising DEC-089's "no Degen Score" (DEC-099). **Formula (version 1):** from each player's own ledger entries, 20 points per Rug Pull or Whale Swap that landed (outcome `Applied`), 10 per one that didn't (`Blocked`, `Stopped`, `Taken`, `Empty` or `TargetLeft`), and 10 per Chaos played, whatever its outcome; Pump, Diamond Hands, Airdrop and HODL earn nothing; at most 100. Display only: the ranking stays as DEC-089 set it. Each result gains `degenScore` and `degenScoreVersion` (1), so a 100 unlocks Full Degen through the existing achievement path (DEC-063); results stored before have neither and show as before. The Chog Royale results show a "Degen Score n/100" tile first among each player's statistics, and the note says what it counts and that it doesn't count towards the ranking. No migration.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a completed Chog Royale match stores each player's Degen Score by the formula, shows it in the results, and a score of 100 unlocks Full Degen.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: the score comes only from the server's ledger, players who left get no result and no score, and a result stored before this story still shows, without a score.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; the ranking, XP and Ladder don't change; no migration.

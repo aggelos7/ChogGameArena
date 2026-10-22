@@ -96,7 +96,7 @@ public class ChogRoyaleMatchRulesTests
 
         Assert.Equal(RoomStatus.Completed, table.Match.Status);
         Assert.All(table.Match.Members, m => Assert.Equal(1, m.Rank));
-        Assert.All(table.Match.Members, m => Assert.Equal("""{"mon":100,"change":0,"lost":0,"successfulCards":0}""", m.Result));
+        Assert.All(table.Match.Members, m => Assert.Equal("""{"mon":100,"change":0,"lost":0,"successfulCards":0,"degenScore":0,"degenScoreVersion":1}""", m.Result));
         var state = table.Stored;
         Assert.Equal((5, 5), (state.Round, state.Ledger.Length));
         Assert.All(state.Ledger.SelectMany(r => r.Entries), e => Assert.Equal((true, (RoyaleCard?)null, 0, 100), (e.ByDefault, e.Card, e.Change, e.Balance)));

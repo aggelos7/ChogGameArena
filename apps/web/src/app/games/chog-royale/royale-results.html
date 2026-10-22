@@ -18,6 +18,12 @@
           <span class="portfolio" data-mon>{{ result.mon }} MON</span>
           <p class="summary" data-summary>{{ signedMon(result.change) }} since the start</p>
           <dl class="stats">
+            @if (result.degenScore !== undefined) {
+              <div class="degen">
+                <dt>Degen Score</dt>
+                <dd data-stat="degen-score">{{ result.degenScore }}<span class="out-of">/100</span></dd>
+              </div>
+            }
             <div>
               <dt>Lost to attacks</dt>
               <dd data-stat="lost">{{ result.lost }} MON</dd>
@@ -42,6 +48,9 @@
   <p class="hint">
     Ranked by MON, then by fewer MON lost to other players’ cards, then by more successful cards. Players equal on all
     three share a place.
+    @if (scored()) {
+      The Degen Score counts the attacks and Chaos each player played: it doesn’t count towards the ranking.
+    }
   </p>
 
   @if (rounds().length > 0) {

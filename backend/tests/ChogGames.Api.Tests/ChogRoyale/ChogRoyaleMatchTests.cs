@@ -282,11 +282,20 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
     private static string[] HandIds(JsonElement room) =>
         [.. State(room).GetProperty("hand").EnumerateArray().Select(c => c.GetProperty("id").GetString()!)];
 
-    /// <summary>A member's result: MON, change, MON lost to opponents and successful cards (DEC-089).</summary>
-    private static (int Mon, int Change, int Lost, int SuccessfulCards) Result(JsonElement member)
+    /// <summary>
+    /// A member's result: MON, change, MON lost to opponents and successful cards (DEC-089), and the Degen Score with its
+    /// formula version (DEC-099).
+    /// </summary>
+    private static (int Mon, int Change, int Lost, int SuccessfulCards, int DegenScore, int DegenScoreVersion) Result(JsonElement member)
     {
         var result = member.GetProperty("result");
-        return (result.GetProperty("mon").GetInt32(), result.GetProperty("change").GetInt32(), result.GetProperty("lost").GetInt32(), result.GetProperty("successfulCards").GetInt32());
+        return (
+            result.GetProperty("mon").GetInt32(),
+            result.GetProperty("change").GetInt32(),
+            result.GetProperty("lost").GetInt32(),
+            result.GetProperty("successfulCards").GetInt32(),
+            result.GetProperty("degenScore").GetInt32(),
+            result.GetProperty("degenScoreVersion").GetInt32());
     }
 
     /// <summary>The first round opens 5 s after the start.</summary>
@@ -514,8 +523,8 @@ public sealed class ChogRoyaleMatchTests(MigratedPostgresDatabase database) : IC
         Assert.Equal("Completed", final.GetProperty("status").GetString());
         var members = final.GetProperty("members").EnumerateArray().ToDictionary(m => m.GetProperty("displayName").GetString()!);
         Assert.Equal((1, 2), (members["Alice"].GetProperty("rank").GetInt32(), members["Bob"].GetProperty("rank").GetInt32()));
-        Assert.Equal((200, 100, 0, 5), Result(members["Alice"]));
-        Assert.Equal((100, 0, 0, 0), Result(members["Bob"]));
+        Assert.Equal((200, 100, 0, 5, 0, 1), Result(members["Alice"]));
+        Assert.Equal((100, 0, 0, 0, 0, 1), Result(members["Bob"]));
 
         var profiles = new Dictionary<string, JsonElement>();
         foreach (var player in new[] { alice, bob })
