@@ -21,7 +21,7 @@ public class ChogRaceRegistrationTests
 
         Assert.Same(RaceRulesV1.Rules, Assert.Single(factory.Services.GetServices<RaceRules>()));
         Assert.Equal(
-            ["chog-life", "chog-race"],
+            ["chog-life", "chog-race", "chog-royale"],
             factory.Services.GetServices<IMatchRules>().Select(rules => rules.GameType).Order());
     }
 

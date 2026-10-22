@@ -1,0 +1,51 @@
+// The round-by-round history under the standings, in the same clear panel style.
+.history {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid #b9a6f2;
+  border-radius: 0.75rem;
+  backdrop-filter: blur(3px);
+
+  h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  h4 {
+    margin: 0.75rem 0 0.25rem;
+    font-size: 0.9375rem;
+  }
+
+  ol {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+}
+
+// Dark glass statistics, like the board's panels, and the "You" tag with dark ink.
+.stats div {
+  border: 1px solid rgb(185 166 242 / 0.5);
+  color: #fff;
+  background: rgb(24 12 82 / 0.6);
+}
+
+.stats dt {
+  color: #d9d0ff;
+}
+
+.tag {
+  color: var(--ink);
+  text-shadow: none;
+}
+
+// The winner's MON in a green light enough to read over the night picture.
+.winner .portfolio {
+  color: #8ee6a8;
+}
+
+// Your own line in each round.
+.yours {
+  font-weight: 700;
+}

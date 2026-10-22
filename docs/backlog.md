@@ -1103,7 +1103,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-070 — Simultaneous rounds in the shared engine
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Add a round mode to the shared match engine next to turns, chosen by a game's rules: every player still playing may act in the same round until its deadline; a player's submission is private, can be revised, and can be locked; the round resolves once, at the deadline or as soon as every player has locked, with the rules' default for anyone who didn't submit. Submissions must not make other players' commands stale; the room shows only who has submitted. Timers, missed rounds and the time cap run on the server whether clients are connected or not (ROYALE-004–008, 026, 031, 052, 061). Chog Life and Chog Race keep their turns unchanged.
@@ -1116,7 +1116,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-071 — Royale configuration, match state and rounds
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Add the Chog Royale game module with versioned rules checked at API startup: 2–6 players, five rounds, round phases (event announcement, decisions, reveal) with their durations, 100 fictional MON each, integer balances that never go below zero, and the match's time cap (ROYALE-001–004, 010–012, 053–056, 059). A match records its rules version. Every action is HODL for now, so a match plays its five rounds to the end. Catalogue status comes from `CHOG_ROYALE_STATUS` (default `ComingSoon`). The lobby, Chog choice and ability choice are the suite's own.
@@ -1129,7 +1129,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-072 — Hidden actions, HODL and timeouts
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Add the round's actions: play a card from your hand (with a target for targeted cards), or HODL, revisable until you lock or the deadline passes; a player without an action at the deadline HODLs (ROYALE-005–008, 016–018, 048, 057, 060–061). HODL plays no card, uses no ability and keeps the hand. Each player's view shows their own pending action; others see only who has submitted until the reveal.
@@ -1142,7 +1142,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-073 — Royale deck and hands
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** A versioned, weighted deck in the rules; each player is dealt three cards with match-unique card ids from server randomness, a played card is replaced after the round except after round five, and HODL keeps the hand (ROYALE-015–020, 062).
@@ -1155,7 +1155,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-074 — Round resolution and ledger
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Resolve a locked round in the documented phase order (snapshot, Chaos, defenses, gains, Rugs, swaps, market effects, clamp), with seat priority rotated each round, against a snapshot taken before any effect (ROYALE-026–032). Each round adds a ledger entry per player (card, target, defense, market effect, change, resulting balance) to the match state and the reveal. Card effects are placeholders until STORY-075.
@@ -1168,7 +1168,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-075 — Pump, Rug Pull and Diamond Hands
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Pump gains 20 MON; Rug Pull steals up to 15 MON from a target, never more than they hold; Diamond Hands blocks the first hostile effect aimed at its player in resolution order and gains 5 MON (ROYALE-017, 025, 029). Values live in the rules version.
@@ -1181,7 +1181,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-076 — Whale Swap, Airdrop and Chaos
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Whale Swap exchanges 20% of balance with a target, at most 20 MON each way, from the pre-round snapshot, with at most one successful swap per player per round; Airdrop gains 5–25 MON from server randomness, recorded in the ledger; Chaos adds one modifier from a bounded pool, at most one per round however many are played (ROYALE-024–025, 030, 062). The Whale Swap edge cases are settled as a decision before coding.
@@ -1194,7 +1194,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-077 — Market events
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Draw one shared, weighted market event per round from server randomness and show it before decisions: Meme Hype (Pump +50%), Market Crash (Pump halved), Whale Incoming (+5 to a successful Rug, within the victim's balance), Community Airdrop (+5 to everyone after cards) and Calm Market (ROYALE-021–025). Amounts round down to whole MON.
@@ -1207,7 +1207,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-078 — Royale finish, rankings and stats
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** After round five, rank by MON, then fewer losses taken, then more successful cards, then a shared place (ROYALE-009). Results carry each player's MON, change and tie-break values; profiles, XP and the Ladder count the match as decided before coding.
@@ -1220,7 +1220,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-079 — Royale simulations and balancing
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Seeded tests that play many full two- and six-player matches with legal random actions, checking no balance goes negative and no round stalls, and reporting balance spreads, card win rates and match length (ROYALE-063, 065). Proposed tuning is a decision and a new rules version, never a silent change, like `docs/games/chog-life-balancing.md`.
@@ -1233,7 +1233,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-080 — Royale abilities
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** A Chog Royale ability catalog for the shared ability pool, once per match each, with timing windows (ROYALE-039–044): `diamond_hands_plus`, `alpha_leak` (next round's event shown only to its player), `double_pump`, and `last_second_exit` or its replacement, since actions are already revisable until the deadline. Guests and holders get the same choices; NFTs and traits give no advantage (ROYALE-037, 066).
@@ -1249,7 +1249,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-081 — Royale game screen
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** The Chog Royale board in the room page, live through the room hub: market event, your three cards, opponents with balances and submitted marks, round counter and countdown; choosing a card, a target (only valid ones), HODL, lock and an ability (ROYALE-045–048, 051). Fits a 375px phone without sideways scrolling; keyboard usable; server errors shown without optimistic balance changes.
@@ -1262,7 +1262,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-082 — Reveal, round history and results
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Each round's reveal shows who played what at whom, blocks and swaps, the market effect and each player's MON change, within its time budget and shortened under reduced motion; the results show standings with ties and a readable round-by-round history (ROYALE-049, 051).
@@ -1275,7 +1275,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-083 — Royale reconnect and AFK
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** A reconnecting player gets the current round, phase, remaining server deadline, their own pending action and the public state, never others' hands or actions (ROYALE-050, 052). AFK players HODL each round under the missed-round rule decided in STORY-070.
@@ -1288,7 +1288,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-084 — Royale cross-game regression and release
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P1
 - **Epic:** E10
 - **Implementation:** Like STORY-057: a Chog Royale match played beside Chog Life and Chog Race at once with each room isolated, cross-game commands refused, and guest and holder parity (ROYALE-064, 066); `release:verify` plays a two-player Chog Royale match; the release checklist gains a Chog Royale section; matches are timed against the five-minute target (ROYALE-003, 065). `CHOG_ROYALE_STATUS` is `Available` on staging and in `deploy:verify`. No new production service.
@@ -1297,3 +1297,51 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: another game's commands, match ids and rooms are refused, and turning Chog Royale off leaves the other games playable.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story.
+
+#### STORY-093 — Chog Royale holder abilities: Fresh Mint and Insider Info
+
+- **Status:** Done
+- **Priority:** P1
+- **Epic:** E10
+- **Implementation:** Holder advantage in Chog Royale as in the other games (DEC-077, DEC-095, revising DEC-091's parity and ROYALE-037/066): 2 standard abilities (Diamond Hands+, Stop Loss) and 4 holder-only ones (Alpha Leak, Double Pump and two new), catalog version 2, with Tier values for all six in `Abilities:Holder` (Base for guests, standard Chogs and Common holders). **Fresh Mint:** used while deciding, before locking; the player's whole hand is replaced with new cards drawn from the rules version's weighted deck with match-unique ids, at once and only in their own view. **Insider Info:** used while deciding on an opponent still playing; the player sees that opponent's hand (never their pending action) for the rest of the round, only in their own view; others learn of the use at the reveal, as with every Royale ability (DEC-091). Both show on the board like the other abilities, with the lobby's holder grouping and badge (DEC-078). STORY-084's guest/holder parity tests become holder-advantage tests.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a holder can lock and use any of the six abilities with their Tier's values, Fresh Mint deals a new hand and Insider Info shows the chosen opponent's hand to that holder only, and a guest is offered the two standard ones with Base values.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: non-holders can't choose holder-only abilities, and use outside the decision window, after locking, beyond the Tier's uses, or Insider Info on the player themselves or a player who left is refused with a stable code; no other player's view shows the minted hand or the revealed hand.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; Tier values are settled before coding.
+
+#### STORY-094 — Royale table: seats and visual cards
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E10
+- **Implementation:** A visual Chog Royale board at the product owner's request: the players sit around a table and play cards that look like cards. Web only, from the room view the server already sends (`players`, `hand`, members' avatars and chosen/locked status, ROYALE-045–048); no API, rules or dependency change. **Table:** an oval felt with a seat per player for 2 to 6, you always at the bottom; each seat shows its avatar (STORY-085), name, MON, its cards face down (from `cards`, never their faces) and "Deciding…", "Chosen" or "Locked in"; a player who left is greyed out. The round, countdown and market event sit in the middle of the table. **Your hand:** your cards drawn as cards (frame, icon, name, effect text from `CARD_INFO`), fanned below the table, plus HODL; tapping one picks it, a targeted card (Rug Pull, Whale Swap) then asks for a target by tapping an opponent's seat, and Choose sends it locked as today (DEC-092). Your ability, Alpha Leak's next event and Insider Info's peeked hand (DEC-096) stay on the table view. **Phones:** fits a 375px screen with six players (opponents in an arc across the top, your hand below), no horizontal scroll. **Accessibility:** every pick stays a real button or radio with labels, so the board stays keyboard and screen-reader usable; dialogs, history and results stay as they are. Whether the table replaces the current board or is a toggle, the card art (CSS and icons, or illustrations) and the table's look are settled before coding.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** two to six players see themselves at the bottom of the table and the others around it with avatar, MON, face-down cards and their decision status, and can pick a card, aim it by tapping a seat and choose it, with the same commands and results as the current board.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: no opponent's card faces or pending action appear anywhere in the page, seats of players who left can't be targeted, nothing can be picked outside the decision window or after choosing, and a refused command shows the server's reason with the room as the server has it.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; no reveal animation (STORY-095), no server change, no new dependency.
+
+#### STORY-095 — Royale table: animated reveal
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E10
+- **Implementation:** The round's reveal played out on STORY-094's table, from the resolved round's ledger entry (card, target, outcome, amount, defense, lost, market, ability and `abilityTarget`, DEC-085–091, DEC-096). In resolution order, within the 10 s reveal (DEC-092's pacing, under 3 s for six players): each played card flips face up at its seat; a Rug Pull or Whale Swap travels to its target, and a block, Stop Loss or a seat that left is shown where it lands; gains and the market show as MON changes counting to the server's balance at each seat; abilities show by name, Insider Info with its target. Nothing changes a balance before the server's snapshot; the animation only replays what the ledger says. Under reduced motion everything appears at once. The text lines of the reveal stay, as the accessible version, and a reconnect or reload mid-reveal shows the final state without replaying. How much motion (flips only, or travelling cards and counting numbers too) is settled before coding.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** each round's reveal plays on the table in resolution order and ends with every seat showing the server's balance, for two to six players and within the reveal window.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: an unknown card, outcome or ability in the ledger shows the text line without animation, reduced motion shows the result at once, and the next round's announcement or a new snapshot replaces the animation instead of queuing behind it.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; no server change, no new dependency, no sound effects.
+
+#### STORY-096 — Chog Royale Degen Score
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E10
+- **Implementation:** A Degen Score for Chog Royale at the product owner's request, like Chog Life's and Chog Race's (DEC-046, DEC-062), revising DEC-089's "no Degen Score" (DEC-099). **Formula (version 1):** from each player's own ledger entries, 20 points per Rug Pull or Whale Swap that landed (outcome `Applied`), 10 per one that didn't (`Blocked`, `Stopped`, `Taken`, `Empty` or `TargetLeft`), and 10 per Chaos played, whatever its outcome; Pump, Diamond Hands, Airdrop and HODL earn nothing; at most 100. Display only: the ranking stays as DEC-089 set it. Each result gains `degenScore` and `degenScoreVersion` (1), so a 100 unlocks Full Degen through the existing achievement path (DEC-063); results stored before have neither and show as before. The Chog Royale results show a "Degen Score n/100" tile first among each player's statistics, and the note says what it counts and that it doesn't count towards the ranking. No migration.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a completed Chog Royale match stores each player's Degen Score by the formula, shows it in the results, and a score of 100 unlocks Full Degen.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: the score comes only from the server's ledger, players who left get no result and no score, and a result stored before this story still shows, without a score.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; the ranking, XP and Ladder don't change; no migration.

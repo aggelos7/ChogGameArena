@@ -1,0 +1,74 @@
+<section class="results" aria-labelledby="results-heading" data-results>
+  <h2 id="results-heading">Results</h2>
+  @if (winnerLine(); as line) {
+    <p class="winner-line" data-winner>{{ line }}</p>
+  }
+  <ol class="standings" data-list="standings">
+    @for (standing of standings(); track $index) {
+      <li [class.winner]="standing.rank === 1" [class.you]="standing.member.isYou" data-standing>
+        <span class="place" data-place>{{ ordinal(standing.rank) }}</span>
+        <app-avatar-badge [avatar]="standing.member.avatar" [name]="standing.member.displayName" [size]="2" />
+        <span class="who">
+          <span class="name">{{ standing.member.displayName }}</span>
+          @if (standing.member.isYou) {
+            <span class="tag">You</span>
+          }
+        </span>
+        @if (standing.result; as result) {
+          <span class="portfolio" data-mon>{{ result.mon }} MON</span>
+          <p class="summary" data-summary>{{ signedMon(result.change) }} since the start</p>
+          <dl class="stats">
+            @if (result.degenScore !== undefined) {
+              <div class="degen">
+                <dt>Degen Score</dt>
+                <dd data-stat="degen-score">{{ result.degenScore }}<span class="out-of">/100</span></dd>
+              </div>
+            }
+            <div>
+              <dt>Lost to attacks</dt>
+              <dd data-stat="lost">{{ result.lost }} MON</dd>
+            </div>
+            <div>
+              <dt>Successful cards</dt>
+              <dd data-stat="successful-cards">{{ result.successfulCards }}</dd>
+            </div>
+          </dl>
+        }
+      </li>
+    }
+    @for (member of left(); track $index) {
+      <li data-standing data-left-match>
+        <span class="place">–</span>
+        <app-avatar-badge [avatar]="member.avatar" [name]="member.displayName" [size]="2" />
+        <span class="who"><span class="name">{{ member.displayName }}</span></span>
+        <p class="summary" data-summary>Left the match</p>
+      </li>
+    }
+  </ol>
+  <p class="hint">
+    Ranked by MON, then by fewer MON lost to other players’ cards, then by more successful cards. Players equal on all
+    three share a place.
+    @if (scored()) {
+      The Degen Score counts the attacks and Chaos each player played: it doesn’t count towards the ranking.
+    }
+  </p>
+
+  @if (rounds().length > 0) {
+    <section class="history" aria-labelledby="history-heading" data-history>
+      <h3 id="history-heading">Round by round</h3>
+      @for (item of rounds(); track item.round.round) {
+        <h4 [attr.data-history-round]="item.round.round">
+          Round {{ item.round.round }} · {{ eventInfo[item.round.event].name }}
+          @if (item.round.chaos; as chaos) {
+            + {{ eventInfo[chaos].name }}
+          }
+        </h4>
+        <ol>
+          @for (line of item.lines; track line.seat) {
+            <li [class.gain]="line.change > 0" [class.loss]="line.change < 0" [class.yours]="line.seat === yourSeat()" data-history-line>{{ line.text }}</li>
+          }
+        </ol>
+      }
+    </section>
+  }
+</section>

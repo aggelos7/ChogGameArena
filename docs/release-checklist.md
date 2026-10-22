@@ -2,7 +2,7 @@
 
 Every release passes this checklist on a **local production-like stack** before it reaches production (STORY-049,
 DEC-053, revised by DEC-071: there is no staging server). The first
-pass, before the public launch, covers every section. A later release runs sections 1–3 and 12–13, plus every manual
+pass, before the public launch, covers every section. A later release runs sections 1–3 and 13–14, plus every manual
 section its changes touch, and the full list at least once a quarter. Record the result in the release record at the
 end. A release with a failed or skipped item doesn't go to production unless the release record says why.
 
@@ -22,8 +22,9 @@ backup key (DEC-049). Create its settings once, in a git-ignored file outside th
 | `POSTGRES_PASSWORD` | its own (`openssl rand -hex 24`) | Never production's |
 | `CHOG_LIFE_STATUS` | `Available` | `CHOG_LIFE_STATUS=Available` is what the smoke test and testers play |
 | `CHOG_RACE_STATUS` | `Available` | `CHOG_RACE_STATUS=Available`: the smoke test plays Chog Race beside Chog Life (DEC-061) |
+| `CHOG_ROYALE_STATUS` | `Available` | `CHOG_ROYALE_STATUS=Available`: the smoke test plays Chog Royale beside both (DEC-094) |
 | `COMPOSE_PROFILES` | empty | No certbot (no public DNS) and no backups |
-| `MODERATION_OPERATOR_WALLETS` | your test operator wallet | So section 11 can review reports; production lists its real operators |
+| `MODERATION_OPERATOR_WALLETS` | your test operator wallet | So section 12 can review reports; production lists its real operators |
 | `IMAGE_TAG` | the release being tested | So the previous release's images stay for the rollback drill |
 
 `MONAD_RPC_URL` stays on Monad mainnet, as in production, so NFT ownership is real. Testers need a browser wallet
@@ -31,11 +32,11 @@ holding at least one Chog, and a second wallet with none.
 
 What a local stack can't show, and where it is checked instead:
 - **Real DNS and the Let's Encrypt certificate:** on the production server's first deployment, before the games are
-  `Available` (section 13).
+  `Available` (section 14).
 - **A real phone:** the local stack only answers `localhost`. Check phone layouts with the browser's device mode at
-  375 px wide here, and play one match on a real phone on launch day (section 13).
+  375 px wide here, and play one match on a real phone on launch day (section 14).
 
-The automated smoke test creates eight guests and three completed matches on every run. Run it on the local stack
+The automated smoke test creates eight guests and four completed matches on every run. Run it on the local stack
 only, and **never against production**: it would add made-up players and results to real stats.
 
 ## 2. Before you start
@@ -45,7 +46,7 @@ only, and **never against production**: it would add made-up players and results
 - [ ] The release has a tag (`IMAGE_TAG=<release>`, for example the git tag) and the previous release's tag (N-1) is
       known. Its images are still on your machine (`docker image ls chog-game-arena/api`).
 - [ ] Schema changes since N-1: `git diff --stat <N-1>..<release> -- backend/src/ChogGames.Infrastructure/Persistence/Migrations`.
-      If any, the release notes say whether N-1 still runs on the new schema (see [Rollback](#12-rollback)).
+      If any, the release notes say whether N-1 still runs on the new schema (see [Rollback](#13-rollback)).
 
 ## 3. Deploy locally and run the smoke tests
 
@@ -76,7 +77,10 @@ $C ps                   # every service healthy, migrate exited (0)
   - a dropped live connection reconnecting and catching up;
   - a six-player and a two-player match played to the finish, with ranks and profile stats;
   - a two-player Chog Race match played to the finish at the same time as that two-player Chog Life one, with
-    a Chog Life command, the other match's id and a player of the other match refused (DEC-061).
+    a Chog Life command, the other match's id and a player of the other match refused (DEC-061);
+  - a two-player Chog Royale match played in rounds at the same time as both, every player locking a card each
+    round, finishing all five rounds within five minutes with results, Explorer and a Ladder place, and a Chog
+    Royale command in Chog Race, another match's id and players of other matches refused (DEC-094).
 - [ ] To repeat it against the stack in this section instead, set `RELEASE_CA_FILE` to its self-signed certificate:
       `$C exec web cat /etc/nginx/tls/self-signed/fullchain.pem > /tmp/chog-local.pem`, then
       `RELEASE_BASE_URL=https://localhost:8443 RELEASE_CA_FILE=/tmp/chog-local.pem npm run release:verify`.
@@ -150,7 +154,28 @@ what is Chog Race's own.
 - [ ] At the end the Results panel shows every player's place, tile and card stats, and each profile's
       `Games played` counts it with the Chog Life games.
 
-## 11. Terms and photo reports
+## 11. Chog Royale
+
+All three games share the same sessions, Chogs, rooms, profiles and live updates (DEC-061, DEC-094), so this section
+checks only what is Chog Royale's own. Time the match from the start to the results.
+
+- [ ] The home page lists Chog Royale as playable (`CHOG_ROYALE_STATUS=Available`); creating a Chog Royale room
+      offers a guest its two standard abilities, with the four holder ones locked, and the wallet playing as a Chog
+      it holds all six with its Tier's values and the "♛ Holder" badge (DEC-095, DEC-096).
+- [ ] Play a two-player Chog Royale match on the phone and the desktop: each round's announcement with its market
+      event, choosing a card (a Rug Pull or Whale Swap at the other player) or HODL, "Chosen" on the other screen,
+      an ability used once (Insider Info on the other player shows their hand only on its screen), and each reveal.
+      Both screens agree on every balance.
+- [ ] Let one round run out without choosing on one screen: that player HODLs and the match goes on.
+- [ ] Reload one screen while deciding: it comes back to the same round, its chosen card and the real time left.
+- [ ] While it runs, a Chog Life or Chog Race match on two other devices plays normally; no board shows another's
+      moves.
+- [ ] The match reaches its results within five minutes of the start, with every player's place, MON, change, MON
+      lost and successful cards, and each profile's `Games played` counts it with the other games.
+- [ ] With `CHOG_ROYALE_STATUS=ComingSoon` (`$C up -d --wait` after editing the file), the home page shows Chog
+      Royale as Coming soon and the other games still start; then set it back.
+
+## 12. Terms and photo reports
 
 Uploaded photos need terms, reports and a review before the public launch (DEC-069, DEC-070).
 
@@ -166,7 +191,7 @@ Uploaded photos need terms, reports and a review before the public launch (DEC-0
       Dismiss shows it to everyone again; Remove (on another reported photo) gives its owner the built-in avatar.
 - [ ] A player who isn't an operator opening `/moderation` sees "There's nothing here."
 
-## 12. Rollback
+## 13. Rollback
 
 The drill proves the release can be undone, on the local stack, before production depends on it.
 
@@ -185,13 +210,13 @@ IMAGE_TAG=<release> $C up -d --wait      # forward again
       ([Restoring](deployment.md#restoring)). Take that backup in production right before the deploy:
       `$C run --rm backup now`.
 
-## 13. Release record
+## 14. Release record
 
 Copy this table into the release's PR or notes:
 
 | Release | Local stack deployed | `deploy:verify` / `backup:verify` | Manual sections passed | Rollback drill | Tester | Date |
 |---|---|---|---|---|---|---|
-| `<release>` | ✅/❌ | ✅/❌ | 4 5 6 7 8 9 10 11 | ✅/❌ (to `<N-1>`) | | |
+| `<release>` | ✅/❌ | ✅/❌ | 4 5 6 7 8 9 10 11 12 | ✅/❌ (to `<N-1>`) | | |
 
 Then deploy the same tag to production ([docs/deployment.md](deployment.md#restarts-and-upgrades)) and check:
 

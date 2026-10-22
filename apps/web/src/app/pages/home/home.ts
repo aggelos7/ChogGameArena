@@ -10,6 +10,21 @@ const GAME_PICTURES: Record<string, string> = {
   'chog-royale': '/chog-royale/background.webp',
 };
 
+/**
+ * The games listed first on the home page, in this order; the rest follow in the catalogue's order. Chog Race leads at
+ * the product owner's request.
+ */
+export const FEATURED_GAMES: readonly string[] = ['chog-race'];
+
+/** The catalogue as the home page lists it: the featured games first, then the others as the server sent them. */
+export function inPickingOrder(games: GameSummary[]): GameSummary[] {
+  const rank = (game: GameSummary) => {
+    const featured = FEATURED_GAMES.indexOf(game.id);
+    return featured < 0 ? FEATURED_GAMES.length : featured;
+  };
+  return games.map((game, index) => ({ game, index })).sort((a, b) => rank(a.game) - rank(b.game) || a.index - b.index).map(({ game }) => game);
+}
+
 type CatalogueState =
   | { kind: 'loading' }
   | { kind: 'error' }
@@ -39,7 +54,7 @@ export class Home implements OnInit {
   protected load(): void {
     this.state.set({ kind: 'loading' });
     this.catalog.getGames().subscribe({
-      next: (games) => this.state.set({ kind: 'loaded', games }),
+      next: (games) => this.state.set({ kind: 'loaded', games: inPickingOrder(games) }),
       error: () => this.state.set({ kind: 'error' }),
     });
   }

@@ -45,7 +45,10 @@
           You left this game. <a routerLink="/">Find another game</a>
         </p>
       } @else if (shownStatus() === 'Active') {
-        <p class="started" [class.visually-hidden]="boardShown()" role="status" data-started>The game has started.</p>
+        <!-- While a board shows, it says the game is on; the line stays only without one. -->
+        @if (!boardShown()) {
+          <p class="started" role="status" data-started>The game has started.</p>
+        }
       } @else if (shownStatus() === 'Completed') {
         <p class="started" role="status" data-result>
           @if (you()?.rank === 1) {
@@ -264,6 +267,28 @@
                   <p class="action-error" boardMessages role="alert" data-error="action">{{ message(failure) }}</p>
                 }
               </app-race-board>
+            } @else if (royaleBoard(); as board) {
+              <app-royale-board
+                [board]="board"
+                [members]="current.members"
+                [opensAt]="current.roundOpensAt ?? null"
+                [endsAt]="current.turnEndsAt"
+                [clockOffset]="clockOffset()"
+                [busy]="busy()"
+                [finalRevealUntil]="finale() ? finalRevealUntil() : null"
+                (act)="submitRoyale($event)"
+                (useAbility)="useRoyaleAbility($event)"
+                (seeResults)="boardSettled()"
+              >
+                <div class="game-header" boardHeader>
+                  <h1>{{ gameName() ?? current.gameType }} room</h1>
+                  <h2 id="match-heading" class="visually-hidden">Game</h2>
+                  <ng-container *ngTemplateOutlet="playingAs; context: { $implicit: me }" />
+                </div>
+                @if (actionError(); as failure) {
+                  <p class="action-error" boardMessages role="alert" data-error="action">{{ message(failure) }}</p>
+                }
+              </app-royale-board>
             } @else {
               <h2 id="match-heading">Game</h2>
               <ng-container *ngTemplateOutlet="playingAs; context: { $implicit: me }" />
@@ -296,6 +321,10 @@
           <h2 id="final-heading">Final board</h2>
           <app-life-board [board]="board" [members]="current.members" />
         </section>
+      } @else if (shownStatus() === 'Completed' && royaleBoard(); as board) {
+        @if (hasRoyaleResults()) {
+          <app-royale-results [members]="current.members" [board]="board" />
+        }
       } @else if (shownStatus() === 'Completed' && raceBoard(); as board) {
         @if (hasRaceResults()) {
           <app-race-results [members]="current.members" />

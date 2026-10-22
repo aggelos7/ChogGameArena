@@ -15,6 +15,7 @@ import {
   isNewerRoom,
   normalizeRoomCode,
   roomErrorMessage,
+  serverClockOffset,
   toRoomError,
 } from '../../rooms/rooms-api';
 import { RoomLiveStatus, RoomLiveUpdates } from '../../rooms/room-live-updates';
@@ -28,9 +29,15 @@ import { ErrorState, LoadingState } from '../../shared/ui/state-views';
 import { TurnTimer } from '../../rooms/turn-timer';
 import { RaceAbilityPlay, RaceBoardView, RaceCardPlay } from '../../games/chog-race/race-board';
 import { RACE_END_TURN, RACE_PASS, RACE_PLAY_CARD, RACE_ROLL, toRaceBoard } from '../../games/chog-race/race-board-model';
+import { RoyaleAbilityUse, RoyaleBoardView, RoyaleSubmission } from '../../games/chog-royale/royale-board';
+import { ROYALE_SUBMIT, toRoyaleBoard } from '../../games/chog-royale/royale-board-model';
+import { RoyaleResultsView, toRoyaleResult } from '../../games/chog-royale/royale-results';
 
 /** The longest a match's last move keeps the live board up before the results show anyway (DEC-076). */
 export const FINALE_MOST_MS = 10_000;
+
+/** How long a Chog Royale match's last round is revealed before the results (DEC-092). */
+export const ROYALE_FINAL_REVEAL_MS = 10_000;
 
 /**
  * A room the player is in and its lobby (STORY-021): code, invite link, members with their Chog, ability and ready
@@ -41,12 +48,14 @@ export const FINALE_MOST_MS = 10_000;
  * a request alike, so an older answer never wins. A lost connection keeps retrying (STORY-027); Refresh is offered
  * while live updates are down. A started Chog Life game shows its board with every pawn (STORY-036, DEC-038), and the
  * player whose turn it is rolls from it (STORY-037, DEC-039). Chog Race rolls the same way and ends a turn in its Play
- * phase (STORY-051, DEC-055).
+ * phase (STORY-051, DEC-055). Chog Royale is played in rounds on its own board (STORY-081): everyone decides at once
+ * before a deadline counted on the server's clock (STORY-083), and the results show its standings and every round
+ * (STORY-082).
  * The server decides who may start; the button state here is only a hint.
  */
 @Component({
   selector: 'app-room',
-  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, CollectorChip, LifeBoardView, LifeResultsView, RaceBoardView, RaceResultsView, TurnTimer, HolderBadge],
+  imports: [RouterLink, NgTemplateOutlet, LoadingState, ErrorState, AvatarBadge, CollectorChip, LifeBoardView, LifeResultsView, RaceBoardView, RaceResultsView, RoyaleBoardView, RoyaleResultsView, TurnTimer, HolderBadge],
   templateUrl: './room.html',
   styleUrl: './room.scss',
 })
@@ -92,13 +101,22 @@ export class RoomPage implements OnInit {
     return room?.gameType === 'chog-race' && (room.status === 'Active' || room.status === 'Completed') ? toRaceBoard(room.state) : null;
   });
 
+  /** The Chog Royale board in the room's game state, once the game has started (STORY-081); null otherwise. */
+  protected readonly royaleBoard = computed(() => {
+    const room = this.room();
+    return room?.gameType === 'chog-royale' && (room.status === 'Active' || room.status === 'Completed') ? toRoyaleBoard(room.state) : null;
+  });
+
+  /** How far the server's clock is ahead of this device's, from the newest snapshot (STORY-083, DEC-093). */
+  protected readonly clockOffset = computed(() => serverClockOffset(this.room()));
+
   /**
    * A board is on the page: the live match you still play, or the final board. Its legend lists the players, so the
    * lobby's player list is hidden (DEC-048, DEC-054).
    */
   protected readonly boardShown = computed(() => {
     const room = this.room();
-    return !!(this.lifeBoard() || this.raceBoard()) && (room?.status === 'Completed' || !this.you()?.hasLeft);
+    return !!(this.lifeBoard() || this.raceBoard() || this.royaleBoard()) && (room?.status === 'Completed' || !this.you()?.hasLeft);
   });
 
   /**
@@ -107,6 +125,8 @@ export class RoomPage implements OnInit {
    */
   protected readonly finale = signal(false);
   private finaleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Until when (this device's clock) a Chog Royale match's last round is revealed before the results. */
+  protected readonly finalRevealUntil = signal<number | null>(null);
   private readonly injector = inject(Injector);
   private readonly liveLifeBoard = viewChild(LifeBoardView);
   private readonly liveRaceBoard = viewChild(RaceBoardView);
@@ -115,7 +135,9 @@ export class RoomPage implements OnInit {
   protected readonly shownStatus = computed(() => (this.finale() ? 'Active' : this.room()?.status));
 
   /** You're playing a live match: its title and details go beside the board, for Chog Life and Chog Race alike (DEC-048). */
-  protected readonly playing = computed(() => !!(this.lifeBoard() || this.raceBoard()) && this.boardShown() && this.shownStatus() === 'Active');
+  protected readonly playing = computed(
+    () => !!(this.lifeBoard() || this.raceBoard() || this.royaleBoard()) && this.boardShown() && this.shownStatus() === 'Active',
+  );
 
   /** A completed Chog Life match whose results the server stored (STORY-043, DEC-046), shown above the final board. */
   protected readonly hasLifeResults = computed(() => {
@@ -127,6 +149,12 @@ export class RoomPage implements OnInit {
   protected readonly hasRaceResults = computed(() => {
     const room = this.room();
     return room?.gameType === 'chog-race' && room.status === 'Completed' && room.members.some((member) => toRaceResult(member.result) !== null);
+  });
+
+  /** A completed Chog Royale match whose results the server stored (STORY-078, STORY-082). */
+  protected readonly hasRoyaleResults = computed(() => {
+    const room = this.room();
+    return room?.gameType === 'chog-royale' && room.status === 'Completed' && room.members.some((member) => toRoyaleResult(member.result) !== null);
   });
 
   /** Whose turn it is and when it runs out, while a match is active (DEC-045). */
@@ -314,6 +342,17 @@ export class RoomPage implements OnInit {
     this.command(USE_ABILITY, use.target === undefined ? { abilityId: use.abilityId } : { abilityId: use.abilityId, target: use.target });
   }
 
+  /** Uses your locked Chog Royale ability while deciding, on an opponent for Insider Info (STORY-093); refusals as for a roll. */
+  protected useRoyaleAbility(use: RoyaleAbilityUse): void {
+    this.command(USE_ABILITY, use.target === undefined ? { abilityId: use.abilityId } : { abilityId: use.abilityId, target: use.target });
+  }
+
+  /** Sends your Chog Royale action for the round, saved or locked in (STORY-081, DEC-083); refusals as for a roll. */
+  protected submitRoyale(submission: RoyaleSubmission): void {
+    const { lock, ...action } = submission;
+    this.command(ROYALE_SUBMIT, lock ? { ...action, lock } : action);
+  }
+
   private command(type: string, payload: object = {}): void {
     const room = this.room();
     if (!room || this.busy()) {
@@ -401,7 +440,13 @@ export class RoomPage implements OnInit {
   private show(room: Room): void {
     if (isNewerRoom(room, this.room())) {
       // A match you're playing ends: keep the live board until it has shown the last move (or long enough for it).
-      if (this.playing() && this.room()?.status === 'Active' && room.status === 'Completed') {
+      if (this.playing() && this.room()?.status === 'Active' && room.status === 'Completed' && room.gameType === 'chog-royale') {
+        // Chog Royale's last round is revealed like any other before the results (DEC-092).
+        this.finale.set(true);
+        this.finalRevealUntil.set(Date.now() + ROYALE_FINAL_REVEAL_MS);
+        clearTimeout(this.finaleTimer);
+        this.finaleTimer = setTimeout(() => this.boardSettled(), ROYALE_FINAL_REVEAL_MS);
+      } else if (this.playing() && this.room()?.status === 'Active' && room.status === 'Completed') {
         this.finale.set(true);
         clearTimeout(this.finaleTimer);
         this.finaleTimer = setTimeout(() => this.finale.set(false), FINALE_MOST_MS);
@@ -419,6 +464,7 @@ export class RoomPage implements OnInit {
     if (this.finale() && !moving && this.room()?.status === 'Completed') {
       clearTimeout(this.finaleTimer);
       this.finale.set(false);
+      this.finalRevealUntil.set(null);
     }
   }
 

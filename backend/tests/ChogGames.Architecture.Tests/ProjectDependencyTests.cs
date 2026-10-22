@@ -64,6 +64,7 @@ public class ProjectDependencyTests
     [InlineData("ChogGames.Games.ChogLife", "ChogGames.Infrastructure")]
     [InlineData("ChogGames.Games.ChogLife", "ChogGames.Games.ChogRace")]
     [InlineData("ChogGames.Games.ChogRace", "ChogGames.Api")]
+    [InlineData("ChogGames.Games.ChogRoyale", "ChogGames.Games.ChogRace")]
     [InlineData("ChogGames.Infrastructure", "ChogGames.Api")]
     [InlineData("ChogGames.Infrastructure", "ChogGames.Games.ChogLife")]
     public void Forbidden_reference_is_reported(string project, string forbiddenReference)

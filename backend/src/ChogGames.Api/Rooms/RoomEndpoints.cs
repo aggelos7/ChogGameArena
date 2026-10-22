@@ -79,6 +79,11 @@ public static class RoomEndpoints
     /// The player's profile avatar, as their header shows it (STORY-085): the built-in avatar's colour and, while there is
     /// one they may see, the photo of <paramref name="AvatarImageUrl"/>. The player list and the results draw it.
     /// </param>
+    /// <param name="HasSubmitted">
+    /// In a match played in rounds (STORY-070, DEC-081): the member submitted an action in the current round. Everyone sees
+    /// this; only the member's own state view shows what they submitted.
+    /// </param>
+    /// <param name="HasLocked">In a match played in rounds: the member's submission for the current round is final.</param>
     public sealed record RoomMemberResponse(
         string DisplayName,
         string AvatarId,
@@ -95,12 +100,14 @@ public static class RoomEndpoints
         JsonElement? Result,
         ProfileEndpoints.CollectorBadgeResponse? Collector,
         string? AvatarImageUrl,
-        ProfileEndpoints.AvatarResponse Avatar);
+        ProfileEndpoints.AvatarResponse Avatar,
+        bool HasSubmitted = false,
+        bool HasLocked = false);
 
     /// <param name="MatchId">The room's id, which match commands name (DEC-026); it identifies no player.</param>
     /// <param name="Version">Bumped by every change to the room; match commands must name the current one (DEC-026).</param>
-    /// <param name="TurnNumber">The turn being played, from 1; 0 before the start (DEC-027).</param>
-    /// <param name="TurnEndsAt">When the current turn runs out; null unless the match is active.</param>
+    /// <param name="TurnNumber">The turn, or in rounds the round, being played, from 1; 0 before the start (DEC-027).</param>
+    /// <param name="TurnEndsAt">When the current turn, or round, runs out; null unless the match is active.</param>
     /// <param name="TurnSeconds">
     /// How long each turn of this match lasts, in seconds, fixed at its start (DEC-027, DEC-045), so clients can show how
     /// much of the turn is left; null before the start.
@@ -121,6 +128,17 @@ public static class RoomEndpoints
     /// The holder-only abilities this member can't choose while the room waits, with the Base Tier's values, in catalog
     /// order, so the lobby shows them locked (STORY-091, DEC-078); empty for a holder and once the room has started.
     /// </param>
+    /// <param name="Play">
+    /// Whether the match is played in turns or in simultaneous rounds (STORY-070, DEC-081); <c>Turns</c> before the start.
+    /// </param>
+    /// <param name="RoundOpensAt">
+    /// In an active match played in rounds: when the current round starts taking actions; its deadline is
+    /// <paramref name="TurnEndsAt"/>. Null otherwise.
+    /// </param>
+    /// <param name="ServerTime">
+    /// The server's time when the snapshot was built, so a client counts down to <paramref name="TurnEndsAt"/> and
+    /// <paramref name="RoundOpensAt"/> on the server's clock, whatever its own says (STORY-083, DEC-093).
+    /// </param>
     public sealed record RoomResponse(
         string Code,
         Guid MatchId,
@@ -137,7 +155,10 @@ public static class RoomEndpoints
         JsonElement? State,
         RoomAbilityResponse[] Abilities,
         RoomAchievementResponse[] Achievements,
-        RoomAbilityResponse[] UnavailableAbilities);
+        RoomAbilityResponse[] UnavailableAbilities,
+        MatchPlay Play = MatchPlay.Turns,
+        DateTimeOffset? RoundOpensAt = null,
+        DateTimeOffset? ServerTime = null);
 
     /// <summary>An achievement the viewer unlocked with this completed match (STORY-058, DEC-063).</summary>
     public sealed record RoomAchievementResponse(string Id, string Name, string Description);

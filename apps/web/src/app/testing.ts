@@ -88,3 +88,38 @@ export const RACE_BOARD: RaceBoard = {
   discard: 0,
   hand: [],
 };
+
+/**
+ * A Chog Royale view as the server sends it (DEC-083, DEC-091): round 2 of 5 under Meme Hype, seat 1 on 115 MON and seat
+ * 2 on 85, the viewer's hand of Pump, Rug Pull and Airdrop, and round 1's ledger, in which seat 1's Rug Pull took 15
+ * from seat 2, who didn't act and held.
+ */
+export function royaleState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    rulesVersion: 2,
+    round: 2,
+    rounds: 5,
+    event: 'MemeHype',
+    players: [
+      { seat: 1, mon: 115, cards: 3 },
+      { seat: 2, mon: 85, cards: 3 },
+    ],
+    hand: [
+      { id: 'c7', card: 'Pump' },
+      { id: 'c2', card: 'RugPull' },
+      { id: 'c3', card: 'Airdrop' },
+    ],
+    ledger: [
+      {
+        round: 1,
+        event: 'CalmMarket',
+        priority: [1, 2],
+        entries: [
+          { seat: 1, card: 'RugPull', target: 2, byDefault: false, outcome: 'Applied', amount: 15, lost: 0, market: 0, change: 15, balance: 115 },
+          { seat: 2, byDefault: true, amount: 0, lost: 15, market: 0, change: -15, balance: 85 },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}

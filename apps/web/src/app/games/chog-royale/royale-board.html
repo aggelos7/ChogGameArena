@@ -1,0 +1,253 @@
+<section class="royale" [class.split]="deciding()" data-royale-board>
+  <dialog
+    #announcement
+    class="round-dialog announcement"
+    aria-labelledby="announcement-heading"
+    aria-describedby="announcement-event"
+    (close)="dismissAnnouncement()"
+    data-announcement
+  >
+    @if (announcing()) {
+      <p class="announcement-round">Round {{ board().round }} of {{ board().rounds }}</p>
+      <h3 id="announcement-heading">
+        <span class="announcement-icon" aria-hidden="true">{{ eventInfo[board().event].icon }}</span>
+        <span data-announcement-event>{{ eventInfo[board().event].name }}</span>
+      </h3>
+      <p id="announcement-event" class="announcement-text">{{ eventInfo[board().event].text }}</p>
+      <p class="announcement-timer" data-announcement-timer>{{ timerText() }}</p>
+      <button type="button" class="primary" (click)="dismissAnnouncement()" data-announcement-close>Got it</button>
+    }
+  </dialog>
+
+  <ng-content select="[boardHeader]" />
+
+  <div class="play">
+    <div class="main">
+      <section class="table" aria-labelledby="table-heading" data-table>
+        <h3 id="table-heading" class="visually-hidden">Table</h3>
+        <div class="opponents" role="list" aria-label="Opponents" data-list="royale-players" [style.--seats]="opponents().length">
+          @for (seat of opponents(); track seat.seat) {
+            <app-royale-seat
+              [seat]="seat"
+              [aimWith]="aimWith()"
+              [aimed]="aiming() && target() === seat.seat"
+              [canAim]="canAct()"
+              (aim)="target.set(seat.seat)"
+            />
+          }
+        </div>
+
+        <div class="felt">
+          <div class="round-bar" [class.urgent]="urgent()" data-round-bar>
+            <p class="round" data-round>
+              @if (finished()) {
+                Game over
+              } @else {
+                Round {{ board().round }} of {{ board().rounds }}
+              }
+            </p>
+            <p class="timer" role="timer" [attr.aria-label]="(finished() ? 'Game over' : 'Round ' + board().round) + ': ' + timerText()" data-timer>
+              {{ timerText() }}
+            </p>
+          </div>
+
+          <div class="event" data-event aria-live="polite">
+            <p>
+              <span class="event-icon" aria-hidden="true">{{ eventInfo[board().event].icon }}</span>
+              <span class="label">Market</span>
+              <strong data-event-name>{{ eventInfo[board().event].name }}</strong>
+              <span class="event-text">{{ eventInfo[board().event].text }}</span>
+            </p>
+            @if (board().nextEvent; as next) {
+              <p class="leak" data-next-event>
+                <span aria-hidden="true">🔮</span> Alpha Leak: next round is <strong>{{ eventInfo[next].name }}</strong>. Only you can see this.
+              </p>
+            }
+          </div>
+        </div>
+
+        @if (mySeat(); as seat) {
+          <div class="me" role="list" aria-label="You">
+            <app-royale-seat [seat]="seat" />
+          </div>
+        }
+
+        @for (fly of flying(); track fly.seat) {
+          <span
+            class="flying"
+            [style.left.px]="fly.x"
+            [style.top.px]="fly.y"
+            [style.--dx.px]="fly.dx"
+            [style.--dy.px]="fly.dy"
+            [style.--accent]="fly.card.accent"
+            aria-hidden="true"
+            data-flying
+          >{{ fly.card.icon }}</span>
+        }
+
+        @if (animating()) {
+          <ol class="visually-hidden" aria-live="polite" data-reveal-text>
+            @for (line of revealLines(); track line.seat) {
+              <li>{{ line.text }}</li>
+            }
+          </ol>
+        }
+      </section>
+
+      @if (deciding()) {
+        <section class="decide" aria-labelledby="hand-heading">
+          <h3 id="hand-heading">Your cards</h3>
+          <div class="hand" role="group" aria-label="Choose a card or HODL" data-list="hand">
+            @for (card of board().hand; track card.id; let i = $index; let count = $count) {
+              <button
+                type="button"
+                class="card"
+                [class.picked]="picked() === card.id"
+                [attr.aria-pressed]="picked() === card.id"
+                [disabled]="!canAct()"
+                [style.--accent]="cardAccent[card.card]"
+                [style.--tilt.deg]="fan(i, count + 1).tilt"
+                [style.--drop.rem]="fan(i, count + 1).drop"
+                (click)="pick(card.id)"
+                [attr.data-card]="card.card"
+              >
+                <span class="card-name">{{ cardInfo[card.card].name }}</span>
+                <span class="card-icon" aria-hidden="true">{{ cardInfo[card.card].icon }}</span>
+                <span class="card-text">{{ cardInfo[card.card].text }}</span>
+              </button>
+            }
+            <button
+              type="button"
+              class="card hodl"
+              [class.picked]="picked() === 'hodl'"
+              [attr.aria-pressed]="picked() === 'hodl'"
+              [disabled]="!canAct()"
+              [style.--accent]="cardAccent.Hodl"
+              [style.--tilt.deg]="fan(board().hand.length, board().hand.length + 1).tilt"
+              [style.--drop.rem]="fan(board().hand.length, board().hand.length + 1).drop"
+              (click)="pick('hodl')"
+              data-card="Hodl"
+            >
+              <span class="card-name">HODL</span>
+              <span class="card-icon" aria-hidden="true">✋</span>
+              <span class="card-text">Play nothing and keep your cards.</span>
+            </button>
+          </div>
+
+          @if (needsTarget()) {
+            <p class="aim-hint" role="status" data-aim-hint>
+              @if (target() !== null) {
+                {{ cardName(pickedCard()!.card) }} aimed at <strong>{{ nameOf(target()!) }}</strong>. Tap another player to change.
+              } @else {
+                Tap a player at the table to aim {{ cardName(pickedCard()!.card) }}.
+              }
+            </p>
+          }
+
+          <div class="send">
+            <button type="button" class="primary" [disabled]="!canAct() || !ready()" (click)="send()" data-choose>Choose</button>
+          </div>
+        </section>
+      }
+      <ng-content select="[boardMessages]" />
+    </div>
+
+    @if (deciding()) {
+      <aside class="info" aria-label="Your round" data-info>
+        @if (pendingText(); as pending) {
+          <p class="pending" role="status" data-pending>{{ pending }}</p>
+        }
+        <p class="hint">
+          Your choice is final for the round, and the round ends once everyone has chosen. Others see only that you’ve
+          chosen, never what, until the round is revealed.
+        </p>
+
+        @if (usedAbility(); as used) {
+          <p class="ability-used" role="status" data-ability-used>You used {{ used }} this round. The others see it at the reveal.</p>
+        } @else if (ability(); as mine) {
+          <div class="ability" data-ability-panel>
+            <p class="ability-name">
+              <strong>{{ mine.name }}</strong>
+              @if (mine.holderOnly) {
+                <app-holder-badge />
+              }
+              <span class="hint" data-uses-left>{{ mine.usesLeft }}/{{ mine.maxUses }} left</span>
+            </p>
+            <div class="ability-plays" role="group" [attr.aria-label]="'Use ' + mine.name">
+              @for (play of abilityPlays(); track play.label) {
+                <button type="button" [disabled]="!canAct()" (click)="useAbility.emit(play.use)" [attr.data-use-ability]="play.use.target ?? ''">
+                  {{ play.label }}
+                </button>
+              }
+            </div>
+            <span class="hint">{{ mine.description }} Use it before you choose.</span>
+          </div>
+        }
+        @if (insider(); as peek) {
+          <div class="insider" role="status" data-insider>
+            <p><span aria-hidden="true">🕵️</span> Insider Info: <strong>{{ peek.name }}</strong> holds</p>
+            <ul>
+              @for (card of peek.cards; track $index) {
+                <li><span aria-hidden="true">{{ card.icon }}</span> {{ card.name }}</li>
+              }
+            </ul>
+            <p class="hint">Only you can see this, until the round ends. Not what they chose.</p>
+          </div>
+        }
+      </aside>
+    }
+  </div>
+
+  <dialog
+    #reveal
+    class="round-dialog reveal-dialog"
+    aria-labelledby="reveal-heading"
+    (close)="closeReveal()"
+    data-reveal-dialog
+  >
+    @if (revealing() && lastRound(); as round) {
+      <section data-reveal>
+        <p class="announcement-round">{{ finished() ? 'Game over' : 'Round ' + round.round + ' of ' + board().rounds }}</p>
+        <h3 id="reveal-heading">
+          Round {{ round.round }} revealed
+          @if (finished()) {
+            · the last round
+          }
+        </h3>
+        <p class="reveal-event">
+          {{ eventInfo[round.event].icon }} {{ eventInfo[round.event].name }}
+          @if (round.chaos; as chaos) {
+            · Chaos added {{ eventInfo[chaos].name }}
+          }
+        </p>
+        <ol class="reveal-lines">
+          @for (line of revealLines(); track line.seat; let i = $index) {
+            <li [style.--i]="i" [class.gain]="line.change > 0" [class.loss]="line.change < 0" [class.yours]="line.seat === yourSeat()" data-reveal-line>
+              {{ line.text }}
+            </li>
+          }
+        </ol>
+        <p class="announcement-timer" data-reveal-timer>{{ timerText() }}</p>
+        @if (finished()) {
+          <button type="button" class="primary" (click)="seeResults.emit()" data-see-results>See results</button>
+        } @else {
+          <button type="button" class="primary" (click)="closeReveal()" data-reveal-close>Got it</button>
+        }
+      </section>
+    }
+  </dialog>
+
+  @if (board().ledger.length > 0) {
+    <details class="history" data-history>
+      <summary>Earlier rounds</summary>
+      @for (round of board().ledger; track round.round) {
+        <h4>Round {{ round.round }} · {{ eventInfo[round.event].name }}@if (round.chaos; as chaos) { + {{ eventInfo[chaos].name }} }</h4>
+        <ol>
+          @for (line of linesOf(round); track line.seat) {
+            <li [class.yours]="line.seat === yourSeat()">{{ line.text }}</li>
+          }
+        </ol>
+      }
+    </details>
+  }
+</section>

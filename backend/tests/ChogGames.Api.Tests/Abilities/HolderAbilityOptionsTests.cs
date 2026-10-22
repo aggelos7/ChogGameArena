@@ -6,6 +6,9 @@ using ChogGames.Games.ChogLife.Rules;
 using ChogGames.Games.ChogRace;
 using ChogGames.Games.ChogRace.Abilities;
 using ChogGames.Games.ChogRace.Rules;
+using ChogGames.Games.ChogRoyale;
+using ChogGames.Games.ChogRoyale.Abilities;
+using ChogGames.Games.ChogRoyale.Rules;
 using ChogGames.Infrastructure.Abilities;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -13,8 +16,8 @@ using Microsoft.Extensions.Options;
 namespace ChogGames.Api.Tests.Abilities;
 
 /// <summary>
-/// STORY-090, DEC-077: <c>Abilities:Holder</c> as shipped holds DEC-077's split and Tier table and passes the startup
-/// check against the real catalogs; any bad value stops the API.
+/// STORY-090, DEC-077: <c>Abilities:Holder</c> as shipped holds DEC-077's split and Tier table, and since STORY-093
+/// DEC-095's for Chog Royale, and passes the startup check against the real catalogs; any bad value stops the API.
 /// </summary>
 public class HolderAbilityOptionsTests
 {
@@ -22,7 +25,9 @@ public class HolderAbilityOptionsTests
 
     private static readonly ChogRaceMatchRules Race = new([RaceRulesV1.Rules]);
 
-    private static readonly AbilityEngine Engine = new([LifeAbilities.Catalog(Life), RaceAbilities.Catalog(Race)]);
+    private static readonly ChogRoyaleMatchRules Royale = new([RoyaleRulesV1.Rules, RoyaleRulesV2.Rules]);
+
+    private static readonly AbilityEngine Engine = new([LifeAbilities.Catalog(Life), RaceAbilities.Catalog(Race), RoyaleAbilities.Catalog(Royale)]);
 
     /// <summary>The API's own appsettings.json, copied next to the tests with the API's build output.</summary>
     private static HolderAbilityOptions Shipped()
@@ -34,16 +39,17 @@ public class HolderAbilityOptionsTests
     }
 
     private static ValidateOptionsResult Validate(HolderAbilityOptions options) =>
-        new HolderAbilityOptionsValidator(Engine, [Life, Race]).Validate(null, options);
+        new HolderAbilityOptionsValidator(Engine, [Life, Race, Royale]).Validate(null, options);
 
     [Fact]
-    public void The_shipped_table_passes_and_holds_dec_077_dec_078_and_dec_080()
+    public void The_shipped_table_passes_and_holds_dec_077_dec_078_dec_080_and_dec_095()
     {
         var shipped = Shipped();
 
         Assert.True(Validate(shipped).Succeeded);
         Assert.Equal(["reward_boost", "loss_protection"], shipped.Games[GameDefinition.ChogLife].Standard);
         Assert.Equal(["attack_block", "card_preview"], shipped.Games[GameDefinition.ChogRace].Standard);
+        Assert.Equal(["diamond_hands_plus", "stop_loss"], shipped.Games[GameDefinition.ChogRoyale].Standard);
         string Row(string game, string ability, string value) => string.Join(
             " ",
             new[] { "Base", "Uncommon", "Rare", "Epic", "Legendary" }.Select(tier => shipped.Games[game].Tiers[tier][ability][value]));
@@ -60,6 +66,12 @@ public class HolderAbilityOptionsTests
         Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogRace, "card_steal", "cards"));
         Assert.Equal("2 2 3 3 3", Row(GameDefinition.ChogRace, "double_dice", "dice"));
         Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogRace, "freeze", "uses"));
+        Assert.Equal("1 1 2 2 3", Row(GameDefinition.ChogRoyale, "diamond_hands_plus", "blocks"));
+        Assert.Equal("5 4 3 2 0", Row(GameDefinition.ChogRoyale, "stop_loss", "mon"));
+        Assert.Equal("50 60 75 90 100", Row(GameDefinition.ChogRoyale, "double_pump", "percent"));
+        Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogRoyale, "alpha_leak", "uses"));
+        Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogRoyale, "fresh_mint", "uses"));
+        Assert.Equal("1 1 1 2 2", Row(GameDefinition.ChogRoyale, "insider_info", "uses"));
         Assert.Equal("Tier", shipped.TraitType);
     }
 
@@ -67,7 +79,7 @@ public class HolderAbilityOptionsTests
     public void The_base_tier_matches_the_catalogs_own_values()
     {
         var shipped = Shipped();
-        foreach (var catalog in new[] { Engine.CatalogFor(GameDefinition.ChogLife)!, Engine.CatalogFor(GameDefinition.ChogRace)! })
+        foreach (var catalog in new[] { GameDefinition.ChogLife, GameDefinition.ChogRace, GameDefinition.ChogRoyale }.Select(game => Engine.CatalogFor(game)!))
         {
             foreach (var (ability, values) in shipped.Games[catalog.GameType].Tiers[HolderAbilityOptions.BaseTier])
             {
@@ -89,6 +101,8 @@ public class HolderAbilityOptionsTests
         { "'Abilities:Holder:Games:chog-race:Tiers:Rare:movement_boost:tiles' must be 1 to 6.", o => o.Games["chog-race"].Tiers["Rare"]["movement_boost"]["tiles"] = 7 },
         { "'Abilities:Holder:Games:chog-race:Tiers:Rare:card_steal:cards' must be 1 to 5.", o => o.Games["chog-race"].Tiers["Rare"]["card_steal"]["cards"] = 0 },
         { "'Abilities:Holder:Games:chog-race:Tiers:Rare:double_dice:dice' must be 2 to 4.", o => o.Games["chog-race"].Tiers["Rare"]["double_dice"]["dice"] = 5 },
+        { "'Abilities:Holder:Games:chog-royale:Tiers:Legendary:stop_loss:mon' must be 0 to 50.", o => o.Games["chog-royale"].Tiers["Legendary"]["stop_loss"]["mon"] = 51 },
+        { "'Abilities:Holder:Games:chog-royale:Tiers:Epic:diamond_hands_plus:blocks' must be 1 to 3.", o => o.Games["chog-royale"].Tiers["Epic"]["diamond_hands_plus"]["blocks"] = 4 },
         { "'Abilities:Holder:Games:chog-life:Tiers:Epic:reward_boost:percent' must be a whole number.", o => o.Games["chog-life"].Tiers["Epic"]["reward_boost"]["percent"] = 40.5m },
         { "'Abilities:Holder:Games:chog-life:Tiers:Epic:event_preview:uses' must be 1 to 10.", o => o.Games["chog-life"].Tiers["Epic"]["event_preview"]["uses"] = 11 },
         { "'Abilities:Holder:Games:chog-life:Tiers:Epic:event_preview:range' is not a value of event_preview.", o => o.Games["chog-life"].Tiers["Epic"]["event_preview"]["range"] = 2 },
@@ -124,6 +138,6 @@ public class HolderAbilityOptionsTests
     [Fact]
     public void A_game_this_host_runs_without_abilities_is_skipped()
     {
-        Assert.True(new HolderAbilityOptionsValidator(new AbilityEngine([]), [Life, Race]).Validate(null, Shipped()).Succeeded);
+        Assert.True(new HolderAbilityOptionsValidator(new AbilityEngine([]), [Life, Race, Royale]).Validate(null, Shipped()).Succeeded);
     }
 }

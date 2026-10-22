@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ChogGames.Api.ChogLife;
 using ChogGames.Api.ChogRace;
+using ChogGames.Api.ChogRoyale;
 using ChogGames.Core.Abilities;
 using ChogGames.Core.Nfts;
 using ChogGames.Core.Wallets;
@@ -20,7 +21,8 @@ namespace ChogGames.Api.Tests.Rooms;
 /// catalog version. Chog Life gets a test catalog here, with no holder rules; Chog Race's is taken out, as by the test
 /// host. With trait-based abilities on (STORY-061, DEC-066) a holder's cached traits narrow their lobby pool and the live
 /// ones decide at start. With the shipped holder rules and Chog Life's real catalog (STORY-090, DEC-077) a guest gets the
-/// 2 standard abilities with Base values, a holder all 4 with their Tier's, which the live Tier at start locks.
+/// 2 standard abilities with Base values, a holder all 4 with their Tier's, which the live Tier at start locks; Chog Race
+/// and, since STORY-093 (DEC-095), Chog Royale split their six abilities the same way.
 /// </summary>
 public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClassFixture<MigratedPostgresDatabase>, IAsyncLifetime
 {
@@ -689,34 +691,83 @@ public sealed class LobbyAbilityTests(MigratedPostgresDatabase database) : IClas
     }
 
     /// <summary>The shipped holder rules (DEC-077) with Chog Life's real catalog, or with <paramref name="race"/> Chog Race's.</summary>
-    private async Task UseHolderRulesAsync(IReadOnlyDictionary<string, string?>? settings = null, bool race = false)
+    private async Task UseHolderRulesAsync(IReadOnlyDictionary<string, string?>? settings = null, string game = "chog-life")
     {
         await _factory.DisposeAsync();
         _factory = new ApiFactory(
             database.ConnectionString,
             new Dictionary<string, string?>(settings ?? new Dictionary<string, string?>())
             {
-                [race ? "Games:Items:1:Status" : "Games:Items:0:Status"] = "Available",
+                [game switch { "chog-race" => "Games:Items:1:Status", "chog-royale" => "Games:Items:2:Status", _ => "Games:Items:0:Status" }] = "Available",
             },
             services =>
             {
                 services.AddScoped<INftProvider>(_ => _chain);
-                if (race)
+                _ = game switch
                 {
-                    services.AddChogRaceAbilities();
-                }
-                else
-                {
-                    services.AddChogLifeAbilities();
-                }
+                    "chog-race" => services.AddChogRaceAbilities(),
+                    "chog-royale" => services.AddChogRoyaleAbilities(),
+                    _ => services.AddChogLifeAbilities(),
+                };
             },
             holderAbilities: true);
     }
 
     [PostgresFact]
+    public async Task A_chog_royale_guest_gets_the_two_standard_abilities_and_a_legendary_holder_all_six_with_legendary_values()
+    {
+        // STORY-093, DEC-095 (revising STORY-084's parity, DEC-091): the shipped holder rules split Chog Royale as the other games.
+        await UseHolderRulesAsync(game: "chog-royale");
+        var (code, alice, bob) = await PairAsync("chog-royale", await TierHolderAsync("Bob", "Legendary"));
+        using (alice)
+        using (bob)
+        {
+            Assert.Equal(
+                ["diamond_hands_plus: blocks=1 x1", "stop_loss: mon=5 x1"],
+                Described((await RawAsync(alice, code)).GetProperty("abilities").EnumerateArray()));
+            Assert.Equal(
+                ["alpha_leak:  x1", "double_pump: percent=50 x1", "fresh_mint:  x1", "insider_info:  x1"],
+                Described((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray()));
+            Assert.All((await RawAsync(alice, code)).GetProperty("unavailableAbilities").EnumerateArray(), a => Assert.True(a.GetProperty("holderOnly").GetBoolean()));
+            var holders = (await RawAsync(bob, code)).GetProperty("abilities").EnumerateArray().ToArray();
+            Assert.Equal(
+                [
+                    "diamond_hands_plus: blocks=3 x1", "alpha_leak:  x2", "double_pump: percent=100 x1", "stop_loss: mon=0 x1",
+                    "fresh_mint:  x2", "insider_info:  x2",
+                ],
+                Described(holders));
+            Assert.Equal([false, true, true, false, true, true], holders.Select(a => a.GetProperty("holderOnly").GetBoolean()));
+            Assert.Empty((await RawAsync(bob, code)).GetProperty("unavailableAbilities").EnumerateArray());
+
+            var before = await ViewAsync(alice, code);
+            foreach (var holderOnly in new[] { "alpha_leak", "double_pump", "fresh_mint", "insider_info" })
+            {
+                await ProblemAsync(await ChooseAsync(alice, code, holderOnly), HttpStatusCode.BadRequest, "ability_unavailable");
+            }
+
+            Assert.Equal(before.Version, (await ViewAsync(alice, code)).Version);
+
+            await ChosenAsync(alice, code, "stop_loss");
+            await ChosenAsync(bob, code, "insider_info");
+            await ReadiedAsync(alice, code);
+            await ReadiedAsync(bob, code);
+            using var started = await StartAsync(alice, code);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+
+            // The abilities differ; the start doesn't: 100 MON and a hand of three each.
+            var room = await RawAsync(bob, code);
+            Assert.Equal(["stop_loss: mon=5 x1"], Described([MemberAbility(room, "Alice")]));
+            Assert.Equal(["insider_info:  x2"], Described([MemberAbility(room, "Bob")]));
+            Assert.EndsWith("2 uses per game, one a round.", MemberAbility(room, "Bob").GetProperty("description").GetString());
+            Assert.True(MemberAbility(room, "Bob").GetProperty("holderOnly").GetBoolean());
+            Assert.All(room.GetProperty("state").GetProperty("players").EnumerateArray(), p => Assert.Equal((100, 3), (p.GetProperty("mon").GetInt32(), p.GetProperty("cards").GetInt32())));
+        }
+    }
+
+    [PostgresFact]
     public async Task A_chog_race_guest_cant_choose_double_dice_or_freeze_and_an_epic_holder_gets_them_with_epic_values()
     {
-        await UseHolderRulesAsync(race: true);
+        await UseHolderRulesAsync(game: "chog-race");
         var (code, alice, bob) = await PairAsync("chog-race", await TierHolderAsync("Bob", "Epic"));
         using (alice)
         using (bob)

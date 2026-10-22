@@ -1,0 +1,68 @@
+<app-avatar-badge [avatar]="seat().avatar" [name]="seat().name" [size]="2.25" />
+<span class="name">{{ seat().name }}@if (seat().isYou) {&ngsp;<span class="tag">You</span>}</span>
+<span class="mon" data-mon>{{ seat().mon }} MON</span>
+@if (seat().reveal; as reveal) {
+  <span class="played" data-played>
+    @if (reveal.card; as played) {
+      <span class="mini-card face flip" [style.--accent]="played.accent" [attr.data-played-card]="played.id">
+        <span aria-hidden="true">{{ played.icon }}</span>
+        <span class="mini-name">{{ played.name }}</span>
+      </span>
+    } @else {
+      <span class="mini-card back" aria-hidden="true"></span>
+    }
+    @for (impact of reveal.impacts; track $index) {
+      <span class="chip impact" data-impact>{{ impact }}</span>
+    }
+    @if (reveal.ability; as ability) {
+      <span class="chip ability-chip" data-reveal-ability>{{ ability }}</span>
+    }
+    @if (reveal.change; as change) {
+      <span class="chip change" [class.gain]="reveal.gain" [class.loss]="reveal.loss" data-change>{{ change }}</span>
+    }
+  </span>
+} @else if (seat().peek; as peek) {
+  <span class="hand-minis peek" data-peek>
+    @for (card of peek; track $index) {
+      <span class="mini-card face" [style.--accent]="card.accent" [attr.title]="card.name">
+        <span aria-hidden="true">{{ card.icon }}</span>
+        <span class="visually-hidden">{{ card.name }}</span>
+      </span>
+    }
+  </span>
+} @else if (seat().status !== 'left' && seat().status !== 'final') {
+  <span class="hand-minis" aria-hidden="true" data-backs>
+    @for (back of range(seat().cards); track back) {
+      <span class="mini-card back"></span>
+    }
+  </span>
+}
+<!-- During a reveal the next round's decisions haven't opened: the seat shows what was played instead. -->
+@if (!seat().reveal || seat().status === 'left' || seat().status === 'final') {
+  <span class="state" [attr.data-status]="seat().status">
+    @switch (seat().status) {
+      @case ('locked') { <span aria-hidden="true">✓</span> Chosen }
+      @case ('submitted') { <span aria-hidden="true">✓</span> Chosen }
+      @case ('deciding') { Deciding… }
+      @case ('left') { Left }
+      @case ('final') { Final balance }
+    }
+    @if (seat().status !== 'left' && seat().status !== 'final') {
+      <span class="visually-hidden">· {{ seat().cards }} {{ seat().cards === 1 ? 'card' : 'cards' }}</span>
+    }
+  </span>
+}
+@if (aimWith(); as card) {
+  <label class="aim">
+    <input
+      type="radio"
+      name="royale-target"
+      [value]="seat().seat"
+      [checked]="aimed()"
+      [disabled]="seat().status === 'left' || !canAim()"
+      (change)="aim.emit()"
+      [attr.data-target]="seat().seat"
+    />
+    <span class="visually-hidden">Aim {{ card }} at {{ seat().name }} ({{ seat().mon }} MON)@if (seat().status === 'left') { · left }</span>
+  </label>
+}

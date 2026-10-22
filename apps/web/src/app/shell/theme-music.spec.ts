@@ -289,3 +289,15 @@ describe('ThemeMusic', () => {
     expect(race.paused).toBe(true);
   });
 });
+
+describe('Game music', () => {
+  it('has a track for every game, Chog Royale’s included', () => {
+    TestBed.configureTestingModule({});
+
+    expect(TestBed.inject(GAME_MUSIC_URLS)).toEqual({
+      'chog-life': 'audio/chog-life.mp3',
+      'chog-race': 'audio/chog-race.mp3',
+      'chog-royale': 'audio/chog-royale.mp3',
+    });
+  });
+});

@@ -2,6 +2,11 @@ section {
   margin-block: 1.5rem;
 }
 
+// A game in play starts right under the header: its board needs the height.
+section.game-wide {
+  margin-top: 0;
+}
+
 h2 {
   font-size: 1.25rem;
 }

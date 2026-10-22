@@ -33,6 +33,16 @@ describe('Home page', () => {
     fixture.detectChanges();
   }
 
+  it('lists Chog Race first, then the other games in the catalogue’s order', () => {
+    respond(CATALOGUE);
+
+    expect(Array.from(element().querySelectorAll('[data-game-id]')).map((li) => li.getAttribute('data-game-id'))).toEqual([
+      'chog-race',
+      'chog-life',
+      'chog-fix',
+    ]);
+  });
+
   it('shows a loading state until the catalogue arrives', () => {
     expect(element().querySelector('[role="status"]')?.textContent).toContain('Loading games');
     respond(CATALOGUE);

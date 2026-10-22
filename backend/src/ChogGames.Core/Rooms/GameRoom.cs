@@ -16,7 +16,9 @@ namespace ChogGames.Core.Rooms;
 /// players take turns in seat order, only the current player may act, and a turn that runs out is timed out once. Every
 /// change is committed as it happens, so a restart resumes the match (STORY-028, DEC-030); a completed match keeps its
 /// final standings on the members. A game may give its matches a time limit and mark players finished, who then get no
-/// more turns; the engine ends a match whose time is up or whose players have all finished (STORY-041, ENG-011).
+/// more turns; the engine ends a match whose time is up or whose players have all finished (STORY-041, ENG-011). A game
+/// may instead play in simultaneous rounds (STORY-070, DEC-081): every player still playing submits privately in the same
+/// round, and the round resolves once, at its deadline or as soon as all have locked.
 /// </summary>
 public sealed class GameRoom
 {
@@ -88,6 +90,25 @@ public sealed class GameRoom
     /// </summary>
     public DateTimeOffset? MatchEndsAt { get; private set; }
 
+    /// <summary>
+    /// Whether the match is played in turns or in simultaneous rounds (STORY-070, DEC-081), fixed at the start. In rounds,
+    /// <see cref="TurnNumber"/> counts the rounds, <see cref="TurnEndsAt"/> is the round's deadline,
+    /// <see cref="TurnTimeout"/> its decision window and there is never a <see cref="CurrentPlayerId"/>.
+    /// </summary>
+    public MatchPlay Play { get; private set; }
+
+    /// <summary>
+    /// When the current round starts taking submissions (DEC-081); set exactly while a match in rounds is active. Its
+    /// deadline is this plus <see cref="TurnTimeout"/>.
+    /// </summary>
+    public DateTimeOffset? RoundOpensAt { get; private set; }
+
+    /// <summary>
+    /// The <see cref="Version"/> the current round began at (DEC-081): a command built on any version since is current, so
+    /// one player's submission never makes another's stale; one built before it is. Set while a match in rounds is active.
+    /// </summary>
+    public long? RoundVersion { get; private set; }
+
     public IReadOnlyList<RoomMember> Members => _members;
 
     private GameRoom()
@@ -124,7 +145,16 @@ public sealed class GameRoom
     public bool IsFull => _members.Count >= Capacity;
 
     /// <summary>The current turn ran out and has not been timed out yet.</summary>
-    public bool IsTurnOverdue(DateTimeOffset now) => Status == RoomStatus.Active && now >= TurnEndsAt;
+    public bool IsTurnOverdue(DateTimeOffset now) => Status == RoomStatus.Active && Play == MatchPlay.Turns && now >= TurnEndsAt;
+
+    /// <summary>
+    /// The active match's round must resolve now (DEC-081): its deadline passed, or every player still playing has locked
+    /// their submission.
+    /// </summary>
+    public bool IsRoundDue(DateTimeOffset now) =>
+        Status == RoomStatus.Active
+        && Play == MatchPlay.Rounds
+        && (now >= TurnEndsAt || _members.Where(m => !m.HasLeft).All(m => m.RoundLocked));
 
     /// <summary>
     /// The active match must end now (STORY-041): its time is up, or every player still playing has finished, so nobody
@@ -249,7 +279,7 @@ public sealed class GameRoom
     /// <summary>
     /// <paramref name="player"/> is out of the match: when fewer than two players remain it is abandoned, and when it was
     /// their turn, or the turn waited for their reply, the next player's begins (DEC-027, DEC-058); the command that
-    /// awaited the reply goes no further.
+    /// awaited the reply goes no further. In rounds, when everyone left has locked, the round is due at once (DEC-081).
     /// </summary>
     private void Forfeit(RoomMember player, DateTimeOffset now)
     {
@@ -257,6 +287,13 @@ public sealed class GameRoom
         if (_members.Count(m => !m.HasLeft) < GameDefinition.MinRoomPlayers)
         {
             MoveTo(RoomStatus.Abandoned, now);
+        }
+        else if (Play == MatchPlay.Rounds)
+        {
+            if (IsRoundDue(now) && now < TurnEndsAt)
+            {
+                TurnEndsAt = now;
+            }
         }
         else if (player.PlayerId == CurrentPlayerId || player.PlayerId == ReplyingPlayerId)
         {
@@ -298,7 +335,9 @@ public sealed class GameRoom
     /// <paramref name="abilities"/> (STORY-033, NFT-015, DEC-035); members of a game without abilities have none.
     /// Once seated, <paramref name="startState"/> gives the game's state at the start, if it has one (STORY-036, DEC-038).
     /// A game's <paramref name="timeLimit"/>, at most <see cref="MaxMatchDuration"/>, sets when the match's time is up
-    /// (STORY-041, ENG-011).
+    /// (STORY-041, ENG-011). A game played in <paramref name="rounds"/> (STORY-070, DEC-081) has no turn order: its first
+    /// round opens after the timing's first pause and lasts its decision window, which replaces
+    /// <paramref name="turnTimeout"/>; seats still give each player's place.
     /// </summary>
     public void Start(
         Guid callerId,
@@ -309,7 +348,8 @@ public sealed class GameRoom
         DateTimeOffset now,
         IReadOnlyDictionary<Guid, AbilitySnapshot>? abilities = null,
         Func<GameRoom, string?>? startState = null,
-        TimeSpan? timeLimit = null)
+        TimeSpan? timeLimit = null,
+        MatchRoundTiming? rounds = null)
     {
         abilities ??= new Dictionary<Guid, AbilitySnapshot>();
         if (turnTimeout <= TimeSpan.Zero)
@@ -321,6 +361,8 @@ public sealed class GameRoom
         {
             throw new ArgumentOutOfRangeException(nameof(timeLimit), timeLimit, $"A match lasts some time, at most {MaxMatchDuration}.");
         }
+
+        rounds?.Check();
 
         if (CheckStart(callerId, players) is { } problem)
         {
@@ -353,11 +395,22 @@ public sealed class GameRoom
             order[seat].TakeSeat(seat + 1);
         }
 
-        TurnTimeout = turnTimeout;
         MatchEndsAt = now + timeLimit;
-        BeginTurn(_members.Single(m => m.Seat == 1), now);
+        if (rounds is null)
+        {
+            TurnTimeout = turnTimeout;
+            BeginTurn(_members.Single(m => m.Seat == 1), now);
+        }
+        else
+        {
+            Play = MatchPlay.Rounds;
+            TurnTimeout = rounds.Decision;
+            BeginRound(now + rounds.FirstOpensAfter);
+        }
+
         State = startState?.Invoke(this);
         Version++;
+        StartRoundVersion();
     }
 
     /// <summary>
@@ -394,9 +447,13 @@ public sealed class GameRoom
     /// <paramref name="now"/>, without a missed turn, since the downtime wasn't theirs. Returns whether anything changed;
     /// only an active match has a turn to restore.
     /// </summary>
+    /// <remarks>
+    /// In rounds (DEC-081) the open round gets its full decision window from <paramref name="now"/>; a round that hasn't
+    /// opened yet lost nothing and keeps its times.
+    /// </remarks>
     public bool ResumeAfterRestart(DateTimeOffset now)
     {
-        if (Status != RoomStatus.Active)
+        if (Status != RoomStatus.Active || (Play == MatchPlay.Rounds && RoundOpensAt > now))
         {
             return false;
         }
@@ -418,7 +475,7 @@ public sealed class GameRoom
     {
         if (!IsTurnOverdue(now))
         {
-            throw new InvalidOperationException("Only an overdue turn of an active match can time out.");
+            throw new InvalidOperationException("Only an overdue turn of an active match played in turns can time out.");
         }
 
         if (skipsNextTurnOf is not null && ReplyingPlayerId is null)
@@ -470,7 +527,9 @@ public sealed class GameRoom
     /// Why <paramref name="playerId"/> can't act on this match with <paramref name="command"/> now, or null if they can
     /// (STORY-024, DEC-026): only the current player acts, before their turn runs out (STORY-025, DEC-027), or, while a reply
     /// window is open, only the player it waits for (STORY-054, DEC-058). The caller has
-    /// checked that the player is a member. Once the match is due to end nobody acts any more (STORY-041).
+    /// checked that the player is a member. Once the match is due to end nobody acts any more (STORY-041). In rounds
+    /// (STORY-070, DEC-081) every player still playing acts while the round is open and they haven't locked, on any version
+    /// since the round began.
     /// </summary>
     public MatchCommandProblem? CheckCommand(Guid playerId, MatchCommand command, DateTimeOffset now)
     {
@@ -494,6 +553,11 @@ public sealed class GameRoom
             return MatchCommandProblem.NotPlaying;
         }
 
+        if (Play == MatchPlay.Rounds)
+        {
+            return CheckRoundCommand(playerId, command, now);
+        }
+
         if (command.ExpectedVersion != Version)
         {
             return MatchCommandProblem.StaleVersion;
@@ -510,6 +574,102 @@ public sealed class GameRoom
         }
 
         return IsTurnOverdue(now) ? MatchCommandProblem.TurnExpired : null;
+    }
+
+    private MatchCommandProblem? CheckRoundCommand(Guid playerId, MatchCommand command, DateTimeOffset now)
+    {
+        if (command.ExpectedVersion < RoundVersion || command.ExpectedVersion > Version)
+        {
+            return MatchCommandProblem.StaleVersion;
+        }
+
+        if (IsDueToEnd(now))
+        {
+            return MatchCommandProblem.TimeUp;
+        }
+
+        if (now < RoundOpensAt)
+        {
+            return MatchCommandProblem.RoundNotOpen;
+        }
+
+        if (now >= TurnEndsAt)
+        {
+            return MatchCommandProblem.RoundClosed;
+        }
+
+        return _members.Single(m => m.PlayerId == playerId).RoundLocked ? MatchCommandProblem.ActionLocked : null;
+    }
+
+    /// <summary>
+    /// Applies a round mode's submission the game's rules accepted (STORY-070, DEC-081): stores their new
+    /// <paramref name="state"/>, marks the player as having submitted and, when it <paramref name="locks"/>, locked, and
+    /// returns the record that makes a retry return this result. Submitting is acting, so it resets their missed rounds.
+    /// The round itself resolves separately, with <see cref="ResolveRound"/>.
+    /// </summary>
+    public MatchAction ApplySubmission(Guid playerId, MatchCommand command, string state, bool locks, DateTimeOffset now)
+    {
+        if (Play != MatchPlay.Rounds)
+        {
+            throw new InvalidOperationException("Only a match played in rounds takes submissions.");
+        }
+
+        if (CheckCommand(playerId, command, now) is { } problem)
+        {
+            throw new InvalidOperationException($"The submission cannot be applied: {problem}.");
+        }
+
+        State = state;
+        var member = _members.Single(m => m.PlayerId == playerId);
+        member.Submit(locks);
+        member.Act();
+        Version++;
+        return new MatchAction(Id, command.ActionId, playerId, command.Type, command.Payload.GetRawText(), Version, now);
+    }
+
+    /// <summary>
+    /// Resolves the due round (STORY-070, DEC-081) with the <paramref name="state"/> the game's rules gave, exactly once:
+    /// every player still playing who submitted nothing has missed one more round in a row (they never forfeit for it), and
+    /// either the rules' <paramref name="standings"/> complete the match or the next round begins, opening
+    /// <paramref name="opensAfter"/> from now. Nothing changes unless <see cref="IsRoundDue"/>.
+    /// </summary>
+    public void ResolveRound(string state, DateTimeOffset now, TimeSpan opensAfter, IReadOnlyCollection<MatchStanding>? standings = null)
+    {
+        if (!IsRoundDue(now))
+        {
+            throw new InvalidOperationException("Only an active match's round that is due can resolve.");
+        }
+
+        if (opensAfter < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(opensAfter), opensAfter, "A round can't open in the past.");
+        }
+
+        if (standings is not null)
+        {
+            CheckStandings(standings);
+        }
+
+        State = state;
+        foreach (var member in _members.Where(m => !m.HasLeft))
+        {
+            if (!member.RoundSubmitted)
+            {
+                member.MissTurn();
+            }
+        }
+
+        if (standings is not null)
+        {
+            Finish(standings, now);
+        }
+        else
+        {
+            BeginRound(now + opensAfter);
+        }
+
+        Version++;
+        StartRoundVersion();
     }
 
     /// <summary>
@@ -611,7 +771,7 @@ public sealed class GameRoom
             throw new InvalidOperationException("No ability can be used while a reply is awaited.");
         }
 
-        var member = CurrentMember();
+        var member = _members.Single(m => m.PlayerId == playerId);
         if (member.Ability is not { } locked || !string.Equals(locked.Id, abilityId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Only the ability the player locked at start can be used.");
@@ -651,6 +811,8 @@ public sealed class GameRoom
             CurrentPlayerId = null;
             TurnEndsAt = null;
             ReplyingPlayerId = null;
+            RoundOpensAt = null;
+            RoundVersion = null;
         }
     }
 
@@ -744,6 +906,27 @@ public sealed class GameRoom
         TurnEndsAt = now + TurnTimeout!.Value;
     }
 
+    /// <summary>The next round opens at <paramref name="opensAt"/> with nobody's submission in it yet (DEC-081).</summary>
+    private void BeginRound(DateTimeOffset opensAt)
+    {
+        TurnNumber++;
+        RoundOpensAt = opensAt;
+        TurnEndsAt = opensAt + TurnTimeout!.Value;
+        foreach (var member in _members)
+        {
+            member.ClearSubmission();
+        }
+    }
+
+    /// <summary>After the version bump that began a round: commands built from here on are current in it.</summary>
+    private void StartRoundVersion()
+    {
+        if (Status == RoomStatus.Active && Play == MatchPlay.Rounds)
+        {
+            RoundVersion = Version;
+        }
+    }
+
     private RoomMember MemberForChange(Guid playerId)
     {
         if (Status != RoomStatus.Waiting)
@@ -781,6 +964,25 @@ public enum MatchCommandProblem
 
     /// <summary>The match's time is up, or every player has finished; it is about to end (STORY-041).</summary>
     TimeUp,
+
+    /// <summary>The round hasn't opened for submissions yet (STORY-070, DEC-081).</summary>
+    RoundNotOpen,
+
+    /// <summary>The round's deadline passed; it is about to resolve (DEC-081).</summary>
+    RoundClosed,
+
+    /// <summary>The player locked their submission for this round (DEC-081).</summary>
+    ActionLocked,
+}
+
+/// <summary>How a match is played (STORY-070, DEC-081), fixed by its game's rules at the start.</summary>
+public enum MatchPlay
+{
+    /// <summary>Players act one at a time, in seat order (DEC-027).</summary>
+    Turns,
+
+    /// <summary>Every player acts in the same round, privately, until it resolves.</summary>
+    Rounds,
 }
 
 public enum RoomStartProblem
@@ -857,6 +1059,15 @@ public sealed class RoomMember
     public DateTimeOffset? FinishedAt { get; private set; }
 
     public bool HasFinished => FinishedAt is not null;
+
+    /// <summary>
+    /// The member submitted something in the current round of a match played in rounds (STORY-070, DEC-081); what they
+    /// submitted is the game's, in its state. Others see only this.
+    /// </summary>
+    public bool RoundSubmitted { get; private set; }
+
+    /// <summary>The member's submission for the current round is final (DEC-081).</summary>
+    public bool RoundLocked { get; private set; }
 
     /// <summary>
     /// The member's final place, from 1 for the winners, set once when the match is completed (STORY-028, DEC-030);
@@ -942,6 +1153,18 @@ public sealed class RoomMember
     internal void Act() => MissedTurns = 0;
 
     internal void SkipNextTurn() => SkipsNextTurn = true;
+
+    internal void Submit(bool locks)
+    {
+        RoundSubmitted = true;
+        RoundLocked |= locks;
+    }
+
+    internal void ClearSubmission()
+    {
+        RoundSubmitted = false;
+        RoundLocked = false;
+    }
 
     /// <summary>The member's turn came round: a skip they were due is used up.</summary>
     internal void TakeSkippedTurn() => SkipsNextTurn = false;
