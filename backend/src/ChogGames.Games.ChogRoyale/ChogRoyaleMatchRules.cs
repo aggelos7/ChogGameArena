@@ -35,6 +35,14 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
     /// <summary>A player's action for the round: <c>{"card", "target"}</c> or <c>{"hodl": true}</c>, and <c>"lock"</c> (DEC-083).</summary>
     public const string SubmitAction = "SUBMIT_ACTION";
 
+    /// <summary>The version of the Degen Score formula, stored with every score so a later formula isn't mixed with it.</summary>
+    public const int DegenScoreVersion = 1;
+
+    private const int AttackLandedPoints = 20;
+    private const int AttackMissedPoints = 10;
+    private const int ChaosPoints = 10;
+    private const int MaxDegenScore = 100;
+
     private const string Unavailable = "game_state_unavailable";
 
     private readonly Dictionary<int, RoyaleRules> _rulesByVersion;
@@ -320,18 +328,40 @@ public sealed partial class ChogRoyaleMatchRules : IRoundMatchRules
                 member.PlayerId,
                 players.FirstOrDefault(p => p.Seat == member.Seat)?.Mon ?? 0,
                 entries.Where(e => e.Seat == member.Seat).Sum(e => e.Lost),
-                entries.Count(e => e.Seat == member.Seat && e.Outcome == RoyaleOutcome.Applied)))
+                entries.Count(e => e.Seat == member.Seat && e.Outcome == RoyaleOutcome.Applied),
+                DegenScore(entries.Where(e => e.Seat == member.Seat))))
             .ToList();
         return
         [
             .. results.Select(result => new MatchStanding(
                 result.PlayerId,
                 1 + results.Count(other => other.Beats(result)),
-                Serialize(new { mon = result.Mon, change = result.Mon - rules.StartingMon, lost = result.Lost, successfulCards = result.SuccessfulCards }))),
+                Serialize(new
+                {
+                    mon = result.Mon,
+                    change = result.Mon - rules.StartingMon,
+                    lost = result.Lost,
+                    successfulCards = result.SuccessfulCards,
+                    degenScore = result.DegenScore,
+                    degenScoreVersion = DegenScoreVersion,
+                }))),
         ];
     }
 
-    private sealed record RoyaleResult(Guid PlayerId, int Mon, int Lost, int SuccessfulCards)
+    /// <summary>
+    /// The Degen Score (STORY-096, DEC-099, version 1), from a player's own ledger entries: 20 points per Rug Pull or
+    /// Whale Swap that landed, 10 per one that didn't, and 10 per Chaos, at most 100. It is display only and doesn't count
+    /// towards the ranking.
+    /// </summary>
+    private static int DegenScore(IEnumerable<RoyaleLedgerEntry> entries) =>
+        Math.Min(MaxDegenScore, entries.Sum(entry => entry.Card switch
+        {
+            RoyaleCard.RugPull or RoyaleCard.WhaleSwap => entry.Outcome == RoyaleOutcome.Applied ? AttackLandedPoints : AttackMissedPoints,
+            RoyaleCard.Chaos => ChaosPoints,
+            _ => 0,
+        }));
+
+    private sealed record RoyaleResult(Guid PlayerId, int Mon, int Lost, int SuccessfulCards, int DegenScore)
     {
         /// <summary>Whether this result ranks ahead of <paramref name="other"/>.</summary>
         public bool Beats(RoyaleResult other) =>

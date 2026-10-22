@@ -1,8 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RoomAbility, RoomMember } from '../../rooms/rooms-api';
 import { royaleState } from '../../testing';
-import { RoyaleAbilityUse, RoyaleBoardView, RoyaleSubmission } from './royale-board';
+import { REVEAL_HOLD_MS, RoyaleAbilityUse, RoyaleBoardView, RoyaleSubmission } from './royale-board';
 import { RoyaleBoard, toRoyaleBoard } from './royale-board-model';
+
+const withoutMotion = () => vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
 
 describe('Chog Royale board', () => {
   const start = Date.parse('2026-10-22T12:00:00Z');
@@ -76,7 +78,10 @@ describe('Chog Royale board', () => {
     fixture.componentInstance.useAbility.subscribe((use) => used.push(use));
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it('shows the round, its countdown, the market event, the players and your three cards', () => {
     render();
@@ -87,7 +92,7 @@ describe('Chog Royale board', () => {
     expect(text('[data-event-name]')).toBe('Meme Hype');
     expect(text('[data-event]')).toContain('Pumps gain 50% more.');
     expect(
-      Array.from(page.querySelectorAll('[data-list="royale-players"] li')).map((li) =>
+      Array.from(page.querySelectorAll('[data-table] [data-seat]')).map((li) =>
         ['.name', '[data-mon]', '[data-status]'].map((part) => li.querySelector(part)?.textContent?.replace(/\s+/g, ' ').trim()),
       ),
     ).toEqual([
@@ -141,15 +146,23 @@ describe('Chog Royale board', () => {
 
     card('RugPull').click();
     fixture.detectChanges();
-    expect(text('[data-list="targets"] legend')).toBe('Aim Rug Pull at');
-    const alice = (page.querySelector('[data-target="1"]') as HTMLInputElement);
-    const carol = (page.querySelector('[data-target="3"]') as HTMLInputElement);
+    expect(text('[data-aim-hint]')).toBe('Tap a player at the table to aim Rug Pull.');
+    const alice = (page.querySelector('[data-seat="1"] [data-target="1"]') as HTMLInputElement);
+    const carol = (page.querySelector('[data-seat="3"] [data-target="3"]') as HTMLInputElement);
     expect(page.querySelector('[data-target="2"]')).toBeNull();
     expect(carol.disabled).toBe(true);
+    expect(page.querySelector('[data-seat="3"]')?.classList).toContain('left');
+    expect(page.querySelector('[data-seat="3"]')?.classList).not.toContain('aimable');
+    expect(page.querySelector('[data-seat="1"]')?.classList).toContain('aimable');
+    expect(text('[data-seat="1"] label')).toBe('Aim Rug Pull at Alice (115 MON)');
     expect(button('[data-choose]').disabled).toBe(true);
 
-    alice.click();
+    // Tapping the seat anywhere picks it: the label covers the seat.
+    (page.querySelector('[data-seat="1"] label') as HTMLLabelElement).click();
     fixture.detectChanges();
+    expect(alice.checked).toBe(true);
+    expect(page.querySelector('[data-seat="1"]')?.classList).toContain('aimed');
+    expect(text('[data-aim-hint]')).toBe('Rug Pull aimed at Alice. Tap another player to change.');
     button('[data-choose]').click();
 
     expect(sent).toEqual([{ card: 'c2', target: 1, lock: true }]);
@@ -376,5 +389,230 @@ describe('Chog Royale board', () => {
 
     expect(text('[data-history] summary')).toBe('Earlier rounds');
     expect(text('[data-history] h4')).toBe('Round 1 · Calm Market');
+  });
+  describe('table (STORY-094)', () => {
+    const six = () => [
+      member('Alice', 1),
+      member('Bob', 2),
+      member('Carol', 3, { isYou: true, ability: stopLoss }),
+      member('Dan', 4, { hasSubmitted: true, hasLocked: true }),
+      member('Eve', 5, { hasLeft: true }),
+      member('Finn', 6),
+    ];
+    const sixState = (overrides: Record<string, unknown> = {}) =>
+      royaleState({
+        players: [1, 2, 3, 4, 6].map((seat) => ({ seat, mon: 100, cards: seat === 6 ? 2 : 3 })),
+        ledger: [],
+        ...overrides,
+      });
+
+    it('seats you at the bottom and the others across the top, from the seat after yours', () => {
+      render(sixState(), six());
+
+      const opponents = Array.from(page.querySelectorAll('[data-list="royale-players"] [data-seat]'));
+      expect(opponents.map((seat) => seat.getAttribute('data-seat'))).toEqual(['4', '5', '6', '1', '2']);
+      expect(page.querySelector('.me [data-seat]')?.getAttribute('data-seat')).toBe('3');
+      expect(text('.me [data-seat] .name')).toBe('Carol You');
+      // The arc: the ends sit lowest, the middle highest.
+      expect(opponents.map((seat) => (seat as HTMLElement).style.getPropertyValue('--arc'))).toEqual(['1', '0.5', '0', '0.5', '1']);
+    });
+
+    it('shows every seat’s avatar, MON, face-down cards and status, greying out a player who left', () => {
+      render(sixState(), six());
+
+      expect(page.querySelectorAll('[data-table] [data-seat] app-avatar-badge').length).toBe(6);
+      expect(page.querySelectorAll('[data-seat="1"] [data-backs] .back').length).toBe(3);
+      expect(page.querySelectorAll('[data-seat="6"] [data-backs] .back').length).toBe(2);
+      expect(text('[data-seat="4"] [data-status]')).toBe('✓ Chosen · 3 cards');
+      expect(text('[data-seat="1"] [data-status]')).toBe('Deciding… · 3 cards');
+      expect(page.querySelector('[data-seat="5"]')?.classList).toContain('left');
+      expect(text('[data-seat="5"] [data-status]')).toBe('Left');
+      expect(page.querySelector('[data-seat="5"] [data-backs]')).toBeNull();
+    });
+
+    it('never shows an opponent’s card faces or pending action while deciding', () => {
+      render(sixState({ action: { hodl: false, card: 'c7', target: null } }), six());
+
+      const opponents = page.querySelector('[data-list="royale-players"]') as HTMLElement;
+      expect(opponents.querySelectorAll('.face').length).toBe(0);
+      expect(opponents.textContent).not.toMatch(/Pump|Rug Pull|Airdrop|Whale Swap|Diamond Hands|Chaos|HODL/);
+    });
+
+    it('draws your hand as cards with their name, icon and effect, and HODL', () => {
+      render();
+
+      const pump = card('Pump');
+      expect(pump.querySelector('.card-name')?.textContent?.trim()).toBe('Pump');
+      expect(pump.querySelector('.card-icon')?.textContent?.trim()).toBe('📈');
+      expect(pump.querySelector('.card-text')?.textContent?.trim()).toBe('Gain 20 MON (more under Meme Hype, less in a Crash).');
+      expect(pump.style.getPropertyValue('--accent')).not.toBe('');
+      expect(text('[data-card="Hodl"] .card-name')).toBe('HODL');
+    });
+
+    it('can’t aim or pick once you have chosen or outside the decision window', () => {
+      render(royaleState({ action: { hodl: false, card: 'c2', target: 1 } }), defaultMembers({ hasSubmitted: true, hasLocked: true }));
+
+      expect(page.querySelector<HTMLInputElement>('[data-target="1"]')?.disabled).toBe(true);
+      expect(page.querySelector('[data-seat="1"]')?.classList).not.toContain('aimable');
+      expect(card('Airdrop').disabled).toBe(true);
+
+      render(royaleState({ ledger: [] }), defaultMembers(), -4);
+      expect(card('RugPull').disabled).toBe(true);
+    });
+
+    it('turns face up only the hand your Insider Info shows you, on that seat', () => {
+      render(royaleState({ ability: 'insider_info', insider: { seat: 1, hand: [{ id: 'c4', card: 'RugPull' }, { id: 'c5', card: 'Chaos' }] } }));
+
+      expect(Array.from(page.querySelectorAll('[data-seat="1"] [data-peek] .face')).map((c) => c.getAttribute('title'))).toEqual(['Rug Pull', 'Chaos']);
+      expect(page.querySelector('[data-seat="1"] [data-backs]')).toBeNull();
+    });
+  });
+
+  describe('animated reveal (STORY-095)', () => {
+    /** Plays round 1 from the decision, then the snapshot that resolves it, `late` ms after it resolved. */
+    function playThenResolve(late = 0, resolved: Record<string, unknown> = royaleState()): void {
+      render(royaleState({ round: 1, ledger: [] }));
+      vi.advanceTimersByTime(late);
+      // The next round opens 20 s after the resolution: 15 s of reveal and transition and 5 s of announcement.
+      render(resolved, defaultMembers(), -(20 - late / 1000));
+    }
+
+    const seatMon = (seat: number) => text(`[data-seat="${seat}"] [data-mon]`);
+    const dialogOpen = () => (page.querySelector('[data-reveal-dialog]') as HTMLDialogElement).open;
+
+    it('plays a watched round on the table in resolution order, then opens the reveal dialog', () => {
+      playThenResolve();
+
+      // Alice resolves first: her Rug Pull is face up and flies; Bob's card is still face down and his MON unchanged.
+      expect(page.querySelector('[data-seat="1"] [data-played-card]')?.getAttribute('data-played-card')).toBe('RugPull');
+      expect(page.querySelector('[data-seat="2"] [data-played-card]')).toBeNull();
+      expect(page.querySelector('[data-seat="2"] .played .back')).not.toBeNull();
+      expect(seatMon(1)).toBe('100 MON');
+      expect(seatMon(2)).toBe('100 MON');
+      expect(dialogOpen()).toBe(false);
+      expect(page.querySelectorAll('[data-reveal-text] li').length).toBe(2);
+
+      // The Rug Pull lands on Bob.
+      vi.advanceTimersByTime(400);
+      fixture.detectChanges();
+      expect(text('[data-seat="2"] [data-impact]')).toBe('Hit');
+      expect(page.querySelector('[data-flying]')).toBeNull();
+
+      // Bob's turn: he held by default; his MON counts down to the server's.
+      vi.advanceTimersByTime(100);
+      fixture.detectChanges();
+      expect(page.querySelector('[data-seat="2"] [data-played-card]')?.getAttribute('data-played-card')).toBe('Hodl');
+
+      vi.advanceTimersByTime(700);
+      fixture.detectChanges();
+      expect(seatMon(1)).toBe('115 MON');
+      expect(seatMon(2)).toBe('85 MON');
+      expect(text('[data-seat="1"] [data-change]')).toBe('+15');
+      expect(text('[data-seat="2"] [data-change]')).toBe('−15');
+      expect(page.querySelector('[data-seat="1"] [data-status]')).toBeNull();
+      expect(page.querySelector('[data-reveal-text]')).toBeNull();
+
+      // The table holds the settled reveal a moment before the dialog opens.
+      expect(dialogOpen()).toBe(false);
+      vi.advanceTimersByTime(REVEAL_HOLD_MS - 100);
+      fixture.detectChanges();
+      expect(dialogOpen()).toBe(false);
+      vi.advanceTimersByTime(300);
+      fixture.detectChanges();
+      expect(dialogOpen()).toBe(true);
+    });
+
+    it('sends the card flying while it is in the air', () => {
+      playThenResolve();
+      fixture.detectChanges();
+
+      expect(page.querySelectorAll('[data-flying]').length).toBe(1);
+      expect(text('[data-flying]')).toBe('🪤');
+    });
+
+    it('shows the final state at once on a first snapshot, as after a reload mid-reveal', () => {
+      render(royaleState(), defaultMembers(), -19);
+
+      expect(page.querySelector('[data-seat="2"] [data-played-card]')?.getAttribute('data-played-card')).toBe('Hodl');
+      expect(seatMon(2)).toBe('85 MON');
+      expect(text('[data-seat="2"] [data-impact]')).toBe('Hit');
+      expect(dialogOpen()).toBe(true);
+    });
+
+    it('shows the final state at once when the resolved round arrives late, as after a reconnect', () => {
+      playThenResolve(5_000);
+
+      expect(seatMon(2)).toBe('85 MON');
+      expect(page.querySelector('[data-reveal-text]')).toBeNull();
+      expect(dialogOpen()).toBe(true);
+    });
+
+    it('shows everything at once under reduced motion', () => {
+      withoutMotion();
+      playThenResolve();
+
+      expect(seatMon(1)).toBe('115 MON');
+      expect(page.querySelector('[data-seat="2"] [data-played-card]')).not.toBeNull();
+      expect(page.querySelector('[data-flying]')).toBeNull();
+      expect(dialogOpen()).toBe(true);
+    });
+
+    it('plays on through another snapshot of the same round', () => {
+      playThenResolve();
+      render(royaleState(), defaultMembers({}, { hasLeft: true }), -19.9);
+
+      expect(seatMon(2)).toBe('100 MON');
+      expect(dialogOpen()).toBe(false);
+    });
+
+    it('lets a snapshot of a later round replace the animation instead of queuing behind it', () => {
+      playThenResolve();
+      expect(seatMon(2)).toBe('100 MON');
+
+      const [first] = royaleState()['ledger'] as { round: number }[];
+      render(royaleState({ round: 3, ledger: [first, { ...first, round: 2 }] }), defaultMembers(), -10);
+      expect(seatMon(2)).toBe('85 MON');
+      expect(page.querySelector('[data-reveal-text]')).toBeNull();
+      expect(text('[data-reveal] h3')).toBe('Round 2 revealed');
+    });
+
+    it('reveals the last round on the table when the match ends', () => {
+      render(royaleState({ round: 1, ledger: [] }));
+      fixture.componentRef.setInput('finalRevealUntil', Date.now() + 10_000);
+      render(royaleState({ round: 1 }), defaultMembers(), 0);
+
+      expect(seatMon(2)).toBe('100 MON');
+      expect(dialogOpen()).toBe(false);
+      vi.advanceTimersByTime(1_200);
+      fixture.detectChanges();
+      expect(seatMon(2)).toBe('85 MON');
+      expect(text('[data-seat="2"] [data-status]')).toBe('Final balance');
+      // The clock ticks every 250 ms once the cards have settled.
+      vi.advanceTimersByTime(REVEAL_HOLD_MS + 250);
+      fixture.detectChanges();
+      expect(dialogOpen()).toBe(true);
+    });
+
+    it('shows an ability by name with its target', () => {
+      const [round] = royaleState()['ledger'] as { entries: object[] }[];
+      const ledger = [{ ...round, entries: [{ ...round.entries[0], ability: 'insider_info', abilityTarget: 2 }, round.entries[1]] }];
+      playThenResolve(0, royaleState({ ledger }));
+
+      expect(text('[data-seat="1"] [data-reveal-ability]')).toBe('Insider Info on You');
+    });
+
+    it('doesn’t animate a line it doesn’t know, which shows with its text at once', () => {
+      const [round] = royaleState()['ledger'] as { entries: object[] }[];
+      const ledger = [{ ...round, entries: [{ ...round.entries[0], ability: 'time_travel' }, round.entries[1]] }];
+      playThenResolve(0, royaleState({ ledger }));
+
+      // Alice's line isn't animated; Bob's is, and goes first.
+      expect(seatMon(1)).toBe('115 MON');
+      expect(page.querySelector('[data-seat="2"] [data-played-card]')?.getAttribute('data-played-card')).toBe('Hodl');
+      vi.advanceTimersByTime(800 + REVEAL_HOLD_MS);
+      fixture.detectChanges();
+      expect(dialogOpen()).toBe(true);
+      expect(Array.from(page.querySelectorAll('[data-reveal-line]')).map((li) => li.textContent?.trim())[0]).toContain('used time_travel');
+    });
   });
 });

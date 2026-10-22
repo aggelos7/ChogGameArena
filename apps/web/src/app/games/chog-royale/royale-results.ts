@@ -15,9 +15,20 @@ export interface RoyaleResult {
   change: number;
   lost: number;
   successfulCards: number;
+  /**
+   * 20 points per Rug Pull or Whale Swap that landed, 10 per one that didn't and 10 per Chaos, at most 100 (STORY-096,
+   * DEC-099); display only. Missing from results stored before STORY-096.
+   */
+  degenScore?: number;
+  /** The version of the formula `degenScore` was computed with. */
+  degenScoreVersion?: number;
 }
 
+/** Present together or not at all: a result from before STORY-096 has neither. */
+const SCORE = ['degenScore', 'degenScoreVersion'] as const;
+
 const isInt = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value);
+const isCount = (value: unknown): value is number => isInt(value) && value >= 0;
 
 /** The Chog Royale result in a member's `result`, or null when it isn't one this client understands. */
 export function toRoyaleResult(value: unknown): RoyaleResult | null {
@@ -25,7 +36,8 @@ export function toRoyaleResult(value: unknown): RoyaleResult | null {
     return null;
   }
   const result = value as Record<string, unknown>;
-  return isInt(result['mon']) && result['mon'] >= 0 && isInt(result['change']) && isInt(result['lost']) && result['lost'] >= 0 && isInt(result['successfulCards']) && result['successfulCards'] >= 0
+  const scored = SCORE.every((key) => isCount(result[key])) || SCORE.every((key) => result[key] === undefined);
+  return scored && isInt(result['mon']) && result['mon'] >= 0 && isInt(result['change']) && isInt(result['lost']) && result['lost'] >= 0 && isInt(result['successfulCards']) && result['successfulCards'] >= 0
     ? (result as unknown as RoyaleResult)
     : null;
 }
@@ -44,7 +56,7 @@ function names(standings: Standing[]): string {
 
 /**
  * Chog Royale's results (STORY-082, ROYALE-049, ROYALE-051): the winners, every player in rank order with ties sharing a
- * place, their MON, its change and both tie-break values, then the last round's reveal and every round, as text. All of
+ * place, their MON, its change, their Degen Score (STORY-096) and both tie-break values, then the last round's reveal and every round, as text. All of
  * it comes from the standings and the ledger the server stored, so every player sees the same after any reload. Players
  * who left are listed after the others, without results.
  */
@@ -68,6 +80,9 @@ export class RoyaleResultsView {
       .flatMap((member) => (member.rank === null ? [] : [{ member, rank: member.rank, result: toRoyaleResult(member.result) }]))
       .sort((a, b) => a.rank - b.rank || (a.member.seat ?? 0) - (b.member.seat ?? 0)),
   );
+
+  /** Whether any result has a Degen Score; a match from before STORY-096 has none. */
+  protected readonly scored = computed(() => this.standings().some((s) => s.result?.degenScore !== undefined));
 
   protected readonly left = computed(() => this.members().filter((member) => member.rank === null && member.hasLeft));
 

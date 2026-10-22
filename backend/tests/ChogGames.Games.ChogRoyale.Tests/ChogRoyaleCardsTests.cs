@@ -457,11 +457,41 @@ public class ChogRoyaleCardsTests
 
         Assert.Equal([1, 2, 3, 4, 4, 6], Enumerable.Range(1, 6).Select(seat => ending.Standings.Single(s => s.PlayerId == table.Seat(seat)).Rank));
         Assert.Equal(
-            """{"mon":100,"change":0,"lost":5,"successfulCards":2}""",
+            """{"mon":100,"change":0,"lost":5,"successfulCards":2,"degenScore":0,"degenScoreVersion":1}""",
             ending.Standings.Single(s => s.PlayerId == table.Seat(3)).Result!.Value.GetRawText());
         Assert.Equal(
-            """{"mon":120,"change":20,"lost":10,"successfulCards":2}""",
+            """{"mon":120,"change":20,"lost":10,"successfulCards":2,"degenScore":0,"degenScoreVersion":1}""",
             ending.Standings.Single(s => s.PlayerId == table.Seat(2)).Result!.Value.GetRawText());
+    }
+
+    // STORY-096: the Degen Score.
+
+    [Fact]
+    public void The_degen_score_counts_landed_and_missed_attacks_and_chaos_at_most_100()
+    {
+        var table = new RoyaleTable(3);
+        RoyaleLedgerEntry Played(int seat, RoyaleCard? card, RoyaleOutcome? outcome) =>
+            new(seat, card, card is RoyaleCard.RugPull or RoyaleCard.WhaleSwap ? 2 : null, card is null, outcome, 0, null, 0, 0, 0, 0);
+        RoyaleRoundLedger Round(int round, params RoyaleLedgerEntry[] entries) =>
+            new(round, RoyaleMarketEvent.CalmMarket, null, [1, 2, 3], entries);
+        var ledger = new[]
+        {
+            // Seat 1: a Rug Pull that landed (20), a blocked Whale Swap (10), a Rug Pull at a player who left (10), a Chaos
+            // too late to shift the market (10) and a Pump (0). Seat 2: six landed Rug Pulls, capped at 100. Seat 3 held.
+            Round(1, Played(1, RoyaleCard.RugPull, RoyaleOutcome.Applied), Played(2, RoyaleCard.RugPull, RoyaleOutcome.Applied), Played(3, null, null)),
+            Round(2, Played(1, RoyaleCard.WhaleSwap, RoyaleOutcome.Blocked), Played(2, RoyaleCard.RugPull, RoyaleOutcome.Applied), Played(3, null, null)),
+            Round(3, Played(1, RoyaleCard.RugPull, RoyaleOutcome.TargetLeft), Played(2, RoyaleCard.RugPull, RoyaleOutcome.Applied), Played(3, null, null)),
+            Round(4, Played(1, RoyaleCard.Chaos, RoyaleOutcome.Taken), Played(2, RoyaleCard.RugPull, RoyaleOutcome.Applied), Played(3, null, null)),
+            Round(5, Played(1, RoyaleCard.Pump, RoyaleOutcome.Applied), Played(2, RoyaleCard.RugPull, RoyaleOutcome.Applied), Played(3, null, null)),
+            Round(6, Played(2, RoyaleCard.RugPull, RoyaleOutcome.Applied)),
+        };
+        var state = table.Stored with { Ledger = ledger };
+
+        var ending = table.Rules.EndMatch(new MatchEndContext(table.Match, JsonSerializer.SerializeToElement(state, RoyaleTable.Json), TimeUp: true))!;
+
+        int Score(int seat) =>
+            JsonDocument.Parse(ending.Standings.Single(s => s.PlayerId == table.Seat(seat)).Result!.Value.GetRawText()).RootElement.GetProperty("degenScore").GetInt32();
+        Assert.Equal([50, 100, 0], Enumerable.Range(1, 3).Select(Score));
     }
 
     [Fact]
@@ -482,7 +512,11 @@ public class ChogRoyaleCardsTests
         Assert.Equal([200, 175, 25], Balances(table));
         Assert.Equal([1, 2, 3], Enumerable.Range(1, 3).Select(seat => table.Match.Members.Single(m => m.Seat == seat).Rank!.Value));
         Assert.Equal(
-            ["""{"mon":200,"change":100,"lost":0,"successfulCards":5}""", """{"mon":175,"change":75,"lost":0,"successfulCards":5}""", """{"mon":25,"change":-75,"lost":75,"successfulCards":0}"""],
+            [
+                """{"mon":200,"change":100,"lost":0,"successfulCards":5,"degenScore":0,"degenScoreVersion":1}""",
+                """{"mon":175,"change":75,"lost":0,"successfulCards":5,"degenScore":100,"degenScoreVersion":1}""",
+                """{"mon":25,"change":-75,"lost":75,"successfulCards":0,"degenScore":0,"degenScoreVersion":1}""",
+            ],
             Enumerable.Range(1, 3).Select(seat => table.Match.Members.Single(m => m.Seat == seat).Result));
     }
 

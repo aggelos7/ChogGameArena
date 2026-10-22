@@ -516,8 +516,8 @@ export async function runReleaseSmoke({ origin, ca, log = console.log, matchMinu
     await checkResults(royalePlayed.room, royals, 'the Chog Royale match');
     check(royalePlayed.room.state.ledger.length === 5, 'the Chog Royale match played all five rounds');
     check(
-      royalePlayed.room.members.every((m) => ['mon', 'change', 'lost', 'successfulCards'].every((key) => Number.isInteger(m.result?.[key]))),
-      'every Chog Royale player gets a result with MON, change, MON lost and successful cards',
+      royalePlayed.room.members.every((m) => ['mon', 'change', 'lost', 'successfulCards', 'degenScore', 'degenScoreVersion'].every((key) => Number.isInteger(m.result?.[key]))),
+      'every Chog Royale player gets a result with MON, change, MON lost, successful cards and a Degen Score',
     );
     await checkResults(twoPlayer.room, duo, 'the two-player match');
     await checkResults(racePlayed.room, racers, 'the Chog Race match');

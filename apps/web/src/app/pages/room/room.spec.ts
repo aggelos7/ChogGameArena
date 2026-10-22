@@ -761,7 +761,8 @@ describe('Room page', () => {
       expect(element().querySelector('[data-list="members"]')).toBeNull();
       expect(element().querySelector('.match')?.classList).toContain('game-wide');
       // The banner stays for screen readers, and the live status says nothing while all is well.
-      expect(element().querySelector('[data-started]')?.classList).toContain('visually-hidden');
+      expect(element().querySelector('[data-started]')).toBeNull();
+      expect(element().querySelector('[data-closed]')).toBeNull();
       expect(liveStatus()?.textContent?.trim()).toBe('');
 
       live.events.next({ type: 'status', status: 'offline' });
@@ -1066,7 +1067,8 @@ describe('Room page', () => {
       expect(element().querySelector('.match')?.classList).toContain('game-wide');
       expect(element().querySelector('[data-board="race"] .side .game-header h1')).not.toBeNull();
       expect(element().querySelector('[data-board="race"] .stage app-turn-timer')).not.toBeNull();
-      expect(element().querySelector('[data-started]')?.classList).toContain('visually-hidden');
+      expect(element().querySelector('[data-started]')).toBeNull();
+      expect(element().querySelector('[data-closed]')).toBeNull();
     });
 
     it('rolls and ends a Chog Race turn on your turn (STORY-051)', () => {

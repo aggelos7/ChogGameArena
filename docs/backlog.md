@@ -1312,7 +1312,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-094 — Royale table: seats and visual cards
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E10
 - **Implementation:** A visual Chog Royale board at the product owner's request: the players sit around a table and play cards that look like cards. Web only, from the room view the server already sends (`players`, `hand`, members' avatars and chosen/locked status, ROYALE-045–048); no API, rules or dependency change. **Table:** an oval felt with a seat per player for 2 to 6, you always at the bottom; each seat shows its avatar (STORY-085), name, MON, its cards face down (from `cards`, never their faces) and "Deciding…", "Chosen" or "Locked in"; a player who left is greyed out. The round, countdown and market event sit in the middle of the table. **Your hand:** your cards drawn as cards (frame, icon, name, effect text from `CARD_INFO`), fanned below the table, plus HODL; tapping one picks it, a targeted card (Rug Pull, Whale Swap) then asks for a target by tapping an opponent's seat, and Choose sends it locked as today (DEC-092). Your ability, Alpha Leak's next event and Insider Info's peeked hand (DEC-096) stay on the table view. **Phones:** fits a 375px screen with six players (opponents in an arc across the top, your hand below), no horizontal scroll. **Accessibility:** every pick stays a real button or radio with labels, so the board stays keyboard and screen-reader usable; dialogs, history and results stay as they are. Whether the table replaces the current board or is a toggle, the card art (CSS and icons, or illustrations) and the table's look are settled before coding.
@@ -1324,7 +1324,7 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
 
 #### STORY-095 — Royale table: animated reveal
 
-- **Status:** Todo
+- **Status:** Done
 - **Priority:** P2
 - **Epic:** E10
 - **Implementation:** The round's reveal played out on STORY-094's table, from the resolved round's ledger entry (card, target, outcome, amount, defense, lost, market, ability and `abilityTarget`, DEC-085–091, DEC-096). In resolution order, within the 10 s reveal (DEC-092's pacing, under 3 s for six players): each played card flips face up at its seat; a Rug Pull or Whale Swap travels to its target, and a block, Stop Loss or a seat that left is shown where it lands; gains and the market show as MON changes counting to the server's balance at each seat; abilities show by name, Insider Info with its target. Nothing changes a balance before the server's snapshot; the animation only replays what the ledger says. Under reduced motion everything appears at once. The text lines of the reveal stay, as the accessible version, and a reconnect or reload mid-reveal shows the final state without replaying. How much motion (flips only, or travelling cards and counting numbers too) is settled before coding.
@@ -1333,3 +1333,15 @@ Requirements: [`docs/games/chog-royale-requirements.md`](games/chog-royale-requi
   - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: an unknown card, outcome or ability in the ledger shows the text line without animation, reduced motion shows the result at once, and the next round's announcement or a new snapshot replaces the animation instead of queuing behind it.
   - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
 - **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; no server change, no new dependency, no sound effects.
+
+#### STORY-096 — Chog Royale Degen Score
+
+- **Status:** Done
+- **Priority:** P2
+- **Epic:** E10
+- **Implementation:** A Degen Score for Chog Royale at the product owner's request, like Chog Life's and Chog Race's (DEC-046, DEC-062), revising DEC-089's "no Degen Score" (DEC-099). **Formula (version 1):** from each player's own ledger entries, 20 points per Rug Pull or Whale Swap that landed (outcome `Applied`), 10 per one that didn't (`Blocked`, `Stopped`, `Taken`, `Empty` or `TargetLeft`), and 10 per Chaos played, whatever its outcome; Pump, Diamond Hands, Airdrop and HODL earn nothing; at most 100. Display only: the ranking stays as DEC-089 set it. Each result gains `degenScore` and `degenScoreVersion` (1), so a 100 unlocks Full Degen through the existing achievement path (DEC-063); results stored before have neither and show as before. The Chog Royale results show a "Degen Score n/100" tile first among each player's statistics, and the note says what it counts and that it doesn't count towards the ranking. No migration.
+- **Acceptance criteria:**
+  - **Given** the prerequisite feature and valid test data, **when** this story's operation is performed, **then** a completed Chog Royale match stores each player's Degen Score by the formula, shows it in the results, and a score of 100 unlocks Full Degen.
+  - **Given** invalid or unauthorized input, **when** the operation is attempted, **then** it fails safely without an unauthorized state change: the score comes only from the server's ledger, players who left get no result and no score, and a result stored before this story still shows, without a score.
+  - **Given** the story's tests and build checks, **when** they are executed, **then** they pass and results are recorded.
+- **Scope guard:** Do not implement later stories or future feature flags as part of this story. Chog Royale only; the ranking, XP and Ladder don't change; no migration.
